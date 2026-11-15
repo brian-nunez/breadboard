@@ -48,7 +48,7 @@ TLS is decided per **edge**, because proxies and relays make per-hop decisions.
      - the target gets the static address `.10` on the segment and the alias `<target>.plain.<domain>`; clients on a plaintext edge connect to that alias;
      - the entry binds its plaintext listener to that address (Kafka, Consul) or accepts unencrypted connections only from that subnet (Postgres `hostnossl`). Entries that cannot do either (Redis) offer no plaintext listener;
   3. reports the edge as a warning in `bb status`, draws it dashed red in the UI, and writes the reason as a comment in exported compose files.
-- Loopback inside one container (an app's own `/healthz` checked by its health check) is not an edge and is exempt.
+- Loopback inside one container (an app's opt-in `/healthz` checked by its health check) is not an edge and is exempt.
 
 ### Proxy and relay modes (Phase 5)
 

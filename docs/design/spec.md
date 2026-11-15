@@ -45,7 +45,7 @@ apps:                        # user code; one compose service each
 | `apps.<name>.command` | no | Overrides the image command. |
 | `apps.<name>.uses` | no | Infra services this app connects to. Each entry creates an edge, injects that service's env contract, and adds `depends_on: service_healthy`. When two used services share an env variable name (two Postgres services, say), the later one's variables are prefixed with its name: `ANALYTICS_DATABASE_URL`. |
 | `apps.<name>.ports` | no | Container ports to publish on `127.0.0.1`. |
-| `apps.<name>.health` | no | Override the default check of `/healthz` on port 8080 (path and port). The port is also injected as `BB_HEALTH_PORT`. |
+| `apps.<name>.health` | no | Opt into an HTTP health check (`path`, default `/healthz`; `port`, default 8080; the port is injected as `BB_HEALTH_PORT`). Without it, the check is that the container's main process is running, so app code needs no health endpoint. |
 | `apps.<name>.resources` | no | As for services. Default `512m` and `0.5` cpus, enough for `go run` to compile in the dev stage. |
 
 Service and app names share one namespace and must be unique DNS labels.

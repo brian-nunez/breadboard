@@ -1,0 +1,125 @@
+// Command producer creates the orders topic and writes one order per second.
+//
+// Each record's key is a customer id. Kafka hashes the key to pick a
+// partition, so every order from one customer lands on the same partition and
+// is read in the order it was written. Orders from different customers can
+// interleave freely.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math/rand/v2"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kerr"
+	"github.com/twmb/franz-go/pkg/kgo"
+
+	"producer-consumer/internal/health"
+	"producer-consumer/internal/kafkaenv"
+)
+
+// partitions caps how many consumers in one group can work in parallel:
+// each partition is read by exactly one member of the group.
+const partitions = 3
+
+type order struct {
+	ID       int       `json:"id"`
+	Customer string    `json:"customer"`
+	Amount   float64   `json:"amount"`
+	Placed   time.Time `json:"placed"`
+}
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("producer failed", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	hc := health.Start()
+	defer hc.Stop()
+
+	opts, err := kafkaenv.Options()
+	if err != nil {
+		return err
+	}
+	topic := kafkaenv.Topic()
+	client, err := kgo.NewClient(append(opts,
+		kgo.DefaultProduceTopic(topic),
+		// acks=all plus idempotence: the broker confirms a write only once it
+		// is durable, and retries never create duplicates.
+		kgo.RequiredAcks(kgo.AllISRAcks()),
+	)...)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	if err := ensureTopic(ctx, client, topic); err != nil {
+		return err
+	}
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for id := 1; ; id++ {
+		o := order{ID: id, Customer: fmt.Sprintf("customer-%d", rand.IntN(5)+1), Amount: float64(rand.IntN(10000)) / 100, Placed: time.Now().UTC()}
+		value, err := json.Marshal(o)
+		if err != nil {
+			return err
+		}
+		rec := &kgo.Record{Key: []byte(o.Customer), Value: value}
+		// ProduceSync waits for the broker's acknowledgement. Use Produce
+		// with a callback when throughput matters more than simplicity.
+		if err := client.ProduceSync(ctx, rec).FirstErr(); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			hc.SetReady(false)
+			slog.Warn("produce failed; retrying", "err", err)
+		} else {
+			hc.SetReady(true)
+			slog.Info("produced", "id", o.ID, "key", o.Customer, "partition", rec.Partition, "offset", rec.Offset)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+// ensureTopic creates the topic if it does not exist. The broker has topic
+// auto-creation turned off, so partitions and replication are always a
+// deliberate choice.
+func ensureTopic(ctx context.Context, client *kgo.Client, topic string) error {
+	admin := kadm.NewClient(client)
+	for {
+		// Replication factor 1: this lab has a single broker.
+		resp, err := admin.CreateTopic(ctx, partitions, 1, nil, topic)
+		if err == nil {
+			err = resp.Err
+		}
+		switch {
+		case err == nil:
+			slog.Info("created topic", "topic", topic, "partitions", partitions)
+			return nil
+		case errors.Is(err, kerr.TopicAlreadyExists):
+			return nil
+		case ctx.Err() != nil:
+			return ctx.Err()
+		}
+		slog.Warn("create topic failed; retrying", "err", err)
+		time.Sleep(2 * time.Second)
+	}
+}

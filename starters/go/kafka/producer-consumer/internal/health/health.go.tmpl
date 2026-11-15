@@ -1,0 +1,55 @@
+// Package health serves /healthz for the container health check.
+package health
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"sync/atomic"
+	"time"
+)
+
+// Server reports ready only after the app has proven it can do its job, so
+// docker compose (and anything that depends on this app) sees real readiness,
+// not just a running process.
+type Server struct {
+	ready atomic.Bool
+	srv   *http.Server
+}
+
+// Start listens on BB_HEALTH_PORT (default 8080).
+func Start() *Server {
+	port := os.Getenv("BB_HEALTH_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	s := &Server{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		if !s.ready.Load() {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	s.srv = &http.Server{Addr: net.JoinHostPort("", port), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if err := s.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("health server stopped", "err", err)
+		}
+	}()
+	return s
+}
+
+// SetReady flips the health check.
+func (s *Server) SetReady(ready bool) { s.ready.Store(ready) }
+
+// Stop shuts the server down.
+func (s *Server) Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = s.srv.Shutdown(ctx)
+}

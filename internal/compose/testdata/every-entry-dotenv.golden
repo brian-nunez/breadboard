@@ -316,7 +316,7 @@ services:
       breadboard.service: api
       breadboard.kind: app
       breadboard.config-hash: f18e397e2ef2a691
-    mem_limit: 512m
+    mem_limit: 2g
     cpus: 0.5
     restart: unless-stopped
 networks:

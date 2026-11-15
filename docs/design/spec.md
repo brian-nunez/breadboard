@@ -46,7 +46,7 @@ apps:                        # user code; one compose service each
 | `apps.<name>.uses` | no | Infra services this app connects to. Each entry creates an edge, injects that service's env contract, and adds `depends_on: service_healthy`. When two used services share an env variable name (two Postgres services, say), the later one's variables are prefixed with its name: `ANALYTICS_DATABASE_URL`. |
 | `apps.<name>.ports` | no | Container ports to publish on `127.0.0.1`. |
 | `apps.<name>.health` | no | Opt into an HTTP health check (`path`, default `/healthz`; `port`, default 8080; the port is injected as `BB_HEALTH_PORT`). Without it, the check is that the container's main process is running, so app code needs no health endpoint. |
-| `apps.<name>.resources` | no | As for services. Default `512m` and `0.5` cpus, enough for `go run` to compile in the dev stage. |
+| `apps.<name>.resources` | no | As for services. Default `2g` and `0.5` cpus. The memory is for `go run`, which compiles dependencies inside the container on first start: `github.com/redis/go-redis/v9` alone needs more than 1 GiB to compile. A running starter app uses far less. |
 
 Service and app names share one namespace and must be unique DNS labels.
 

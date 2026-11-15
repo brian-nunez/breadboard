@@ -265,6 +265,8 @@ services:
     command: [go, run, ./cmd/api]
     environment:
       SSL_CERT_FILE: /etc/bb/trust-bundle.pem
+      TLS_CERT_FILE: /etc/bb/tls/tls.crt
+      TLS_KEY_FILE: /etc/bb/tls/tls.key
       BB_SERVICE: api
       BB_HEALTH_PORT: "8080"
       # kafka (Kafka)

@@ -288,6 +288,9 @@ func appService(in Input, svc *model.Service) *yaml.Node {
 	}
 	env := []catalog.EnvVar{
 		{Name: "SSL_CERT_FILE", Value: catalog.TrustBundleFile},
+		// The app's own certificate, for apps that serve TLS to other apps.
+		{Name: "TLS_CERT_FILE", Value: catalog.CertFile},
+		{Name: "TLS_KEY_FILE", Value: catalog.KeyFile},
 		{Name: "BB_SERVICE", Value: svc.Name},
 	}
 	if svc.Health != nil {

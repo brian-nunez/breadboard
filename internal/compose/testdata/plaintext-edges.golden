@@ -285,6 +285,8 @@ services:
       target: dev
     environment:
       SSL_CERT_FILE: /etc/bb/trust-bundle.pem
+      TLS_CERT_FILE: /etc/bb/tls/tls.crt
+      TLS_KEY_FILE: /etc/bb/tls/tls.key
       BB_SERVICE: pooler
       # postgres (Postgres): PLAINTEXT edge (tls.mode: off). Reason: practice TLS termination at a pooler
       DATABASE_URL: postgres://app:postgrespasswordSECRET@postgres.plain.bb.internal:5432/orders?sslmode=disable
@@ -330,6 +332,8 @@ services:
       target: dev
     environment:
       SSL_CERT_FILE: /etc/bb/trust-bundle.pem
+      TLS_CERT_FILE: /etc/bb/tls/tls.crt
+      TLS_KEY_FILE: /etc/bb/tls/tls.key
       BB_SERVICE: api
       # postgres (Postgres)
       DATABASE_URL: postgres://app:postgrespasswordSECRET@postgres.bb.internal:5432/orders?sslmode=verify-full
@@ -385,6 +389,8 @@ services:
       target: dev
     environment:
       SSL_CERT_FILE: /etc/bb/trust-bundle.pem
+      TLS_CERT_FILE: /etc/bb/tls/tls.crt
+      TLS_KEY_FILE: /etc/bb/tls/tls.key
       BB_SERVICE: worker
       # redis (Redis)
       REDIS_URL: rediss://default:redispasswordSECRET@redis.bb.internal:6379/0

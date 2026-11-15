@@ -55,6 +55,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-045 | 2026-11-15 | `bb down` also removes networks, and with `--volumes` volumes, labeled with the experiment's id, so resources of services or segments removed since an earlier `bb up` do not outlive the experiment. Matching the id, not the name, leaves a same-named experiment in another directory alone. |
 | D-046 | 2026-11-15 | The shared Go cache volumes mount with `volume.nocopy`, so Docker never copies the image's module cache into them. Apps start together, and concurrent copies into one new volume failed with `mkdir ...: file exists`. Go fills the caches itself on first start. |
 | D-047 | 2026-11-15 | Starter app names are unique across all starters. Applying a starter whose app name is already used, other than by the same starter in the same directory, fails with `ErrExists` before anything is written, instead of skipping the app. |
+| D-048 | 2026-11-15 | Every app gets `TLS_CERT_FILE` and `TLS_KEY_FILE` pointing at its own certificate and key, so apps that serve TLS keep certificate paths out of code. |
 
 ## Open questions
 

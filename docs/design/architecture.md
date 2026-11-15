@@ -92,6 +92,7 @@ There is no database. Everything is a file, and each kind of data has one home:
 - Defaults to `os.UserConfigDir()/breadboard` (`~/Library/Application Support/breadboard` on macOS); overridable by the `BB_HOME` env var. Directory mode `0700`.
 - `config.yaml`: install settings, loaded through bkit `settings` in layers: built-in defaults (`settings.Map`) → `config.yaml` (`settings.File` with the yaml driver) → `BB_*` env vars (`settings.Env`).
 - `ca/root.crt` and `ca/root.key` (`0600`): the install's CA ([`security.md`](security.md)).
+- `ca/lock`: every project shares the CA, so project locks cannot protect it. Loading, creating, or replacing the CA holds an exclusive `flock` on this file; a second caller waits (up to 30 seconds) instead of failing, then sees the CA the first one saved. A key that does not match its certificate is treated as missing and replaced, and leaves signed by the old CA are reissued on the next `bb up`.
 
 ## Project state (`.bb/`)
 
@@ -103,7 +104,8 @@ Created by `bb init` next to `experiment.yaml`, directory mode `0700`.
   state.json          format version, bb version that last wrote it, experiment id
   secrets.json        generated secrets (0600)
   certs/<service>/    leaf certificate and key per service (key 0600)
-  runtime/            docker-compose.yml, docker-compose.dev.yml, trust-bundle.pem
+  runtime/            the generated compose project: docker-compose.yml, docker-compose.dev.yml,
+                      ca.pem, trust-bundle.pem, tls/<service>/, config/<service>/
   lock                advisory file lock
 ```
 
@@ -128,8 +130,11 @@ Every file Breadboard owns carries a format version, and every format only moves
 ## Runtime layout
 
 - Compose project name: `bb-<experiment>`.
-- App services bind-mount their source directory by path relative to the generated compose file.
-- Labels on every service: `breadboard.experiment=<name>`, `breadboard.service=<name>`, `breadboard.kind=infra|app`. The engine finds its containers by label, never by name parsing.
+- `docker-compose.yml` is the whole stack: infra services and app services built from their `dev` stage with the spec's `command`. `docker-compose.dev.yml` adds the development loop: each app's source bind-mounted at `/src` (relative to the generated file) and named volumes for the Go module and build caches. `bb up` uses both files. The `prod` stage is for building release images by hand.
+- App containers also get `BB_SERVICE` (their name). Their health check is that the main process is running, unless the spec's `health` opts into an HTTP check (then `BB_HEALTH_PORT` is set too).
+- `bb up` waits up to 5 minutes (`--timeout`) for every container to be running and healthy, and fails fast when one exits, keeps restarting, or reports unhealthy.
+- Labels on every service: `breadboard.experiment=<name>`, `breadboard.experiment-id=<id from state.json>`, `breadboard.service=<name>`, `breadboard.kind=infra|app`, and `breadboard.config-hash`, a hash of the service's mounted certificates and configuration files. A new hash changes the service's config, so `docker compose up` recreates it and reissued certificates take effect. Networks and volumes carry the experiment labels too. The engine finds its containers by label, never by name parsing.
+- Compose projects are named after the experiment, so two directories with the same experiment name would share one project. `bb up` and `bb down` refuse to run when Docker holds containers, networks, or volumes labeled with the same name but another experiment id.
 - Ports: nothing is published to the host by default. A port is published only when the spec asks for it, always bound to `127.0.0.1`.
 
 ## Web UI and MCP (Phases 3 and 4)
@@ -155,22 +160,22 @@ Each command is a thin wrapper over one core operation.
 | `bb add <type> [--name n]` | Add an infra service to `experiment.yaml`. |
 | `bb remove <name>` | Remove a service or app from `experiment.yaml`. |
 | `bb starters` | List starters. |
-| `bb starter <id>` | Apply a starter: write code, add app services. |
-| `bb up` | Reconcile state, materialize, `docker compose up -d`, wait for health. |
+| `bb starter <id> [--dir path]` | Apply a starter: write code, add app services. |
+| `bb up [--timeout d]` | Reconcile state, materialize, `docker compose up -d`, wait for health. |
 | `bb down [--volumes]` | Stop the experiment; `--volumes` also deletes its data. |
 | `bb status` | Per service: state, health, CPU, memory; plus TLS warnings. |
-| `bb logs [service] [-f]` | Stream logs. |
+| `bb logs [service] [-f] [--tail n]` | Stream logs. |
 | `bb creds [service]` | Show generated credentials and connection strings. |
 | `bb learn <type>` | Print the catalog entry's learning notes. |
-| `bb ca` | Show CA details and how to trust it on the host (never auto-installs). |
-| `bb config [get\|set] <key> [value]` | Read or change install settings. |
+| `bb ca [--pem]` | Show CA details and how to trust it on the host (never auto-installs); `--pem` prints the certificate. |
+| `bb config [get [key] \| set <key> <value>]` | List, read, or change install settings. |
 | `bb migrate` | Upgrade `experiment.yaml` to the current spec version. |
-| `bb export compose [--out dir] [--secrets inline\|dotenv]` | Write a standalone compose stack. |
+| `bb export compose [--out dir] [--secrets inline\|dotenv]` | Write a standalone compose stack (default `export/compose`). |
 | `bb version` | Print the bb version. |
 
 `bb add`, `bb remove`, and `bb starter` edit `experiment.yaml` through a YAML node tree, so the user's comments and ordering survive.
 
-The CLI is built on the standard library `flag` package with a small subcommand dispatcher.
+The CLI is built on the standard library `flag` package with a small subcommand dispatcher. Flags may follow positional arguments (`bb logs consumer -f`), and the global `-C dir` runs a command as if started in `dir`. Commands find the experiment by walking up from the current directory to the nearest `experiment.yaml`. Exit codes: 0 success, 1 error, 2 usage.
 
 ## Repository layout
 
@@ -192,7 +197,8 @@ internal/
   runtime/              docker compose invocation, health waiting, stats
   starters/             starter engine (embed.FS + text/template)
   export/               exporters (Phase 7+)
-starters/go/<area>/<name>/   starter templates (embedded)
+starters/                    package embedding the templates (starters.FS)
+starters/go/<area>/<name>/   starter templates; every file ends in .tmpl so Go never compiles starter code as part of this module
 docs/design/            this design
 ```
 
@@ -208,7 +214,7 @@ Breadboard's own internals use Brian's [bkit](https://github.com/brian-nunez/bki
 | Relational database | `rdb` + `rdb/drivers/postgres` | Postgres explorer in the UI. | 3 |
 | Object storage | `objex` + `objex/drivers/s3` | Bucket explorer for the S3 Compatible entry. | 3 |
 
-`experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3` (strict decoding to reject unknown keys, and node-level editing to preserve comments), which `settings` does not offer. Where bkit has no matching capability (Kafka admin, Consul catalog), internals use the same official client libraries the starters use.
+`experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3` (strict decoding to reject unknown keys, and node-level editing to preserve comments), which `settings` does not offer. Where bkit has no matching capability, the engine uses the standard library; any other direct dependency needs Brian's approval and a row in [`decisions.md`](decisions.md).
 
 ## Engineering conventions
 

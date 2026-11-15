@@ -9,12 +9,12 @@ Every entry defines:
 | Part | Requirement |
 |---|---|
 | Image | Official image, **exact version pin** (never `latest` or a major-only tag). The pin lives in the entry's Go code; that code is the source of truth for versions. |
-| Listeners | Protocol, port, TLS configuration, and how to enable a plaintext listener when an edge asks for one ([`security.md`](security.md)). |
+| Listeners | Protocol, port, TLS configuration, and how to enable a plaintext listener when an edge asks for one ([`security.md`](security.md)). An entry whose server cannot confine a plaintext port to a private segment offers none, and validation rejects `tls.mode: off` edges to it. |
 | Config | Server configuration with TLS on, plus any type-specific `config` options the spec may set. |
 | Secrets | Which secrets it needs and how they reach the server. |
 | Health check | Exercises the real protocol **over TLS with verification**, so "healthy" also proves the certificates work. |
 | Resources | Default `mem_limit` and `cpus`. |
-| Storage | Named volume for data; removed by `bb down --volumes`. |
+| Storage | Named volume for data; removed by `bb down --volumes`, including volumes of services removed from `experiment.yaml` since an earlier `bb up` (matched by the `breadboard.experiment-id` label). |
 | Env contract | Variables injected into every app that `uses` it, named the way the ecosystem expects. |
 | Learning notes | Embedded markdown: what you got, key concepts, things to try, things to break. Shown by `bb learn` and in the UI. |
 | Explorer probes | (Phase 3) How the UI reads live state. |
@@ -24,15 +24,24 @@ Every service also gets `restart: unless-stopped`, the `breadboard.*` labels, an
 
 ## Phase 1 entries
 
-Hostnames below use the default domain and a service named after its type.
+Hostnames below use the default domain and a service named after its type. Image pins as of Phase 1 (the Go code in `internal/catalog` remains the source of truth):
+
+| Entry | Image | Limits | Plaintext listener |
+|---|---|---|---|
+| `kafka` | `apache/kafka:4.3.2` | 1g, 1.0 cpu | 9092, bound to the segment address |
+| `postgres` | `postgres:18.7-alpine3.24` | 512m, 0.5 cpu | same port 5432; `hostnossl` limited to the segment subnet |
+| `redis` | `redis:8.10.3-alpine3.23` | 256m, 0.25 cpu | none in v1 |
+| `consul` | `hashicorp/consul:1.22.7` | 256m, 0.5 cpu | 8500, bound to the segment address |
+
+Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/etc/bb/tls/tls.key`, both together at `/etc/bb/tls/keystore.pem`, the CA at `/etc/bb/ca.pem`, the trust bundle at `/etc/bb/trust-bundle.pem`, and entry configuration under `/etc/bb/config/`.
 
 ### `kafka`
 
-- Official `apache/kafka` image, single node in KRaft combined mode (broker + controller), no ZooKeeper.
+- Official `apache/kafka` image, single node in KRaft combined mode (broker + controller), no ZooKeeper. The entry bypasses the image's environment-driven configuration: it mounts its own `server.properties`, formats the log directory with a generated cluster id (`kafka-storage.sh format --ignore-formatted`), then starts the server. The controller listener is loopback-only.
 - SSL listener on 9093 with PEM certificates directly (`ssl.keystore.type=PEM`), so no Java keystores.
 - Internal topic replication factors set to 1 for the single node.
 - `auto.create.topics.enable=false`: starters create topics explicitly with the admin client, which teaches partitions and replication.
-- Health check: broker API versions request over SSL against the FQDN.
+- Health check: `kafka-broker-api-versions.sh` over SSL against the FQDN, with a 128 MB heap so it fits beside the broker's 512 MB heap.
 - Env contract:
   - `KAFKA_BROKERS=kafka.bb.internal:9093`
   - `KAFKA_SECURITY_PROTOCOL=SSL`
@@ -42,26 +51,31 @@ Hostnames below use the default domain and a service named after its type.
 ### `postgres`
 
 - Official `postgres` image, `ssl=on`, and `pg_hba.conf` accepts only `hostssl` (plus `host` on a private segment when an edge asks for plaintext).
-- Gotcha: the key file must be `0600` and owned by the image's postgres uid. The entry handles this; the learning notes explain it.
+- Gotcha: the key file must be `0600` and owned by the image's postgres uid. The entry's start script copies the mounted key with `install -m 0600 -o postgres` before handing over to the image's entrypoint; the learning notes explain it.
+- The app role and database are created by an init script on first start; changing `config.user` or `config.database` later needs `bb down --volumes`. Data lives in a named volume at `/var/lib/postgresql` (Postgres 18 layout).
 - Secrets: superuser password; default database and app role from `config` (defaults `app`/`app`).
 - Health check: a TLS connection with `sslmode=verify-full` running `select 1`.
 - Env contract:
   - `DATABASE_URL=postgres://app:<pw>@postgres.bb.internal:5432/app?sslmode=verify-full`
-  - `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE=verify-full`
+  - `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE=verify-full`, `PGSSLROOTCERT=/etc/bb/ca.pem` (so `psql` and libpq verify too; pgx also verifies through `SSL_CERT_FILE`)
+  - On a plaintext edge: host `postgres.plain.bb.internal` and `sslmode=disable`.
 
 ### `redis`
 
-- Official `redis` image, `tls-port 6379`, `port 0` (plaintext disabled unless an edge asks), password via ACL default user.
+- Official `redis` image, `tls-port 6379`, `port 0`, password on the default user, append-only persistence.
+- No plaintext listener in v1: Redis binds every port to the same addresses, so a plaintext port could not be confined to a private segment. Plaintext Redis arrives with terminating proxies in Phase 5.
 - Health check: `redis-cli --tls --cacert … -h redis.bb.internal ping`.
 - Env contract: `REDIS_URL=rediss://default:<pw>@redis.bb.internal:6379/0`
 
 ### `consul`
 
-- Official `hashicorp/consul` image, single server in dev-like topology with persistence, HTTPS on 8501, plain HTTP disabled, TLS on RPC.
-- Health check: the HTTPS API's leader endpoint with CA verification.
+- Official `hashicorp/consul` image, single server in dev-like topology with persistence, HTTPS on 8501, plain HTTP disabled.
+- Other listeners: server RPC (8300) requires TLS with a client certificate from the CA; LAN gossip (8301) stays on for Phase 2 client agents and is encrypted with a generated gossip key (`-encrypt` on the command line, never in the config file); DNS, gRPC, and WAN gossip are off.
+- Health check: `consul operator raft list-peers` over HTTPS with CA verification; it succeeds only once a leader exists.
 - Env contract:
   - `CONSUL_HTTP_ADDR=https://consul.bb.internal:8501`
-  - `CONSUL_CACERT=<bundle path>`
+  - `CONSUL_CACERT=/etc/bb/trust-bundle.pem`
+  - On a plaintext edge: `CONSUL_HTTP_ADDR=http://consul.plain.bb.internal:8500` only.
 - Service registration for apps follows the sidecar pattern in Phase 2 ([`starters.md`](starters.md)).
 - ACLs are out of scope for v1.
 

@@ -1,0 +1,25 @@
+# kafka/producer-consumer
+
+A Go producer and consumer for Kafka, using [franz-go](https://github.com/twmb/franz-go).
+
+- `cmd/producer`: creates the `orders` topic with 3 partitions, then writes one record per second, keyed by customer.
+- `cmd/consumer`: reads `orders` as a member of the `orders-consumers` group.
+
+Breadboard sets `KAFKA_BROKERS` and `SSL_CERT_FILE` in each container. The code reads nothing else.
+
+```sh
+bb up
+bb logs consumer -f
+```
+
+## Try this
+
+- **Keys pick partitions.** In `bb logs producer`, every record for one customer has the same partition.
+- **Scale the group.** Copy the `consumer` app in `experiment.yaml` to `consumer-2` and run `bb up`. The three partitions are split between the two consumers.
+- **Start a new group.** Change the group name in `cmd/consumer` and run `bb up`. The new group reads from offset 0.
+
+## Break this
+
+- **Stop the broker.** Run `docker stop bb-<experiment>-kafka-1`, watch the producer log errors, then run `bb up` again.
+- **Crash before a commit.** Stop the consumer right after it logs a record and start it again. Some records come back a second time.
+- **Starve the consumer.** Set `resources.cpus: 0.05` on the consumer in `experiment.yaml`, run `bb up`, and watch it fall behind.

@@ -1,0 +1,44 @@
+// Command producer writes one order per second to the "orders" topic.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
+)
+
+func main() {
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(strings.Split(os.Getenv("KAFKA_BROKERS"), ",")...),
+		// The broker only speaks TLS. Go verifies its certificate using SSL_CERT_FILE.
+		kgo.DialTLSConfig(new(tls.Config)),
+		kgo.DefaultProduceTopic("orders"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+	ctx := context.Background()
+
+	// The broker never creates topics on its own, so create it: 3 partitions, 1 replica.
+	// If it already exists, the call reports that and nothing changes.
+	kadm.NewClient(client).CreateTopic(ctx, 3, 1, nil, "orders")
+
+	for i := 1; ; i++ {
+		// Records with the same key always land on the same partition, in order.
+		rec := &kgo.Record{Key: fmt.Appendf(nil, "customer-%d", i%5), Value: fmt.Appendf(nil, "order %d", i)}
+		if err := client.ProduceSync(ctx, rec).FirstErr(); err != nil {
+			log.Print(err)
+		} else {
+			log.Printf("produced key=%s partition=%d offset=%d", rec.Key, rec.Partition, rec.Offset)
+		}
+		time.Sleep(time.Second)
+	}
+}

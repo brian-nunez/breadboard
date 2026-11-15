@@ -1,5 +1,5 @@
 ---
-status: "accepted"
+status: "superseded by ADR-0011"
 date: 2026-11-14
 decision-makers: Brian Nunez
 ---
@@ -26,7 +26,7 @@ Breadboard's own code needs layered configuration, rule-based validation, and la
 
 Chosen option: "bkit modules wherever one fits, standard library otherwise", because bkit is standard-library-first, fully tested, uses sentinel errors and explicit drivers, and keeps Breadboard's dependency graph small.
 
-Phase 1 uses `settings` (with the YAML driver) for install configuration and `gate` for spec and policy validation. The web UI phase adds `stash` with the in-memory driver for sessions, `rdb` with the Postgres driver for the Postgres explorer, and `objex` with the S3 driver for the bucket explorer. `experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3`, because Breadboard needs strict decoding and comment-preserving node edits that `settings` does not offer. Where bkit has no matching capability, Breadboard uses the standard library; any other direct dependency, including the client libraries starters use, needs Brian's approval and its own row in `docs/design/decisions.md`.
+Phase 1 uses `settings` (with the YAML driver) for install configuration and `gate` for spec and policy validation. The web UI phase adds `stash` with the in-memory driver for sessions, `rdb` with the Postgres driver for the Postgres explorer, and `objex` with the S3 driver for the bucket explorer. `experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3`, because Breadboard needs strict decoding and comment-preserving node edits that `settings` does not offer. Where bkit has no matching capability (Kafka admin, Consul catalog), internals use the same official libraries as the starters.
 
 ### Consequences
 

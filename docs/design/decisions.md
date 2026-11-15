@@ -16,7 +16,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-006 | 2026-11-14 | Name: Breadboard; CLI `bb`. |
 | D-007 | 2026-11-14 | Starters start with Go, targeting Go 1.27.4. The engine also pins toolchain go1.27.4. |
 | D-008 | 2026-11-14 | Default starter libraries: `franz-go`, `pgx/v5`, `go-redis/v9`, `hashicorp/consul/api`. Users may install anything else. → [ADR-0006](../adr/README.md) |
-| D-009 | 2026-11-14 | Engine YAML dependency: `go.yaml.in/yaml/v3`. → [ADR-0007](../adr/README.md) |
+| D-009 | 2026-11-14 | Engine YAML dependency: `go.yaml.in/yaml/v3`. → [ADR-0011](../adr/README.md) (carried forward from ADR-0007) |
 | D-010 | 2026-11-14 | TLS on by default for every container-to-container hop. Plaintext requires an explicit, reasoned choice (supports proxy/relay termination practice). → [ADR-0005](../adr/README.md) |
 | D-011 | 2026-11-14 | Breadboard generates a local CA; all containers trust it. Services are addressed as `<service>.<domain>` via Docker network aliases. → [ADR-0005](../adr/README.md) |
 | D-012 | 2026-11-14 | Domain defaults to `bb.internal` and is configurable. → [ADR-0005](../adr/README.md) |
@@ -25,7 +25,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-015 | 2026-11-14 | Generated secrets are materialized inline in compose or into a `.env`; exporters transform them into their target's medium. Storage location: see D-026. |
 | D-016 | 2026-11-14 | ~~CLI on the host; UI and MCP in containers.~~ Superseded by D-024. |
 | D-017 | 2026-11-14 | Exporter targets: Kubernetes, Ansible, Terraform (AWS, GCP, Cloudflare). Azure and Stripe dropped. → [ADR-0009](../adr/README.md) |
-| D-018 | 2026-11-14 | Breadboard internals use Brian's bkit modules where they fit: `settings`, `gate` now; `stash`, `rdb`, `objex` in the UI phase. Mapping in [`architecture.md`](architecture.md#internal-libraries-bkit). → [ADR-0007](../adr/README.md) |
+| D-018 | 2026-11-14 | Breadboard internals use Brian's bkit modules where they fit: `settings`, `gate` now; `stash`, `rdb`, `objex` in the UI phase. Mapping in [`architecture.md`](architecture.md#internal-libraries-bkit). → [ADR-0011](../adr/README.md) (carried forward from ADR-0007) |
 | D-019 | 2026-11-14 | Module path and repository: `github.com/brian-nunez/breadboard` (`git@github.com:brian-nunez/breadboard.git`). |
 | D-020 | 2026-11-14 | ~~SQLite state DB schema.~~ Superseded by D-025. |
 | D-021 | 2026-11-14 | ~~SQLite state DB as source of truth, mounted into containers.~~ Superseded by D-025. |
@@ -50,6 +50,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-040 | 2026-11-15 | Each service carries `breadboard.config-hash` over its mounted certificates and configuration, so compose recreates the container when they change (for example, a reissued leaf). |
 | D-041 | 2026-11-15 | Consul: server RPC requires TLS client certificates, LAN gossip is encrypted with a generated key, and DNS, gRPC, and WAN gossip are disabled, so no unencrypted port is reachable outside a private segment. |
 | D-042 | 2026-11-15 | Starters are the bare minimum: one `main.go` per app using the official library directly, with no helper packages or health code. App containers get a default health check that the main process is running; an HTTP check is opt-in with `health` in `experiment.yaml`. (Brian's direction.) |
+| D-043 | 2026-11-15 | Where bkit has no matching module, internals use the standard library; any other direct dependency of `bb`, including starter client libraries, needs Brian's approval and its own row here. Supersedes the client-library fallback in ADR-0007. (Brian's direction.) → [ADR-0011](../adr/README.md) |
 
 ## Open questions
 

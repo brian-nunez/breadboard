@@ -140,7 +140,7 @@ func checkCompose(t *testing.T, b *Bundle) {
 
 func TestEveryEntryInline(t *testing.T) {
 	s := &spec.Spec{Version: 1, Name: "lab", Services: allServices(), Apps: []spec.App{
-		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul"), Ports: []int{8080}},
+		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul"), Ports: []int{8080}, Health: &spec.Health{Path: "/ready"}},
 	}}
 	b := render(t, s, secrets.Inline)
 	checkCompose(t, b)

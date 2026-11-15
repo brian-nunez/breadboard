@@ -25,6 +25,7 @@ const (
 const (
 	DefaultAppMemory     = "512m"
 	DefaultAppCPUs       = "0.5"
+	// Used when an app opts into an HTTP health check with `health`.
 	DefaultAppHealthPath = "/healthz"
 	DefaultAppHealthPort = 8080
 )
@@ -52,8 +53,10 @@ type Service struct {
 	Config map[string]string
 
 	// App only.
-	App    *spec.App
-	Health spec.Health
+	App *spec.App
+	// Health is the app's HTTP health check, or nil for the default check
+	// that the container's main process is running. Apps need no health code.
+	Health *spec.Health
 }
 
 // Edge is a directed connection from an app to an infra listener.
@@ -150,8 +153,9 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 	}
 	for i := range s.Apps {
 		app := &s.Apps[i]
-		health := spec.Health{Path: DefaultAppHealthPath, Port: DefaultAppHealthPort}
+		var health *spec.Health
 		if app.Health != nil {
+			health = &spec.Health{Path: DefaultAppHealthPath, Port: DefaultAppHealthPort}
 			if app.Health.Path != "" {
 				health.Path = app.Health.Path
 			}

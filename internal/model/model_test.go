@@ -33,12 +33,15 @@ func TestResolve(t *testing.T) {
 		t.Errorf("db config defaults = %v", db.Config)
 	}
 	api, _ := m.Service("api")
-	if api.Health.Port != 9000 || api.Health.Path != DefaultAppHealthPath || api.Resources.Memory != DefaultAppMemory {
+	if api.Health == nil || api.Health.Port != 9000 || api.Health.Path != DefaultAppHealthPath || api.Resources.Memory != DefaultAppMemory {
 		t.Errorf("api defaults = %+v %+v", api.Health, api.Resources)
 	}
 	edges := m.EdgesFrom("api")
 	if len(edges) != 2 || !edges[0].TLS || edges[0].Port != 5432 || edges[1].TLS || edges[1].Port != 9092 || edges[1].Reason != "bench" {
 		t.Errorf("api edges = %+v", edges)
+	}
+	if w, _ := m.Service("worker"); w.Health != nil {
+		t.Errorf("worker health = %+v, want the default process check", w.Health)
 	}
 	if len(m.Segments) != 1 {
 		t.Fatalf("segments = %+v", m.Segments)

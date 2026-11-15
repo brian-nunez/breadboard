@@ -287,12 +287,12 @@ services:
     ports:
       - 127.0.0.1:8080:8080
     healthcheck:
-      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/healthz']
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/ready']
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 3m
-      start_interval: 2s
+      start_interval: 1s
     depends_on:
       kafka:
         condition: service_healthy

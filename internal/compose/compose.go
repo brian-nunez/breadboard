@@ -289,7 +289,9 @@ func appService(in Input, svc *model.Service) *yaml.Node {
 	env := []catalog.EnvVar{
 		{Name: "SSL_CERT_FILE", Value: catalog.TrustBundleFile},
 		{Name: "BB_SERVICE", Value: svc.Name},
-		{Name: "BB_HEALTH_PORT", Value: strconv.Itoa(svc.Health.Port)},
+	}
+	if svc.Health != nil {
+		env = append(env, catalog.EnvVar{Name: "BB_HEALTH_PORT", Value: strconv.Itoa(svc.Health.Port)})
 	}
 	seen := map[string]bool{}
 	for _, e := range env {
@@ -337,15 +339,22 @@ func appService(in Input, svc *model.Service) *yaml.Node {
 		}
 		def.Content = append(def.Content, str("ports"), seq(ports...))
 	}
-	def.Content = append(def.Content, str("healthcheck"), healthcheck(catalog.Health{
-		// Loopback inside the container: not an edge, so no TLS.
-		Test:          []string{"CMD", "wget", "-q", "-O", "/dev/null", fmt.Sprintf("http://127.0.0.1:%d%s", svc.Health.Port, escape(svc.Health.Path))},
+	// By default the check only asks whether the main process is running, so
+	// app code needs no health endpoint. `health` in the spec opts into HTTP.
+	check := catalog.Health{
+		Test:          []string{"CMD-SHELL", "kill -0 1"},
 		Interval:      10 * time.Second,
 		Timeout:       5 * time.Second,
 		Retries:       3,
-		StartPeriod:   180 * time.Second,
-		StartInterval: 2 * time.Second,
-	}))
+		StartPeriod:   10 * time.Second,
+		StartInterval: 1 * time.Second,
+	}
+	if h := svc.Health; h != nil {
+		// Loopback inside the container: not an edge, so no TLS.
+		check.Test = []string{"CMD", "wget", "-q", "-O", "/dev/null", fmt.Sprintf("http://127.0.0.1:%d%s", h.Port, escape(h.Path))}
+		check.StartPeriod = 180 * time.Second
+	}
+	def.Content = append(def.Content, str("healthcheck"), healthcheck(check))
 	if len(depends.Content) > 0 {
 		def.Content = append(def.Content, str("depends_on"), depends)
 	}

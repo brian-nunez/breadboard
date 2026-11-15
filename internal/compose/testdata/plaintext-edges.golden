@@ -286,7 +286,6 @@ services:
     environment:
       SSL_CERT_FILE: /etc/bb/trust-bundle.pem
       BB_SERVICE: pooler
-      BB_HEALTH_PORT: "8080"
       # postgres (Postgres): PLAINTEXT edge (tls.mode: off). Reason: practice TLS termination at a pooler
       DATABASE_URL: postgres://app:postgrespasswordSECRET@postgres.plain.bb.internal:5432/orders?sslmode=disable
       PGHOST: postgres.plain.bb.internal
@@ -297,12 +296,12 @@ services:
       PGSSLMODE: disable
       PGSSLROOTCERT: /etc/bb/ca.pem
     healthcheck:
-      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/healthz']
+      test: [CMD-SHELL, kill -0 1]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 3m
-      start_interval: 2s
+      start_period: 10s
+      start_interval: 1s
     depends_on:
       postgres:
         condition: service_healthy
@@ -332,7 +331,6 @@ services:
     environment:
       SSL_CERT_FILE: /etc/bb/trust-bundle.pem
       BB_SERVICE: api
-      BB_HEALTH_PORT: "8080"
       # postgres (Postgres)
       DATABASE_URL: postgres://app:postgrespasswordSECRET@postgres.bb.internal:5432/orders?sslmode=verify-full
       PGHOST: postgres.bb.internal
@@ -348,12 +346,12 @@ services:
       # consul (Consul): PLAINTEXT edge (tls.mode: off). Reason: debug with curl
       CONSUL_HTTP_ADDR: http://consul.plain.bb.internal:8500
     healthcheck:
-      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/healthz']
+      test: [CMD-SHELL, kill -0 1]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 3m
-      start_interval: 2s
+      start_period: 10s
+      start_interval: 1s
     depends_on:
       postgres:
         condition: service_healthy
@@ -388,16 +386,15 @@ services:
     environment:
       SSL_CERT_FILE: /etc/bb/trust-bundle.pem
       BB_SERVICE: worker
-      BB_HEALTH_PORT: "8080"
       # redis (Redis)
       REDIS_URL: rediss://default:redispasswordSECRET@redis.bb.internal:6379/0
     healthcheck:
-      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/healthz']
+      test: [CMD-SHELL, kill -0 1]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 3m
-      start_interval: 2s
+      start_period: 10s
+      start_interval: 1s
     depends_on:
       redis:
         condition: service_healthy

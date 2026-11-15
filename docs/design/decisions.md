@@ -52,6 +52,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-042 | 2026-11-15 | Starters are the bare minimum: one `main.go` per app using the official library directly, with no helper packages or health code. App containers get a default health check that the main process is running; an HTTP check is opt-in with `health` in `experiment.yaml`. (Brian's direction.) |
 | D-043 | 2026-11-15 | Where bkit has no matching module, internals use the standard library; any other direct dependency of `bb`, including starter client libraries, needs Brian's approval and its own row here. Supersedes the client-library fallback in ADR-0007. (Brian's direction.) → [ADR-0011](../adr/README.md) |
 | D-044 | 2026-11-15 | The install CA has its own lock, `BB_HOME/ca/lock`, held from loading the CA until any replacement is saved; callers wait for it rather than fail. A CA key that does not match its certificate is replaced. |
+| D-045 | 2026-11-15 | `bb down` also removes networks, and with `--volumes` volumes, labeled with the experiment's id, so resources of services or segments removed since an earlier `bb up` do not outlive the experiment. Matching the id, not the name, leaves a same-named experiment in another directory alone. |
 
 ## Open questions
 

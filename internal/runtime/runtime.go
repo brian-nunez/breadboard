@@ -143,6 +143,34 @@ func (c *Compose) Down(ctx context.Context, p Project, volumes bool) error {
 	return err
 }
 
+// RemoveOwned removes networks, and volumes when volumes is true, labeled with
+// experimentID. Compose only removes what the current compose files declare,
+// so this catches resources of services or segments removed since an earlier
+// up. Matching on the experiment id, not the name, leaves a same-named
+// experiment from another directory alone. Run it after Down.
+func (c *Compose) RemoveOwned(ctx context.Context, experimentID string, volumes bool) error {
+	if experimentID == "" {
+		return errors.New("runtime: RemoveOwned needs an experiment id")
+	}
+	filter := "label=" + labelExperimentID + "=" + experimentID
+	kinds := []string{"network"}
+	if volumes {
+		kinds = append(kinds, "volume")
+	}
+	for _, kind := range kinds {
+		out, err := c.run(ctx, kind, "ls", "--quiet", "--filter", filter)
+		if err != nil {
+			return err
+		}
+		if names := strings.Fields(string(out)); len(names) > 0 {
+			if _, err := c.run(ctx, append([]string{kind, "rm"}, names...)...); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Containers lists an experiment's containers by label.
 func (c *Compose) Containers(ctx context.Context, experiment string) ([]Container, error) {
 	out, err := c.run(ctx, "ps", "--all", "--quiet", "--no-trunc", "--filter", "label=breadboard.experiment="+experiment)

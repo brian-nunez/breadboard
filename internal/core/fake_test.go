@@ -32,6 +32,8 @@ type fakeRuntime struct {
 	logArgs  []string
 	// filesSeen captures the compose files present when Up ran.
 	filesSeen map[string][]byte
+	// removedOwned records the experiment ids passed to RemoveOwned.
+	removedOwned []string
 }
 
 func newFake() *fakeRuntime {
@@ -86,6 +88,16 @@ func (f *fakeRuntime) Down(ctx context.Context, p runtime.Project, volumes bool)
 		f.record("down")
 	}
 	delete(f.containers, p.Name[len("bb-"):])
+	return nil
+}
+
+func (f *fakeRuntime) RemoveOwned(ctx context.Context, experimentID string, volumes bool) error {
+	if volumes {
+		f.record("remove-owned-volumes")
+	} else {
+		f.record("remove-owned")
+	}
+	f.removedOwned = append(f.removedOwned, experimentID)
 	return nil
 }
 

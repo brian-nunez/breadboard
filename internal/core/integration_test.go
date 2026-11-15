@@ -296,3 +296,40 @@ apps:
 	}
 	assertGone(t, name)
 }
+
+// TestIntegrationDownRemovesVolumesOfRemovedServices covers a service removed
+// between two ups: its volume is no longer in the compose files, so compose
+// alone would leave it behind on down --volumes.
+func TestIntegrationDownRemovesVolumesOfRemovedServices(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := fmt.Sprintf("rm-%d", time.Now().Unix()%100000)
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+	})
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+	for _, typ := range []string{"postgres", "redis"} {
+		if _, err := eng.AddService(ctx, AddServiceRequest{Dir: dir, Type: typ}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.RemoveService(ctx, RemoveServiceRequest{Dir: dir, Name: "postgres"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatal(err)
+	}
+	if all := docker(t, "volume", "ls", "-q", "--filter", "label=breadboard.experiment="+name); !strings.Contains(all, "postgres-data") {
+		t.Fatalf("precondition: the removed service's volume should survive up; volumes:\n%s", all)
+	}
+	if _, err := eng.Down(ctx, DownRequest{Dir: dir, Volumes: true}); err != nil {
+		t.Fatal(err)
+	}
+	assertGone(t, name)
+}

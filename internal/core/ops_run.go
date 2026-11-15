@@ -194,8 +194,17 @@ func (e *Engine) Down(ctx context.Context, req DownRequest) (*DownResult, error)
 	if err := e.checkOwnership(ctx, p); err != nil {
 		return nil, err
 	}
+	ps, err := p.LoadState()
+	if err != nil {
+		return nil, err
+	}
 	req.Events.step("Stopping containers")
 	if err := e.rt.Down(ctx, runtimeProject(p.Project, p.spec.Name), req.Volumes); err != nil {
+		return nil, err
+	}
+	// Networks and volumes of services removed since an earlier up are no
+	// longer in the compose files, so compose leaves them behind.
+	if err := e.rt.RemoveOwned(ctx, ps.ExperimentID, req.Volumes); err != nil {
 		return nil, err
 	}
 	return &DownResult{Experiment: p.spec.Name, VolumesRemoved: req.Volumes}, nil

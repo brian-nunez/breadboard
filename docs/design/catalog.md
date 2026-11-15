@@ -14,7 +14,7 @@ Every entry defines:
 | Secrets | Which secrets it needs and how they reach the server. |
 | Health check | Exercises the real protocol **over TLS with verification**, so "healthy" also proves the certificates work. |
 | Resources | Default `mem_limit` and `cpus`. |
-| Storage | Named volume for data; removed by `bb down --volumes`. |
+| Storage | Named volume for data; removed by `bb down --volumes`, including volumes of services removed from `experiment.yaml` since an earlier `bb up` (matched by the `breadboard.experiment-id` label). |
 | Env contract | Variables injected into every app that `uses` it, named the way the ecosystem expects. |
 | Learning notes | Embedded markdown: what you got, key concepts, things to try, things to break. Shown by `bb learn` and in the UI. |
 | Explorer probes | (Phase 3) How the UI reads live state. |

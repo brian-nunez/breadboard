@@ -46,6 +46,7 @@ type Runtime interface {
 	Available(ctx context.Context) error
 	Up(ctx context.Context, p runtime.Project) error
 	Down(ctx context.Context, p runtime.Project, volumes bool) error
+	RemoveOwned(ctx context.Context, experimentID string, volumes bool) error
 	Containers(ctx context.Context, experiment string) ([]runtime.Container, error)
 	Stats(ctx context.Context, ids []string) (map[string]runtime.Usage, error)
 	Logs(ctx context.Context, p runtime.Project, services []string, follow bool, tail int) iter.Seq2[runtime.LogLine, error]

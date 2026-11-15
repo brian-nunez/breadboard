@@ -527,8 +527,21 @@ func TestDownStatusLogs(t *testing.T) {
 	if err != nil || !res.VolumesRemoved {
 		t.Fatalf("Down = %+v %v", res, err)
 	}
-	if h.rt.calls[len(h.rt.calls)-1] != "down-volumes" {
-		t.Errorf("calls = %v", h.rt.calls)
+	if n := len(h.rt.calls); n < 2 || h.rt.calls[n-2] != "down-volumes" || h.rt.calls[n-1] != "remove-owned-volumes" {
+		t.Errorf("calls = %v, want down-volumes then remove-owned-volumes", h.rt.calls)
+	}
+	ps, err := (state.Project{Dir: h.dir}).LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ps.ExperimentID == "" || !slices.Equal(h.rt.removedOwned, []string{ps.ExperimentID}) {
+		t.Errorf("RemoveOwned ids = %v, want [%s]", h.rt.removedOwned, ps.ExperimentID)
+	}
+	if _, err := h.eng.Down(h.ctx(), DownRequest{Dir: h.dir}); err != nil {
+		t.Fatal(err)
+	}
+	if h.rt.calls[len(h.rt.calls)-1] != "remove-owned" {
+		t.Errorf("down without volumes must keep volumes: calls = %v", h.rt.calls)
 	}
 	st, _ = h.eng.Status(h.ctx(), StatusRequest{Dir: h.dir})
 	if st.Services[0].State != StateNotCreated {

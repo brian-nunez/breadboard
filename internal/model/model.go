@@ -23,8 +23,8 @@ const (
 
 // Defaults for app services.
 const (
-	DefaultAppMemory     = "512m"
-	DefaultAppCPUs       = "0.5"
+	DefaultAppMemory = "512m"
+	DefaultAppCPUs   = "0.5"
 	// Used when an app opts into an HTTP health check with `health`.
 	DefaultAppHealthPath = "/healthz"
 	DefaultAppHealthPort = 8080

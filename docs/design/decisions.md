@@ -16,7 +16,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-006 | 2026-11-14 | Name: Breadboard; CLI `bb`. |
 | D-007 | 2026-11-14 | Starters start with Go, targeting Go 1.27.4. The engine also pins toolchain go1.27.4. |
 | D-008 | 2026-11-14 | Default starter libraries: `franz-go`, `pgx/v5`, `go-redis/v9`, `hashicorp/consul/api`. Users may install anything else. → [ADR-0006](../adr/README.md) |
-| D-009 | 2026-11-14 | Engine YAML dependency: `go.yaml.in/yaml/v3`. → [ADR-0007](../adr/README.md) |
+| D-009 | 2026-11-14 | Engine YAML dependency: `go.yaml.in/yaml/v3`. → [ADR-0011](../adr/README.md) (carried forward from ADR-0007) |
 | D-010 | 2026-11-14 | TLS on by default for every container-to-container hop. Plaintext requires an explicit, reasoned choice (supports proxy/relay termination practice). → [ADR-0005](../adr/README.md) |
 | D-011 | 2026-11-14 | Breadboard generates a local CA; all containers trust it. Services are addressed as `<service>.<domain>` via Docker network aliases. → [ADR-0005](../adr/README.md) |
 | D-012 | 2026-11-14 | Domain defaults to `bb.internal` and is configurable. → [ADR-0005](../adr/README.md) |
@@ -25,7 +25,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-015 | 2026-11-14 | Generated secrets are materialized inline in compose or into a `.env`; exporters transform them into their target's medium. Storage location: see D-026. |
 | D-016 | 2026-11-14 | ~~CLI on the host; UI and MCP in containers.~~ Superseded by D-024. |
 | D-017 | 2026-11-14 | Exporter targets: Kubernetes, Ansible, Terraform (AWS, GCP, Cloudflare). Azure and Stripe dropped. → [ADR-0009](../adr/README.md) |
-| D-018 | 2026-11-14 | Breadboard internals use Brian's bkit modules where they fit: `settings`, `gate` now; `stash`, `rdb`, `objex` in the UI phase. Mapping in [`architecture.md`](architecture.md#internal-libraries-bkit). → [ADR-0007](../adr/README.md) |
+| D-018 | 2026-11-14 | Breadboard internals use Brian's bkit modules where they fit: `settings`, `gate` now; `stash`, `rdb`, `objex` in the UI phase. Mapping in [`architecture.md`](architecture.md#internal-libraries-bkit). → [ADR-0011](../adr/README.md) (carried forward from ADR-0007) |
 | D-019 | 2026-11-14 | Module path and repository: `github.com/brian-nunez/breadboard` (`git@github.com:brian-nunez/breadboard.git`). |
 | D-020 | 2026-11-14 | ~~SQLite state DB schema.~~ Superseded by D-025. |
 | D-021 | 2026-11-14 | ~~SQLite state DB as source of truth, mounted into containers.~~ Superseded by D-025. |
@@ -39,6 +39,21 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-029 | 2026-11-14 | S3 starter library: `aws-sdk-go-v2`. Starter libraries default to the most popular SDK in the ecosystem. → [ADR-0006](../adr/README.md) |
 | D-030 | 2026-11-14 | At Phase 1 kickoff: set `origin` to `git@github.com:brian-nunez/breadboard.git`, commit the design docs to `main`, push; build Phase 1 on a feature branch with a pull request. (Former Q-03.) |
 | D-031 | 2026-11-14 | Web UI design v1 accepted: read-only, calm, minimal copy, no alerts; commands instead of action buttons; Kafka overview and starter page are the templates for all tech and starter pages. Design in [`ui/`](ui/README.md). → [ADR-0008](../adr/README.md) |
+| D-032 | 2026-11-15 | Phase 1 image pins: `apache/kafka:4.3.2`, `postgres:18.7-alpine3.24`, `redis:8.10.3-alpine3.23`, `hashicorp/consul:1.22.7`; starters build on `golang:1.27.4-alpine3.24` and `alpine:3.24.4`. The catalog's Go code stays the source of truth for versions. |
+| D-033 | 2026-11-15 | Plaintext segments: an `internal` compose network `plain-<target>` with a `/24` from `10.213.0.0/16` (skipping subnets Docker already uses), recorded in `.bb/state.json`; the target sits at `.10` with alias `<target>.plain.<domain>`. Entries bind their plaintext listener to that address or limit it to that subnet. |
+| D-034 | 2026-11-15 | Redis has no plaintext listener in v1, because Redis cannot bind one port to a segment-only address; validation rejects `tls.mode: off` toward it. Plaintext Redis comes with terminating proxies (Phase 5). |
+| D-035 | 2026-11-15 | App runtime conventions: `docker-compose.yml` runs apps from their `dev` stage; `docker-compose.dev.yml` bind-mounts source at `/src` and adds Go cache volumes; apps default to `512m`/`0.5` cpus. ~~Default `/healthz` check on port 8080.~~ Health default superseded by D-042. |
+| D-036 | 2026-11-15 | `kafka/producer-consumer` uses `github.com/twmb/franz-go v1.22.3` plus its admin module `github.com/twmb/franz-go/pkg/kadm v1.20.0` (part of the franz-go project under D-008). Starter template files all end in `.tmpl` so the engine module never compiles them. |
+| D-037 | 2026-11-15 | Generated passwords are 32 base32 characters (`crypto/rand.Text`, 160 bits): safe in URLs, shells, and compose files without escaping. Env variables from a second service of the same type are prefixed with that service's name. Dotenv secret variables are `<SERVICE>__<KEY>` (double underscore), so names never collide. |
+| D-038 | 2026-11-15 | The `domain` setting must end in a special-use suffix (`.internal`, `.test`, `.localhost`, `.home.arpa`), so the name-constrained CA can never sign for a real site. |
+| D-039 | 2026-11-15 | Every Docker resource carries `breadboard.experiment-id`. `bb up`/`bb down` refuse to act when resources labeled with the same experiment name belong to another id (another directory), and subnet allocation treats only the experiment's own networks as reusable. |
+| D-040 | 2026-11-15 | Each service carries `breadboard.config-hash` over its mounted certificates and configuration, so compose recreates the container when they change (for example, a reissued leaf). |
+| D-041 | 2026-11-15 | Consul: server RPC requires TLS client certificates, LAN gossip is encrypted with a generated key, and DNS, gRPC, and WAN gossip are disabled, so no unencrypted port is reachable outside a private segment. |
+| D-042 | 2026-11-15 | Starters are the bare minimum: one `main.go` per app using the official library directly, with no helper packages or health code. App containers get a default health check that the main process is running; an HTTP check is opt-in with `health` in `experiment.yaml`. (Brian's direction.) |
+| D-043 | 2026-11-15 | Where bkit has no matching module, internals use the standard library; any other direct dependency of `bb`, including starter client libraries, needs Brian's approval and its own row here. Supersedes the client-library fallback in ADR-0007. (Brian's direction.) → [ADR-0011](../adr/README.md) |
+| D-044 | 2026-11-15 | The install CA has its own lock, `BB_HOME/ca/lock`, held from loading the CA until any replacement is saved; callers wait for it rather than fail. A CA key that does not match its certificate is replaced. |
+| D-045 | 2026-11-15 | `bb down` also removes networks, and with `--volumes` volumes, labeled with the experiment's id, so resources of services or segments removed since an earlier `bb up` do not outlive the experiment. Matching the id, not the name, leaves a same-named experiment in another directory alone. |
+| D-046 | 2026-11-15 | The shared Go cache volumes mount with `volume.nocopy`, so Docker never copies the image's module cache into them. Apps start together, and concurrent copies into one new volume failed with `mkdir ...: file exists`. Go fills the caches itself on first start. |
 
 ## Open questions
 

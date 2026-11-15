@@ -1,0 +1,76 @@
+# Experiment spec (`experiment.yaml`)
+
+`experiment.yaml` is the **source of truth** for an experiment. The CLI, UI, and MCP server all read and edit this file; edits go through a YAML node tree so comments and ordering survive.
+
+The spec holds **intent only**. It never contains secrets, certificates, or generated values, so it is safe to commit. Everything omitted takes a catalog default.
+
+## Example
+
+```yaml
+version: 1
+name: kafka-lab
+
+services:                    # infra services, from the catalog
+  kafka:
+    type: kafka
+  postgres:
+    type: postgres
+    resources:               # optional; overrides catalog defaults
+      memory: 512m
+      cpus: 0.5
+
+apps:                        # user code; one compose service each
+  producer:
+    path: ./orders           # directory containing the Dockerfile
+    command: [go, run, ./cmd/producer]
+    uses: [kafka]
+  consumer:
+    path: ./orders
+    command: [go, run, ./cmd/consumer]
+    uses: [kafka, postgres]
+    ports:                   # optional; published on 127.0.0.1 only
+      - 8080
+```
+
+## Fields
+
+| Field | Required | Notes |
+|---|---|---|
+| `version` | yes | Schema version. Currently `1`. Older versions load; `bb migrate` rewrites the file to the current one; a newer version is refused. |
+| `name` | yes | Lowercase DNS label (`[a-z0-9-]`, ≤ 40 chars). Becomes the compose project `bb-<name>` and part of each service identity. |
+| `services.<name>.type` | yes | A catalog entry id. The map key is the service name and its DNS label. |
+| `services.<name>.resources` | no | `memory` (Docker size string), `cpus` (decimal). |
+| `services.<name>.config` | no | Type-specific options defined by the catalog entry (e.g. Postgres database name). Validated by the entry. |
+| `apps.<name>.path` | yes | Relative to the spec file. Must contain a `Dockerfile` with a `dev` stage. |
+| `apps.<name>.command` | no | Overrides the image command. |
+| `apps.<name>.uses` | no | Services this app connects to. Each entry creates an edge, injects that service's env contract, and adds `depends_on: service_healthy`. |
+| `apps.<name>.ports` | no | Container ports to publish on `127.0.0.1`. |
+| `apps.<name>.health` | no | Override the default `/healthz` check (path and port). |
+| `apps.<name>.resources` | no | As for services. |
+
+Service and app names share one namespace and must be unique DNS labels.
+
+## `uses` entries and TLS overrides
+
+A `uses` entry is a service name (short form) or an object (long form). The long form is how an edge deviates from the TLS default; the rules live in [`security.md`](security.md).
+
+```yaml
+uses:
+  - kafka
+  - service: postgres
+    tls:
+      mode: off
+      reason: practice TLS termination at a pooler
+```
+
+Reserved for later phases, rejected by v1 validation: `tls.clientAuth` (mTLS), `tls.ca` (multiple CAs), infra-to-infra `upstream` edges for proxies.
+
+## Validation rules
+
+Validation fails with every violation listed, each with its YAML path:
+
+- Unknown top-level or nested keys are errors (catches typos).
+- `type` must exist in the catalog; `config` must satisfy the entry's schema.
+- Every `uses` target must exist.
+- `tls.mode: off` requires a non-empty `reason`.
+- Reserved fields are rejected with a message naming the phase that introduces them.

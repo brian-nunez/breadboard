@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+<defs>
+<linearGradient id="tile" x2="1" y2="1"><stop stop-color="#faf0da"/><stop offset="1" stop-color="#c8b99b"/></linearGradient>
+<linearGradient id="board" x2="0.8" y2="1"><stop stop-color="#414c45"/><stop offset="1" stop-color="#202e29"/></linearGradient>
+<linearGradient id="red" x2="0.8" y2="1"><stop stop-color="#f39a76"/><stop offset="1" stop-color="#ae4d39"/></linearGradient>
+<linearGradient id="sage" x2="1" y2="1"><stop stop-color="#c0d5ac"/><stop offset="1" stop-color="#6c9379"/></linearGradient>
+<linearGradient id="gold" x2="1" y2="1"><stop stop-color="#ffe39a"/><stop offset="1" stop-color="#dea13d"/></linearGradient>
+<filter id="shadow" x="-40%" y="-40%" width="180%" height="200%"><feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#25271c" flood-opacity=".3"/></filter>
+<filter id="soft"><feGaussianBlur stdDeviation="18"/></filter>
+<pattern id="holes" width="42" height="42" patternUnits="userSpaceOnUse"><circle cx="21" cy="21" r="6" fill="#111e19"/><path d="M16 24a6 6 0 0 0 10 0" stroke="#718074" stroke-opacity=".45" stroke-width="2"/></pattern>
+</defs>
+<rect x="24" y="24" width="976" height="976" rx="222" fill="url(#tile)"/>
+<rect x="25" y="25" width="974" height="974" rx="221" stroke="#fff9e9" stroke-width="3"/>
+<ellipse cx="529" cy="799" rx="321" ry="66" fill="#574f3b" opacity=".2" filter="url(#soft)"/>
+<!-- A rounded graphite breadboard, with its front edge visible. -->
+<g filter="url(#shadow)">
+<path d="M158 397Q158 357 202 350L770 306Q826 302 845 350L894 699Q903 753 850 766L276 855Q222 863 211 811Z" fill="#192821"/>
+<path d="M153 366Q149 326 199 322L767 280Q820 276 833 322L887 664Q896 714 846 724L270 813Q219 821 210 773Z" fill="url(#board)" stroke="#687365" stroke-width="3"/>
+<path d="M183 366L790 321L852 680L249 773Z" fill="url(#holes)"/>
+<path d="M242 747L837 661" stroke="#a3ae92" stroke-opacity=".3" stroke-width="3"/>
+</g>
+<!-- Copper contacts under the modules. -->
+<g stroke="#c9af74" stroke-width="12" stroke-linecap="round"><path d="M291 494v49m48-42v49m48-42v49M612 442v47m47-44v47m47-44v47M534 671v42m46-47v42m46-47v42"/></g>
+<!-- Terracotta stacked storage module. -->
+<g filter="url(#shadow)">
+<path d="M251 340v139c0 26 46 47 103 47s103-21 103-47V340" fill="url(#red)"/>
+<ellipse cx="354" cy="340" rx="103" ry="46" fill="#f4aa87" stroke="#ffc4a0" stroke-width="3"/>
+<path d="M252 390c24 40 175 47 204-1M252 438c26 42 176 46 204-1" stroke="#8e4232" stroke-width="8"/>
+<path d="M264 389c35 31 145 32 179 3M266 438c35 30 140 31 177 4" stroke="#f3ac87" stroke-width="3"/>
+<ellipse cx="354" cy="337" rx="68" ry="23" fill="#e18a68" opacity=".65"/>
+</g>
+<!-- Sage hexagonal compute module. -->
+<g filter="url(#shadow)">
+<path d="M569 330L657 283L745 319V424L660 474L569 436Z" fill="#4d7460"/>
+<path d="M569 330L657 283L745 319L661 372Z" fill="url(#sage)" stroke="#d4e4bf" stroke-width="3" stroke-linejoin="round"/>
+<path d="M661 372V474L745 424V319" fill="#739c7f"/>
+<path d="M598 331L657 300L715 322L660 355Z" fill="#b4cfa7"/>
+</g>
+<!-- One vivid ceramic module anchors the foreground. -->
+<g filter="url(#shadow)"><path d="M460 566Q456 546 480 541L614 519Q639 515 646 540L671 640Q676 662 653 668L516 695Q490 700 485 674Z" fill="#b48232"/>
+<path d="M456 543Q451 522 476 517L610 495Q635 491 642 516L665 610Q671 633 647 638L510 665Q485 670 480 646Z" fill="url(#gold)" stroke="#ffe9ac" stroke-width="3"/>
+<rect x="513" y="543" width="82" height="59" rx="15" transform="rotate(-10 513 543)" fill="#f7cc70" stroke="#bd8934" stroke-opacity=".5" stroke-width="3"/>
+</g>
+<!-- Flexible jumper cables with dark sockets and specular edges. -->
+<g stroke-linecap="round"><path d="M423 373C468 251 526 257 598 331" stroke="#1a2821" stroke-width="27"/><path d="M423 367C468 245 526 251 598 325" stroke="#dfb465" stroke-width="19"/><path d="M426 363C470 253 522 254 590 318" stroke="#ffe2a0" stroke-width="4"/>
+<path d="M714 407C822 457 797 578 646 585" stroke="#18251f" stroke-width="27"/><path d="M714 401C822 451 797 572 646 579" stroke="#ee8058" stroke-width="19"/><path d="M718 397C814 446 792 560 654 573" stroke="#ffb38a" stroke-width="4"/></g>
+</svg>

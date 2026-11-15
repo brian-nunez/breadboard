@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+<defs>
+ <linearGradient id="tile" x1="180" y1="70" x2="840" y2="980" gradientUnits="userSpaceOnUse"><stop stop-color="#6366F1"/><stop offset=".48" stop-color="#37348E"/><stop offset="1" stop-color="#0F172A"/></linearGradient>
+ <linearGradient id="ceramic" x1="300" y1="220" x2="730" y2="820" gradientUnits="userSpaceOnUse"><stop stop-color="#FFFFFF"/><stop offset=".5" stop-color="#E8EDF8"/><stop offset="1" stop-color="#A8B5D2"/></linearGradient>
+ <linearGradient id="wire" x1="350" y1="370" x2="680" y2="640" gradientUnits="userSpaceOnUse"><stop stop-color="#A7A3FF"/><stop offset=".45" stop-color="#6366F1"/><stop offset="1" stop-color="#3930A8"/></linearGradient>
+ <linearGradient id="amber" x1="600" y1="400" x2="600" y2="690" gradientUnits="userSpaceOnUse"><stop stop-color="#FFE7A5"/><stop offset=".4" stop-color="#FFBF55"/><stop offset="1" stop-color="#ED852C"/></linearGradient>
+ <radialGradient id="light" cx="0" cy="0" r="1" gradientTransform="translate(300 100) rotate(65) scale(760 690)" gradientUnits="userSpaceOnUse"><stop stop-color="#B9B7FF" stop-opacity=".35"/><stop offset="1" stop-color="#B9B7FF" stop-opacity="0"/></radialGradient>
+ <filter id="shadow" x="-40%" y="-40%" width="180%" height="190%"><feDropShadow dx="0" dy="30" stdDeviation="24" flood-color="#060B23" flood-opacity=".5"/></filter>
+ <filter id="contact" x="-40%" y="-40%" width="180%" height="190%"><feDropShadow dx="0" dy="12" stdDeviation="7" flood-color="#192047" flood-opacity=".5"/></filter>
+ <g id="hole"><circle cy="2" r="13" fill="#FFF" fill-opacity=".8"/><circle r="12" fill="#8693B1"/><circle cy="-2" r="9" fill="#26314F"/><path d="M-5-4h10" stroke="#101A31" stroke-width="3" stroke-linecap="round"/></g>
+</defs>
+<rect x="32" y="32" width="960" height="960" rx="218" fill="url(#tile)"/>
+<rect x="32" y="32" width="960" height="960" rx="218" fill="url(#light)"/>
+<rect x="34" y="34" width="956" height="956" rx="216" stroke="#DAD9FF" stroke-opacity=".3" stroke-width="3"/>
+<g transform="rotate(-9 512 512)">
+ <rect x="221" y="200" width="582" height="646" rx="86" fill="#7D8BAD" filter="url(#shadow)"/>
+ <rect x="221" y="184" width="582" height="646" rx="86" fill="url(#ceramic)"/>
+ <rect x="230" y="193" width="564" height="628" rx="78" stroke="white" stroke-opacity=".65" stroke-width="3"/>
+ <rect x="493" y="254" width="38" height="506" rx="19" fill="#95A3BF" fill-opacity=".45"/>
+ <path d="M503 271v471" stroke="#667796" stroke-opacity=".4" stroke-width="3" stroke-linecap="round"/>
+<use href="#hole" x="303" y="292"/>
+<use href="#hole" x="375" y="292"/>
+<use href="#hole" x="447" y="292"/>
+<use href="#hole" x="577" y="292"/>
+<use href="#hole" x="649" y="292"/>
+<use href="#hole" x="721" y="292"/>
+<use href="#hole" x="303" y="364"/>
+<use href="#hole" x="375" y="364"/>
+<use href="#hole" x="447" y="364"/>
+<use href="#hole" x="577" y="364"/>
+<use href="#hole" x="649" y="364"/>
+<use href="#hole" x="721" y="364"/>
+<use href="#hole" x="303" y="436"/>
+<use href="#hole" x="375" y="436"/>
+<use href="#hole" x="447" y="436"/>
+<use href="#hole" x="577" y="436"/>
+<use href="#hole" x="649" y="436"/>
+<use href="#hole" x="721" y="436"/>
+<use href="#hole" x="303" y="508"/>
+<use href="#hole" x="375" y="508"/>
+<use href="#hole" x="447" y="508"/>
+<use href="#hole" x="577" y="508"/>
+<use href="#hole" x="649" y="508"/>
+<use href="#hole" x="721" y="508"/>
+<use href="#hole" x="303" y="580"/>
+<use href="#hole" x="375" y="580"/>
+<use href="#hole" x="447" y="580"/>
+<use href="#hole" x="577" y="580"/>
+<use href="#hole" x="649" y="580"/>
+<use href="#hole" x="721" y="580"/>
+<use href="#hole" x="303" y="652"/>
+<use href="#hole" x="375" y="652"/>
+<use href="#hole" x="447" y="652"/>
+<use href="#hole" x="577" y="652"/>
+<use href="#hole" x="649" y="652"/>
+<use href="#hole" x="721" y="652"/>
+<use href="#hole" x="303" y="724"/>
+<use href="#hole" x="375" y="724"/>
+<use href="#hole" x="447" y="724"/>
+<use href="#hole" x="577" y="724"/>
+<use href="#hole" x="649" y="724"/>
+<use href="#hole" x="721" y="724"/>
+<g filter="url(#contact)" stroke-linecap="round" stroke-linejoin="round">
+ <path d="M375 580V412c0-27 21-48 48-48h106c27 0 48 21 48 48v24" stroke="#383184" stroke-width="39"/>
+ <path d="M375 580V406c0-27 21-48 48-48h106c27 0 48 21 48 48v30" stroke="url(#wire)" stroke-width="31"/>
+ <path d="M369 563V406c0-24 19-43 43-43h117c22 0 41 17 43 39" stroke="#D9D6FF" stroke-opacity=".65" stroke-width="6"/>
+ <path d="M649 436v168c0 27-21 48-48 48H495c-27 0-48-21-48-48v-24" stroke="#AE632C" stroke-width="39"/>
+ <path d="M649 436v162c0 27-21 48-48 48H495c-27 0-48-21-48-48v-18" stroke="url(#amber)" stroke-width="31"/>
+ <path d="M643 448v148c0 24-19 43-43 43H497" stroke="#FFF1C7" stroke-opacity=".8" stroke-width="6"/>
+ </g>
+</g>
+</svg>

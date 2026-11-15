@@ -1,0 +1,24 @@
+# Normalize line endings; LF in the repository and the working tree.
+* text=auto eol=lf
+
+# Windows scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets: no diff, no merge, no normalization.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.figcraft binary
+
+# Generated output that is committed (go install runs no generators).
+*_templ.go linguist-generated
+go.sum linguist-generated

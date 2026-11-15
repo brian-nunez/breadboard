@@ -1,90 +1,38 @@
-// Command consumer reads orders as a member of a consumer group.
-//
-// Members of one group split the topic's partitions between them. Run a
-// second consumer with the same group and Kafka rebalances: each member gets
-// some of the partitions. Run it with a different group and it reads every
-// record independently.
+// Command consumer reads the "orders" topic as a member of a consumer group.
 package main
 
 import (
 	"context"
-	"errors"
-	"log/slog"
+	"crypto/tls"
+	"log"
 	"os"
-	"os/signal"
-	"syscall"
+	"strings"
 
 	"github.com/twmb/franz-go/pkg/kgo"
-
-	"producer-consumer/internal/health"
-	"producer-consumer/internal/kafkaenv"
 )
 
 func main() {
-	if err := run(); err != nil {
-		slog.Error("consumer failed", "err", err)
-		os.Exit(1)
-	}
-}
-
-func run() error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	hc := health.Start()
-	defer hc.Stop()
-
-	opts, err := kafkaenv.Options()
-	if err != nil {
-		return err
-	}
-	group := os.Getenv("CONSUMER_GROUP")
-	if group == "" {
-		group = "orders-consumers"
-	}
-	client, err := kgo.NewClient(append(opts,
-		kgo.ConsumerGroup(group),
-		kgo.ConsumeTopics(kafkaenv.Topic()),
-		// A brand-new group has no committed offsets. Start from the oldest
-		// record instead of only new ones, so nothing produced before this
-		// consumer joined is skipped.
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(strings.Split(os.Getenv("KAFKA_BROKERS"), ",")...),
+		kgo.DialTLSConfig(new(tls.Config)),
+		// Consumers in the same group split the topic's partitions between them.
+		kgo.ConsumerGroup("orders-consumers"),
+		kgo.ConsumeTopics("orders"),
+		// A new group starts from the oldest record instead of only new ones.
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
-		// Commit only records the code has marked as processed. If the
-		// consumer crashes mid-batch, unmarked records are delivered again:
-		// at-least-once delivery, so processing must tolerate duplicates.
-		kgo.AutoCommitMarks(),
-		// Before partitions move to another member during a rebalance,
-		// commit what this member finished so the next owner resumes there.
-		kgo.OnPartitionsRevoked(func(ctx context.Context, cl *kgo.Client, _ map[string][]int32) {
-			if err := cl.CommitMarkedOffsets(ctx); err != nil {
-				slog.Warn("commit on revoke failed", "err", err)
-			}
-		}),
-	)...)
+	)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
 	defer client.Close()
 
-	if err := client.Ping(ctx); err != nil {
-		return err
-	}
-	hc.SetReady(true)
-
 	for {
-		fetches := client.PollFetches(ctx)
-		if ctx.Err() != nil || fetches.IsClientClosed() {
-			return nil
-		}
-		fetches.EachError(func(topic string, partition int32, err error) {
-			if !errors.Is(err, context.Canceled) {
-				slog.Warn("fetch error", "topic", topic, "partition", partition, "err", err)
-			}
-		})
+		fetches := client.PollFetches(context.Background())
+		fetches.EachError(func(topic string, partition int32, err error) { log.Print(err) })
+		// Offsets are committed automatically every few seconds. A crash before a
+		// commit means those records are read again: at-least-once delivery.
 		fetches.EachRecord(func(r *kgo.Record) {
-			// Process the record, then mark it. Marked offsets are committed
-			// in the background (AutoCommitMarks) and on rebalance.
-			slog.Info("consumed", "key", string(r.Key), "partition", r.Partition, "offset", r.Offset, "value", string(r.Value))
-			client.MarkCommitRecords(r)
+			log.Printf("consumed key=%s partition=%d offset=%d value=%s", r.Key, r.Partition, r.Offset, r.Value)
 		})
 	}
 }

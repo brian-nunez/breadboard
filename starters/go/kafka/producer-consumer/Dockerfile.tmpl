@@ -1,29 +1,24 @@
-# syntax=docker/dockerfile:1
-
-# dev: what `bb up` runs. Source is copied so the image works on its own; the
-# dev compose file also bind-mounts this directory over /src for live edits.
+# dev: what bb up runs, with your source mounted for live edits.
 FROM golang:{{.GoImage}} AS dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-CMD ["go", "run", "./cmd/producer"]
 
-# build: compiles one app. Choose it with --build-arg APP=producer|consumer.
 FROM golang:{{.GoImage}} AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG APP=producer
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/${APP}
+RUN CGO_ENABLED=0 go build -o /out/app ./cmd/${APP}
 
-# prod: minimal non-root image.
-#   docker build --target prod --build-arg APP=consumer -t orders-consumer .
+# prod: a small non-root image for one app.
+#   docker build --target prod --build-arg APP=consumer .
 FROM alpine:{{.AlpineVersion}} AS prod
 LABEL maintainer="Your Name <you@example.com>" \
       version="0.1.0" \
-      description="Kafka producer and consumer from the Breadboard kafka/producer-consumer starter" \
+      description="Kafka producer and consumer" \
       platform="linux"
 RUN adduser -D -u 10001 app
 COPY --from=build /out/app /usr/local/bin/app

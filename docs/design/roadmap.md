@@ -42,18 +42,19 @@ bb logs consumer -f
 
 **Completion criteria:**
 
-- [ ] `gofmt -l .` is empty; `go vet ./...` passes; `go test ./...` passes.
-- [ ] Every core operation is tested through the core API with a fake Docker runtime; no core test shells out or prints.
-- [ ] `internal/core` and everything below it contain no `fmt.Print*`, `os.Exit`, `os.Stdin`, or `flag` usage (checked by a test or lint rule).
-- [ ] Golden tests cover the compose materializer for every catalog entry, for both secret modes, and for a plaintext edge.
-- [ ] Unit tests prove: CA name constraints reject an out-of-domain leaf; leaf SANs, identity URI, and EKUs are correct; reissue happens below the 30-day threshold; validation reports every listed rule with its YAML path.
-- [ ] `Init` creates `.bb/` (`0700`, self-ignoring `.gitignore`), `secrets.json` and keys at `0600`, and `BB_HOME` with the CA when missing.
-- [ ] Tests prove: writes are atomic (no partial file after an interrupted write); a state file with a newer `formatVersion` is refused; a second holder of the operation lock gets `ErrBusy`; `AddService`/`RemoveService` preserve comments in `experiment.yaml`.
-- [ ] `go install` of the module path into an empty `GOPATH` produces a working `bb`, and `bb version` reports the module version.
-- [ ] The rendered starter passes `go build ./...` and `go vet ./...`.
-- [ ] Integration test (`-tags integration`, real Docker): `Up` all four entries → each reports healthy over TLS → producer sends N messages → consumer receives exactly N → `Down` with volumes leaves no containers, networks, or volumes labeled for the experiment.
-- [ ] The exported compose stack starts with plain `docker compose` and reaches healthy without `bb`.
-- [ ] Docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated.
+- [x] `gofmt -l .` is empty; `go vet ./...` passes; `go test ./...` passes.
+- [x] Every core operation is tested through the core API with a fake Docker runtime; no core test shells out or prints.
+- [x] `internal/core` and everything below it contain no `fmt.Print*`, `os.Exit`, `os.Stdin`, or `flag` usage (checked by a test or lint rule).
+- [x] Golden tests cover the compose materializer for every catalog entry, for both secret modes, and for a plaintext edge.
+- [x] Unit tests prove: CA name constraints reject an out-of-domain leaf; leaf SANs, identity URI, and EKUs are correct; reissue happens below the 30-day threshold; validation reports every listed rule with its YAML path.
+- [x] `Init` creates `.bb/` (`0700`, self-ignoring `.gitignore`), `secrets.json` and keys at `0600`, and `BB_HOME` with the CA when missing.
+- [x] Tests prove: writes are atomic (no partial file after an interrupted write); a state file with a newer `formatVersion` is refused; a second holder of the operation lock gets `ErrBusy`; `AddService`/`RemoveService` preserve comments in `experiment.yaml`.
+- [x] `go install` of the module path into an empty `GOPATH` produces a working `bb`, and `bb version` reports the module version. (Verified through a local module proxy serving the branch as `v0.1.0-phase1test`; repeat against the real tag at release.)
+- [x] The rendered starter passes `go build ./...` and `go vet ./...`.
+- [x] Integration test (`go test -tags integration ./internal/core/`, real Docker): `Up` all four entries → each reports healthy over TLS → producer sends N messages → consumer receives exactly N → `Down` with volumes leaves no containers, networks, or volumes labeled for the experiment.
+- [x] The exported compose stack starts with plain `docker compose` and reaches healthy without `bb`.
+- [x] Docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated.
+- [x] Integration test for plaintext segments: a client on a plaintext edge reaches the Postgres, Kafka, and Consul plaintext listeners; a TLS-only client on the shared network cannot.
 
 ## Phase 2: Starters
 

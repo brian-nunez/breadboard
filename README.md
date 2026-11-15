@@ -17,7 +17,7 @@
   <img alt="Written in Go" src="https://img.shields.io/badge/written%20in-Go-4F46E5?style=flat-square&logo=go&logoColor=white">
   <img alt="Runs on macOS and Linux" src="https://img.shields.io/badge/runs%20on-macOS%20%C2%B7%20Linux-6366F1?style=flat-square">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-4F46E5?style=flat-square">
-  <img alt="Status: design" src="https://img.shields.io/badge/status-design-6366F1?style=flat-square">
+  <img alt="Status: phase 1" src="https://img.shields.io/badge/status-phase%201-6366F1?style=flat-square">
   <br>
   <a href="https://www.linkedin.com/in/brianjnunez/"><img alt="LinkedIn: Brian Nunez" src="https://img.shields.io/badge/LinkedIn-Brian%20Nunez-0A66C2?style=flat-square&logo=linkedin&logoColor=white"></a>
   <img alt="Discord: .derthon" src="https://img.shields.io/badge/Discord-.derthon-5865F2?style=flat-square&logo=discord&logoColor=white">
@@ -38,7 +38,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Breadboard is in design.** The architecture and UI are settled; Phase 1 (the core engine and CLI) is next. Nothing is installable yet.
+> **Breadboard is early.** Phase 1 (the core engine and CLI, four services, the first starter, Compose export) works; the web UI, MCP server, and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
 
 <p align="center">
   <a href="#why-breadboard">Why Breadboard</a> ·
@@ -63,10 +63,11 @@
 
 An experiment is a directory with an `experiment.yaml`. Breadboard resolves it against its catalog of services, generates certificates and secrets, writes a Compose project, and runs it on its own Docker network. Your app code runs as containers on that same network, addressed as `<service>.bb.internal`.
 
-The planned Phase 1 workflow (these commands do not exist yet):
+The Phase 1 workflow:
 
 ```sh
-go install github.com/brian-nunez/breadboard/bb@latest   # one binary: CLI, web UI and MCP server
+go install github.com/brian-nunez/breadboard/bb@latest   # one binary on your machine
+mkdir kafka-lab && cd kafka-lab
 bb init kafka-lab                                        # create experiment.yaml and .bb/
 bb add kafka                                             # add a real Kafka broker
 bb starter kafka/producer-consumer                       # write a Go producer and consumer

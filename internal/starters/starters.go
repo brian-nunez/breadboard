@@ -59,6 +59,19 @@ var all = []Starter{
 			{Name: "consumer", Command: []string{"go", "run", "./cmd/consumer"}, Uses: []string{"kafka"}},
 		},
 	},
+	{
+		ID:       "kafka/sink-to-postgres",
+		Title:    "Kafka sink to Postgres",
+		Summary:  "Consume, transform, write; idempotent inserts; at-least-once delivery; migrations.",
+		Language: "go",
+		Template: "go/kafka/sink-to-postgres",
+		Dir:      "sink-to-postgres",
+		Requires: []string{"kafka", "postgres"},
+		Apps: []App{
+			{Name: "sink-producer", Command: []string{"go", "run", "./cmd/sink-producer"}, Uses: []string{"kafka"}},
+			{Name: "sink", Command: []string{"go", "run", "./cmd/sink"}, Uses: []string{"kafka", "postgres"}},
+		},
+	},
 }
 
 // All returns every starter.

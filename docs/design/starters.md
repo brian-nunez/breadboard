@@ -40,6 +40,8 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 
 `kafka/producer-consumer` pins `github.com/twmb/franz-go v1.22.3` and its admin client module `github.com/twmb/franz-go/pkg/kadm v1.20.0`.
 
+`kafka/sink-to-postgres` pins the same franz-go modules and `github.com/jackc/pgx/v5 v5.13.0`. Its apps are `sink-producer` (JSON order events on `order-events`) and `sink` (creates the `orders` table, inserts with `ON CONFLICT DO NOTHING`, and commits offsets only after the write).
+
 ## Starter list
 
 | Id | Phase | Teaches |

@@ -1,0 +1,50 @@
+// Command sink-producer writes one order event per second to the "order-events" topic.
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/tls"
+	"encoding/json"
+	"log"
+	mrand "math/rand/v2"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
+)
+
+// Order is the event the sink stores. Its ID makes a redelivered event easy to spot.
+type Order struct {
+	ID          string `json:"id"`
+	Customer    string `json:"customer"`
+	AmountCents int    `json:"amount_cents"`
+}
+
+func main() {
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(strings.Split(os.Getenv("KAFKA_BROKERS"), ",")...),
+		kgo.DialTLSConfig(new(tls.Config)),
+		kgo.DefaultProduceTopic("order-events"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+	ctx := context.Background()
+	kadm.NewClient(client).CreateTopic(ctx, 3, 1, nil, "order-events")
+
+	for {
+		order := Order{ID: rand.Text(), Customer: []string{"ada", "grace", "linus"}[mrand.IntN(3)], AmountCents: 100 + mrand.IntN(9900)}
+		value, _ := json.Marshal(order)
+		rec := &kgo.Record{Key: []byte(order.ID), Value: value}
+		if err := client.ProduceSync(ctx, rec).FirstErr(); err != nil {
+			log.Print(err)
+		} else {
+			log.Printf("produced id=%s", order.ID)
+		}
+		time.Sleep(time.Second)
+	}
+}

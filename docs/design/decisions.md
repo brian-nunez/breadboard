@@ -56,6 +56,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-046 | 2026-11-15 | The shared Go cache volumes mount with `volume.nocopy`, so Docker never copies the image's module cache into them. Apps start together, and concurrent copies into one new volume failed with `mkdir ...: file exists`. Go fills the caches itself on first start. |
 | D-047 | 2026-11-15 | Starter app names are unique across all starters. Applying a starter whose app name is already used, other than by the same starter in the same directory, fails with `ErrExists` before anything is written, instead of skipping the app. |
 | D-048 | 2026-11-15 | Every app gets `TLS_CERT_FILE` and `TLS_KEY_FILE` pointing at its own certificate and key, so apps that serve TLS keep certificate paths out of code. |
+| D-049 | 2026-11-15 | Starters may use any popular official SDK for the service they teach without a separate approval; each pin is listed in `starters.md`. `bb`'s own dependencies still need approval (ADR-0011). (Brian's direction.) |
 
 ## Open questions
 

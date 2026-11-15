@@ -1,0 +1,38 @@
+// Command consumer reads the "orders" topic as a member of a consumer group.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"log"
+	"os"
+	"strings"
+
+	"github.com/twmb/franz-go/pkg/kgo"
+)
+
+func main() {
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(strings.Split(os.Getenv("KAFKA_BROKERS"), ",")...),
+		kgo.DialTLSConfig(new(tls.Config)),
+		// Consumers in the same group split the topic's partitions between them.
+		kgo.ConsumerGroup("orders-consumers"),
+		kgo.ConsumeTopics("orders"),
+		// A new group starts from the oldest record instead of only new ones.
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	for {
+		fetches := client.PollFetches(context.Background())
+		fetches.EachError(func(topic string, partition int32, err error) { log.Print(err) })
+		// Offsets are committed automatically every few seconds. A crash before a
+		// commit means those records are read again: at-least-once delivery.
+		fetches.EachRecord(func(r *kgo.Record) {
+			log.Printf("consumed key=%s partition=%d offset=%d value=%s", r.Key, r.Partition, r.Offset, r.Value)
+		})
+	}
+}

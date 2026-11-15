@@ -208,7 +208,7 @@ Breadboard's own internals use Brian's [bkit](https://github.com/brian-nunez/bki
 | Relational database | `rdb` + `rdb/drivers/postgres` | Postgres explorer in the UI. | 3 |
 | Object storage | `objex` + `objex/drivers/s3` | Bucket explorer for the S3 Compatible entry. | 3 |
 
-`experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3` (strict decoding to reject unknown keys, and node-level editing to preserve comments), which `settings` does not offer. Where bkit has no matching capability (Kafka admin, Consul catalog), internals use the same official client libraries the starters use.
+`experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3` (strict decoding to reject unknown keys, and node-level editing to preserve comments), which `settings` does not offer. Where bkit has no matching capability, the engine uses the standard library; any other direct dependency needs Brian's approval and a row in [`decisions.md`](decisions.md).
 
 ## Engineering conventions
 

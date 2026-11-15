@@ -1,0 +1,63 @@
+// Command cache-reader reads product prices through a Redis cache.
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"math/rand/v2"
+	"os"
+	"strconv"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
+)
+
+var products = []string{"apple", "bread", "coffee"}
+
+func main() {
+	ctx := context.Background()
+	db, err := pgx.Connect(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close(ctx)
+	opts, err := redis.ParseURL(os.Getenv("REDIS_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	cache := redis.NewClient(opts)
+
+	for {
+		id := products[rand.IntN(len(products))]
+		price, hit, err := read(ctx, db, cache, id)
+		switch {
+		case err != nil:
+			log.Print(err)
+		case hit:
+			log.Printf("hit id=%s price=%d", id, price)
+		default:
+			log.Printf("miss id=%s price=%d", id, price)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// read is cache-aside: try the cache, fall back to the database, then fill
+// the cache. The TTL bounds how long a missed invalidation can serve a stale price.
+func read(ctx context.Context, db *pgx.Conn, cache *redis.Client, id string) (price int, hit bool, err error) {
+	key := "product:" + id
+	cached, err := cache.Get(ctx, key).Result()
+	if err == nil {
+		price, err = strconv.Atoi(cached)
+		return price, true, err
+	}
+	if !errors.Is(err, redis.Nil) {
+		return 0, false, err
+	}
+	if err := db.QueryRow(ctx, `SELECT price_cents FROM products WHERE id = $1`, id).Scan(&price); err != nil {
+		return 0, false, err
+	}
+	return price, false, cache.Set(ctx, key, price, 30*time.Second).Err()
+}

@@ -72,6 +72,20 @@ var all = []Starter{
 			{Name: "sink", Command: []string{"go", "run", "./cmd/sink"}, Uses: []string{"kafka", "postgres"}},
 		},
 	},
+	{
+		ID:       "redis/cache-invalidation",
+		Title:    "Redis cache invalidation",
+		Summary:  "Cache-aside, invalidate-on-write via Kafka events, TTLs, stale reads.",
+		Language: "go",
+		Template: "go/redis/cache-invalidation",
+		Dir:      "cache-invalidation",
+		Requires: []string{"kafka", "postgres", "redis"},
+		Apps: []App{
+			{Name: "cache-writer", Command: []string{"go", "run", "./cmd/cache-writer"}, Uses: []string{"postgres", "kafka"}},
+			{Name: "cache-reader", Command: []string{"go", "run", "./cmd/cache-reader"}, Uses: []string{"postgres", "redis"}},
+			{Name: "cache-invalidator", Command: []string{"go", "run", "./cmd/cache-invalidator"}, Uses: []string{"kafka", "redis"}},
+		},
+	},
 }
 
 // All returns every starter.

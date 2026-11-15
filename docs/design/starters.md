@@ -42,6 +42,8 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 
 `kafka/sink-to-postgres` pins the same franz-go modules and `github.com/jackc/pgx/v5 v5.13.0`. Its apps are `sink-producer` (JSON order events on `order-events`) and `sink` (creates the `orders` table, inserts with `ON CONFLICT DO NOTHING`, and commits offsets only after the write).
 
+`redis/cache-invalidation` pins `github.com/redis/go-redis/v9 v9.23.0` with the same pgx and franz-go modules. Its apps are `cache-writer` (updates Postgres, then announces on `product-updates`), `cache-reader` (cache-aside with a 30-second TTL) and `cache-invalidator` (deletes the changed key).
+
 ## Starter list
 
 | Id | Phase | Teaches |

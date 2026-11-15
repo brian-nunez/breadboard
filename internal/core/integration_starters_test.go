@@ -112,3 +112,62 @@ func TestIntegrationSinkToPostgres(t *testing.T) {
 	}
 	t.Logf("produced %d orders; each stored exactly once across a sink crash", len(want))
 }
+
+// TestIntegrationCacheInvalidation proves invalidate-on-write: once the
+// writer stops, the reader serves every product's current price well before
+// the 30-second TTL could have expired a stale entry.
+func TestIntegrationCacheInvalidation(t *testing.T) {
+	eng, dir, name := starterLab(t, "cache", "redis/cache-invalidation")
+	updated := regexp.MustCompile(`updated id=(\S+)`)
+	read := regexp.MustCompile(`(?:hit|miss) id=(\S+ price=\d+)`)
+
+	invalidated := regexp.MustCompile(`invalidated id=(\S+)`)
+
+	// Healthy means the processes run; go run may still be compiling. Wait
+	// until the reader reads and the invalidator has caught up with a change.
+	eventually(t, 3*time.Minute, "the reader to read", func() bool {
+		return len(matches(logsOf(t, eng, dir, "cache-reader"), read)) > 0
+	})
+	eventually(t, 3*time.Minute, "the invalidator to invalidate", func() bool {
+		return len(matches(logsOf(t, eng, dir, "cache-invalidator"), invalidated)) > 0
+	})
+	n := len(matches(logsOf(t, eng, dir, "cache-writer"), updated))
+	eventually(t, time.Minute, "3 more price updates", func() bool {
+		return len(matches(logsOf(t, eng, dir, "cache-writer"), updated)) >= n+3
+	})
+	docker(t, "stop", containerOf(t, name, "cache-writer"))
+	stopped := time.Now()
+	truth := map[string]string{}
+	for _, row := range psql(t, name, "select id || '=' || price_cents from products") {
+		id, price, _ := strings.Cut(row, "=")
+		truth[id] = price
+	}
+	skip := len(logsOf(t, eng, dir, "cache-reader"))
+
+	// The latest read of every product must show its current price, within a
+	// window shorter than the TTL, so only invalidation can explain it.
+	t.Cleanup(func() {
+		if t.Failed() {
+			for _, app := range []string{"cache-writer", "cache-invalidator", "cache-reader"} {
+				lines := logsOf(t, eng, dir, app)
+				t.Logf("%s (last 15 lines):\n%s", app, strings.Join(lines[max(0, len(lines)-15):], "\n"))
+			}
+			t.Logf("database: %v", truth)
+		}
+	})
+	eventually(t, 12*time.Second, "the reader to serve current prices", func() bool {
+		lines := logsOf(t, eng, dir, "cache-reader")
+		latest := map[string]string{}
+		for _, m := range matches(lines[min(skip, len(lines)):], read) {
+			id, price, _ := strings.Cut(m, " price=")
+			latest[id] = price
+		}
+		for id, price := range truth {
+			if latest[id] != price {
+				return false
+			}
+		}
+		return true
+	})
+	t.Logf("reader matched the database %s after the last write", time.Since(stopped).Round(time.Second))
+}

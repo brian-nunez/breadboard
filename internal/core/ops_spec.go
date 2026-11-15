@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -392,8 +393,15 @@ func (e *Engine) ApplyStarter(ctx context.Context, req ApplyStarterRequest) (*Ap
 	}
 	for _, a := range st.Apps {
 		if doc.HasName(a.Name) {
-			res.ExistingApps = append(res.ExistingApps, a.Name)
-			continue
+			// Re-applying the same starter to the same directory keeps the
+			// app as the user left it. Any other owner of the name is a clash:
+			// failing here, before any file is written, beats silently
+			// skipping an app the starter's code expects to exist.
+			if existing, ok := p.spec.App(a.Name); ok && path.Clean(existing.Path) == path.Clean(res.Dir) {
+				res.ExistingApps = append(res.ExistingApps, a.Name)
+				continue
+			}
+			return nil, fmt.Errorf("starter %s needs an app named %q, but experiment.yaml already uses that name for something else; rename it there, then apply the starter again: %w", st.ID, a.Name, ErrExists)
 		}
 		app := spec.App{Name: a.Name, Path: res.Dir, Command: a.Command}
 		for _, typ := range a.Uses {

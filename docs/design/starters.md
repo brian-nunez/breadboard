@@ -17,6 +17,7 @@ A starter takes the user from intent to running code: it writes a small, working
 - **Comments teach the why.** Explain concepts (consumer groups, offsets, at-least-once delivery, why invalidation follows the write), not the syntax.
 - **Every starter README has two sections:** *Try this* (guided experiments) and *Break this* (failure drills: kill the broker, slow the consumer, exhaust memory).
 - **Idempotent apply.** Re-applying a starter never overwrites user-modified files; it reports conflicts instead.
+- **Unique app names.** App names are unique across every starter (a test enforces it), so several starters can share one experiment. Re-applying a starter to the same directory leaves its existing apps alone; if a name it needs belongs to anything else in `experiment.yaml`, `bb starter` fails before writing any file.
 
 ## Language and libraries
 

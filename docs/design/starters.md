@@ -9,9 +9,9 @@ A starter takes the user from intent to running code: it writes a small, working
 - **Configuration from env only.** Code reads the catalog env contract (`KAFKA_BROKERS`, `DATABASE_URL`, …). No Breadboard-specific config files.
 - **Runs without Breadboard.** The project builds and runs anywhere the env vars and a trust bundle exist.
 - **Containerised.** Each starter has a multi-stage `Dockerfile`:
-  - `dev` stage: `golang:<exact>-alpine`, source bind-mounted, named volume for the Go module cache, runs the app's `command`.
+  - `dev` stage: `golang:<exact>-alpine`, `WORKDIR /src`, dependencies downloaded, source copied so the image runs on its own. `bb up` builds it, runs the app's `command`, and bind-mounts the source over `/src` with named volumes for the Go module and build caches.
   - `prod` stage: minimal non-root final image, with labels `maintainer`, `version`, `description`, `platform`.
-- **Health.** Every long-running app serves `/healthz` on an internal port using `net/http`; its handler reflects real readiness (e.g. the Kafka client is connected).
+- **Health.** Every long-running app serves `/healthz` on `BB_HEALTH_PORT` (default 8080) using `net/http`; its handler reflects real readiness (e.g. the Kafka client is connected).
 - **TLS through the environment.** Clients use standard TLS configuration that verifies against `SSL_CERT_FILE`; comments explain each TLS setting.
 - **Comments teach the why.** Explain concepts (consumer groups, offsets, at-least-once delivery, why invalidation follows the write), not the syntax.
 - **Every starter README has two sections:** *Try this* (guided experiments) and *Break this* (failure drills: kill the broker, slow the consumer, exhaust memory).
@@ -32,7 +32,11 @@ A starter takes the user from intent to running code: it writes a small, working
 
 ## Shape
 
-A starter is one Go module; each app is a `cmd/<app>` entry, and each app service in the spec sets `command` to run its entry. Templates live in `starters/go/<area>/<name>/`, are embedded in the binary, and render with `text/template`.
+A starter is one Go module; each app is a `cmd/<app>` entry, and each app service in the spec sets `command` to run its entry. Templates live in `starters/go/<area>/<name>/`, are embedded in the binary, and render with `text/template`. Every template file ends in `.tmpl` (including `go.mod` and `go.sum`), so the Go tool never treats starter code as part of Breadboard's module.
+
+A starter declares the catalog types it needs; applying it adds any missing one (named after its type) and points each app's `uses` at the experiment's service of that type. The default target directory is the starter's name (`./producer-consumer`); `bb starter <id> --dir <path>` overrides it.
+
+`kafka/producer-consumer` pins `github.com/twmb/franz-go v1.22.3` and its admin client module `github.com/twmb/franz-go/pkg/kadm v1.20.0`.
 
 ## Starter list
 

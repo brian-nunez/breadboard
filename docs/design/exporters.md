@@ -11,15 +11,18 @@ Exporters turn an experiment into something that runs elsewhere. Each exporter c
 
 ## Compose (Phase 1)
 
-`bb export compose --out <dir> [--secrets inline|dotenv]` writes:
+`bb export compose [--out <dir>] [--secrets inline|dotenv]` writes (default directory `export/compose` in the project):
 
-- `docker-compose.yml`: infra and app services, health checks, limits, aliases, segments.
-- `docker-compose.dev.yml`: bind mounts and dev-stage builds.
-- `certs/`: CA certificate, leaf certificates and keys, trust bundle.
-- `.env` and `.gitignore` when `--secrets dotenv` is used.
-- `README.md`: how to run with plain `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`.
+- `docker-compose.yml`: infra and app services (built from their `dev` stage), health checks, limits, aliases, segments.
+- `docker-compose.dev.yml`: source bind mounts and Go cache volumes for app services.
+- `ca.pem`, `trust-bundle.pem`, `tls/<service>/`: the CA, the trust bundle, and each service's certificate and key.
+- `config/<service>/`: generated server configuration (Kafka properties, `pg_hba.conf`, Consul config).
+- `.env` (mode `0600`) when `--secrets dotenv` is used.
+- `.gitignore`: private keys always, plus `.env` in dotenv mode or `docker-compose.yml` in inline mode (it then holds secrets).
+- `README.md`: how to run with plain `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait`.
+- `.bb-export`: a marker. bb replaces a directory holding it on the next export and refuses to write into any other non-empty directory.
 
-Bind paths are relative to the export directory, so the stack is portable. Plaintext edges carry their `reason` as a comment.
+Bind paths are relative to the export directory, so the stack is portable. Plaintext edges carry their `reason` as a comment on the segment network and the client's environment. The export uses the same compose project name (`bb-<experiment>`) as `bb up`, so stop one before starting the other. Leaf certificates expire after 90 days; export again to renew them.
 
 ## Later targets
 

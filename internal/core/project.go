@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -135,19 +136,24 @@ func (e *Engine) settings(ctx context.Context) (config.Settings, error) {
 // ensureCA loads the install CA, creating it when missing, constrained to a
 // different domain, or too close to expiry to sign a full leaf.
 func (e *Engine) ensureCA(domain string) (ca *pki.CA, created bool, err error) {
-	if _, err := e.home.Ensure(); err != nil {
+	lock, err := e.home.LockCA("ca")
+	if err != nil {
 		return nil, false, err
 	}
+	defer lock.Release()
 	certPEM, keyPEM, ok, err := e.home.LoadCA(caName)
 	if err != nil {
 		return nil, false, err
 	}
 	if ok {
 		ca, err = pki.LoadCA(certPEM, keyPEM)
-		if err != nil {
+		switch {
+		case errors.Is(err, pki.ErrKeyMismatch):
+			// A torn pair from an interrupted write: replace it. Leaves
+			// signed by the old CA are reissued by reconcileCerts.
+		case err != nil:
 			return nil, false, fmt.Errorf("load CA from %s: %w", e.home.CADir(), err)
-		}
-		if ca.Usable(domain, e.now()) {
+		case ca.Usable(domain, e.now()):
 			return ca, false, nil
 		}
 	}

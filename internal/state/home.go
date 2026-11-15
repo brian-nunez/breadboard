@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // HomeEnv overrides the install home.
@@ -53,6 +54,19 @@ func (h Home) Ensure() (created bool, err error) {
 		}
 	}
 	return created, nil
+}
+
+// caLockTimeout bounds how long LockCA waits for another bb process.
+const caLockTimeout = 30 * time.Second
+
+// LockCA takes the install-wide CA lock, waiting while another bb process
+// holds it. Every project shares the CA, so project locks cannot protect it:
+// hold this lock from reading the CA until any replacement is saved.
+func (h Home) LockCA(operation string) (*Lock, error) {
+	if _, err := h.Ensure(); err != nil {
+		return nil, err
+	}
+	return acquireWait(filepath.Join(h.CADir(), "lock"), operation, caLockTimeout)
 }
 
 // LoadCA reads the named CA's certificate and key PEM, or ok=false.

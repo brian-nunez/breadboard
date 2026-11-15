@@ -93,6 +93,9 @@ func NewCA(domain string, now time.Time) (*CA, error) {
 	return &CA{Cert: cert, Key: key, CertPEM: pemBlock("CERTIFICATE", der)}, nil
 }
 
+// ErrKeyMismatch reports a CA key that is not the private key of its certificate.
+var ErrKeyMismatch = errors.New("pki: CA key does not match its certificate")
+
 // LoadCA parses a CA from its PEM certificate and PKCS#8 PEM key.
 func LoadCA(certPEM, keyPEM []byte) (*CA, error) {
 	cert, err := ParseCert(certPEM)
@@ -105,7 +108,7 @@ func LoadCA(certPEM, keyPEM []byte) (*CA, error) {
 	}
 	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
 	if !ok || !pub.Equal(&key.PublicKey) {
-		return nil, errors.New("pki: CA key does not match its certificate")
+		return nil, ErrKeyMismatch
 	}
 	return &CA{Cert: cert, Key: key, CertPEM: certPEM}, nil
 }

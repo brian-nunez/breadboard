@@ -67,6 +67,19 @@ func acquire(path, operation string) (*Lock, error) {
 	return &Lock{f: f}, nil
 }
 
+// acquireWait retries acquire until it succeeds or timeout passes, for short
+// critical sections where waiting is better than failing.
+func acquireWait(path, operation string, timeout time.Duration) (*Lock, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		l, err := acquire(path, operation)
+		if err == nil || !errors.Is(err, errs.ErrBusy) || time.Now().After(deadline) {
+			return l, err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // Release drops the lock.
 func (l *Lock) Release() error {
 	if l == nil || l.f == nil {

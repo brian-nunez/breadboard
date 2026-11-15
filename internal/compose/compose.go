@@ -164,8 +164,8 @@ func Render(in Input) (*Bundle, error) {
 			dev.Content = append(dev.Content, str(svc.Name), mapping(
 				str("volumes"), seq(
 					str(escape(src)+":"+AppWorkdir),
-					str("go-mod-cache:/go/pkg/mod"),
-					str("go-build-cache:/root/.cache/go-build"),
+					cacheMount("go-mod-cache", "/go/pkg/mod"),
+					cacheMount("go-build-cache", "/root/.cache/go-build"),
 				),
 			))
 		}
@@ -447,6 +447,19 @@ func dur(d time.Duration) string {
 		return strconv.Itoa(int(d/time.Minute)) + "m"
 	}
 	return strconv.Itoa(int(d/time.Second)) + "s"
+}
+
+// cacheMount mounts a Go cache volume that every app shares. nocopy stops
+// Docker from copying the image's files into the empty volume on first use:
+// apps start together, and concurrent copies into one new volume fail with
+// "mkdir ...: file exists". Go fills the cache itself and locks it safely.
+func cacheMount(volume, target string) *yaml.Node {
+	return mapping(
+		str("type"), str("volume"),
+		str("source"), str(volume),
+		str("target"), str(target),
+		str("volume"), mapping(str("nocopy"), boolean(true)),
+	)
 }
 
 func mapping(kv ...*yaml.Node) *yaml.Node {

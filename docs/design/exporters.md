@@ -14,7 +14,7 @@ Exporters turn an experiment into something that runs elsewhere. Each exporter c
 `bb export compose [--out <dir>] [--secrets inline|dotenv]` writes (default directory `export/compose` in the project):
 
 - `docker-compose.yml`: infra and app services (built from their `dev` stage), health checks, limits, aliases, segments.
-- `docker-compose.dev.yml`: source bind mounts and Go cache volumes for app services.
+- `docker-compose.dev.yml`: source bind mounts and Go cache volumes for app services (mounted with `nocopy`, so apps starting together cannot race to fill them).
 - `ca.pem`, `trust-bundle.pem`, `tls/<service>/`: the CA, the trust bundle, and each service's certificate and key.
 - `config/<service>/`: generated server configuration (Kafka properties, `pg_hba.conf`, Consul config).
 - `.env` (mode `0600`) when `--secrets dotenv` is used.

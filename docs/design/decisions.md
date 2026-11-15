@@ -53,6 +53,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-043 | 2026-11-15 | Where bkit has no matching module, internals use the standard library; any other direct dependency of `bb`, including starter client libraries, needs Brian's approval and its own row here. Supersedes the client-library fallback in ADR-0007. (Brian's direction.) → [ADR-0011](../adr/README.md) |
 | D-044 | 2026-11-15 | The install CA has its own lock, `BB_HOME/ca/lock`, held from loading the CA until any replacement is saved; callers wait for it rather than fail. A CA key that does not match its certificate is replaced. |
 | D-045 | 2026-11-15 | `bb down` also removes networks, and with `--volumes` volumes, labeled with the experiment's id, so resources of services or segments removed since an earlier `bb up` do not outlive the experiment. Matching the id, not the name, leaves a same-named experiment in another directory alone. |
+| D-046 | 2026-11-15 | The shared Go cache volumes mount with `volume.nocopy`, so Docker never copies the image's module cache into them. Apps start together, and concurrent copies into one new volume failed with `mkdir ...: file exists`. Go fills the caches itself on first start. |
 
 ## Open questions
 

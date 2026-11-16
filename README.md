@@ -38,7 +38,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Breadboard is early.** Phases 1 to 3 work: the core engine and CLI, five services including S3 Compatible, six starters, Compose export, and the read-only web UI (`bb serve`). The MCP server and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
+> **Breadboard is early.** Phases 1 to 4 work: the core engine and CLI, five services including S3 Compatible, six starters, Compose export, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`). Proxies, mTLS and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
 
 <p align="center">
   <a href="#why-breadboard">Why Breadboard</a> ·
@@ -77,6 +77,17 @@ bb serve                                                 # open the read-only da
 ```
 
 `bb` itself runs on your machine; only experiments run in containers. The CLI, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`) are thin wrappers over one core engine. See [architecture](docs/design/architecture.md).
+
+## Use it from an AI agent
+
+`bb mcp` serves Breadboard as MCP tools over stdio, so an agent can create an experiment, apply starters, run it, read logs, credentials and live data (Kafka topics, Postgres tables, Redis keys, the Consul catalog, S3 buckets), and debug it. Register it with your client from the experiment's directory:
+
+```sh
+claude mcp add breadboard -- bb mcp                # Claude Code
+codex mcp add breadboard -- bb mcp                 # Codex CLI
+```
+
+Other clients take the same command in their config: `{"command": "bb", "args": ["mcp"]}`. Tools act only on directories inside the one `bb mcp` starts in (choose it with `bb -C <dir> mcp`), and `bb mcp --read-only` exposes only the tools that change nothing you own. The agent should call the `guide` tool first.
 
 ## Supported services
 

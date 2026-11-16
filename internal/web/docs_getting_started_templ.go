@@ -457,7 +457,15 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, ") and a planned MCP server are thin wrappers: each turns its input into a call to the engine and renders the result. A wrapper holds no logic of its own, so anything the CLI can do, the other front ends get by calling the same operation.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, ") and the MCP server for AI agents (started with ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("bb mcp").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, ") are thin wrappers: each turns its input into a call to the engine and renders the result. A wrapper holds no logic of its own, so anything the CLI can do, the other front ends get by calling the same operation.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -479,7 +487,7 @@ func gettingStartedHowItWorks() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "All of this is one Go binary on your machine. Breadboard itself never runs in a container. The web UI only reads: it shows topology, health, logs and what each service holds, and gives you the ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "All of this is one Go binary on your machine. Breadboard itself never runs in a container. The web UI only reads: it shows topology, health, logs and what each service holds, and gives you the ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -487,7 +495,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, " command to run when you want to change something.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, " command to run when you want to change something.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -513,7 +521,7 @@ func gettingStartedHowItWorks() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "There is no database. ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "There is no database. ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -521,7 +529,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " holds your intent: which services, which apps, what each app uses, and any TLS exceptions. It never holds secrets, certificates or generated values, so it is safe to commit. Everything it leaves out takes a catalog default.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, " holds your intent: which services, which apps, what each app uses, and any TLS exceptions. It never holds secrets, certificates or generated values, so it is safe to commit. Everything it leaves out takes a catalog default.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -543,7 +551,7 @@ func gettingStartedHowItWorks() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "Every output is generated from it. The engine never reads a generated compose file back as input, so editing the compose file by hand changes nothing: the next ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "Every output is generated from it. The engine never reads a generated compose file back as input, so editing the compose file by hand changes nothing: the next ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -551,7 +559,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, " writes it again from the spec.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, " writes it again from the spec.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -589,7 +597,7 @@ func gettingStartedHowItWorks() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "A program can crash right after its first health check passes. So ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "A program can crash right after its first health check passes. So ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -597,7 +605,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, " also tracks each container's restart count and start time, and fails if any container exits, reports unhealthy, or restarts at any point during the wait. The error names the service and points you at ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, " also tracks each container's restart count and start time, and fails if any container exits, reports unhealthy, or restarts at any point during the wait. The error names the service and points you at ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -605,7 +613,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -627,7 +635,7 @@ func gettingStartedHowItWorks() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "Health has a precise meaning. Infra services use the check from their catalog entry. An app's default check is that its main process is running, so app code needs no health endpoint; an app can opt into an HTTP check with ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "Health has a precise meaning. Infra services use the check from their catalog entry. An app's default check is that its main process is running, so app code needs no health endpoint; an app can opt into an HTTP check with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -635,7 +643,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, " in the spec.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " in the spec.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -669,7 +677,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " runs ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, " runs ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -677,7 +685,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, " on the experiment and also removes networks labeled with the experiment's id, so networks of services you removed since an earlier ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, " on the experiment and also removes networks labeled with the experiment's id, so networks of services you removed since an earlier ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -685,7 +693,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, " do not linger. Data volumes stay, so the next ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " do not linger. Data volumes stay, so the next ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -693,7 +701,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " finds your topics, tables and keys where you left them.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, " finds your topics, tables and keys where you left them.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -719,7 +727,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, " deletes the data volumes too. Secrets are kept even then, because they live in ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, " deletes the data volumes too. Secrets are kept even then, because they live in ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -727,7 +735,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "&#46; To reset an experiment completely, run ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "&#46; To reset an experiment completely, run ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -735,7 +743,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, " and delete ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, " and delete ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -743,7 +751,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, ": the next ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, ": the next ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -751,7 +759,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, " generates fresh secrets and certificates.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, " generates fresh secrets and certificates.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -773,7 +781,7 @@ func gettingStartedHowItWorks() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "Every container, network and volume carries the experiment's id as a label. If another directory holds an experiment with the same name, ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "Every container, network and volume carries the experiment's id as a label. If another directory holds an experiment with the same name, ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -781,7 +789,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, " and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, " and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -789,7 +797,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, " refuse to act rather than touch its resources.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, " refuse to act rather than touch its resources.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -823,7 +831,7 @@ func gettingStartedHowItWorks() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "Every file Breadboard owns carries a format version and is upgraded forward on load. A ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "Every file Breadboard owns carries a format version and is upgraded forward on load. A ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -831,7 +839,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, " that meets a newer format than it knows refuses to write and asks you to upgrade. ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, " that meets a newer format than it knows refuses to write and asks you to upgrade. ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -839,7 +847,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, " is the exception: Breadboard never rewrites it silently, and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, " is the exception: Breadboard never rewrites it silently, and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -847,7 +855,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, " upgrades it when you ask.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, " upgrades it when you ask.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -890,7 +898,7 @@ func gettingStartedExperiments() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "An experiment is a directory with an ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "An experiment is a directory with an ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -898,7 +906,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, ", your app code, and Breadboard's ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, ", your app code, and Breadboard's ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -906,7 +914,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, " state. It becomes one compose project with its own networks.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, " state. It becomes one compose project with its own networks.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -932,7 +940,7 @@ func gettingStartedExperiments() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "The file has four top-level keys. ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "The file has four top-level keys. ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -940,7 +948,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, " is the schema version, currently 1. ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, " is the schema version, currently 1. ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -948,7 +956,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, " is a DNS label of up to 40 characters: lower-case letters, digits and hyphens; it names the compose project and is part of every service's identity. ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, " is a DNS label of up to 40 characters: lower-case letters, digits and hyphens; it names the compose project and is part of every service's identity. ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -956,7 +964,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, " are infra services from the catalog. ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, " are infra services from the catalog. ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -964,7 +972,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, " are your code.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, " are your code.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -986,7 +994,7 @@ func gettingStartedExperiments() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "Service and app names share one namespace and must be unique DNS labels, because each becomes an address on the experiment's network.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "Service and app names share one namespace and must be unique DNS labels, because each becomes an address on the experiment's network.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1035,7 +1043,7 @@ func gettingStartedExperiments() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "Each ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "Each ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1043,7 +1051,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, " entry is an edge from the app to an infra service. An edge does three things: it injects that service's environment variables into the app, it adds a ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " entry is an edge from the app to an infra service. An edge does three things: it injects that service's environment variables into the app, it adds a ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1051,7 +1059,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " with ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, " with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1059,7 +1067,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, " so the app starts after the service is healthy, and it carries the edge's TLS policy. This is what Breadboard generates for the producer above:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, " so the app starts after the service is healthy, and it carries the edge's TLS policy. This is what Breadboard generates for the producer above:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1085,7 +1093,7 @@ func gettingStartedExperiments() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "The short form, a service name, means TLS with full verification. The long form, an object with ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "The short form, a service name, means TLS with full verification. The long form, an object with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1093,7 +1101,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, " and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, " and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1101,7 +1109,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, ", is how one edge deviates; see ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, ", is how one edge deviates; see ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1109,7 +1117,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "&#46; When an app uses two services that share a variable name, such as two Postgres services, the later one's variables are prefixed with its name, for example ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "&#46; When an app uses two services that share a variable name, such as two Postgres services, the later one's variables are prefixed with its name, for example ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1117,7 +1125,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1143,7 +1151,7 @@ func gettingStartedExperiments() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "Validation reports every violation at once, each with its YAML path, before anything runs.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "Validation reports every violation at once, each with its YAML path, before anything runs.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1178,7 +1186,7 @@ func gettingStartedExperiments() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "You can edit ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "You can edit ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1186,7 +1194,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, " by hand. The commands that change it edit a YAML node tree, so your comments and key order survive. Commands find the experiment by walking up from the current directory to the nearest ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, " by hand. The commands that change it edit a YAML node tree, so your comments and key order survive. Commands find the experiment by walking up from the current directory to the nearest ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1194,7 +1202,7 @@ func gettingStartedExperiments() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1253,7 +1261,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "Every connection between containers uses TLS with full verification, and you write nothing to get it. Plaintext is possible, but only as an explicit choice with a written reason, and it is always shown.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "Every connection between containers uses TLS with full verification, and you write nothing to get it. Plaintext is possible, but only as an explicit choice with a written reason, and it is always shown.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1279,7 +1287,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "The first time it is needed, Breadboard creates a certificate authority with Go's standard library (ECDSA P-256) and stores it in ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "The first time it is needed, Breadboard creates a certificate authority with Go's standard library (ECDSA P-256) and stores it in ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1287,7 +1295,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, ", with the key readable only by you. Every experiment on the machine shares it. It is valid for 5 years.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, ", with the key readable only by you. Every experiment on the machine shares it. It is valid for 5 years.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1309,7 +1317,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "The CA is name-constrained to the install's domain, ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "The CA is name-constrained to the install's domain, ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1317,7 +1325,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, " by default. The constraint is marked critical, so even a leaked CA key cannot mint a certificate a client would accept for any real site. The domain must end in a reserved suffix such as ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, " by default. The constraint is marked critical, so even a leaked CA key cannot mint a certificate a client would accept for any real site. The domain must end in a reserved suffix such as ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1325,7 +1333,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, " or ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, " or ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1333,7 +1341,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, ", which never resolves publicly. Changing the domain mints a new CA and reissues every certificate on the next ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, ", which never resolves publicly. Changing the domain mints a new CA and reissues every certificate on the next ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1341,7 +1349,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1367,7 +1375,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "Every infra service and every app gets its own certificate, issued at ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "Every infra service and every app gets its own certificate, issued at ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1375,7 +1383,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, ":")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, ":")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1406,7 +1414,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "A reissued certificate changes the service's ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "A reissued certificate changes the service's ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1414,7 +1422,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, " label, so Compose recreates that container and it starts with the new certificate.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, " label, so Compose recreates that container and it starts with the new certificate.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1440,7 +1448,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, "Each container gets read-only files under ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "Each container gets read-only files under ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1448,7 +1456,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, ": the trust bundle (the Breadboard CA followed by your machine's public roots), the CA alone, and its own certificate and key. Every app also receives these variables:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, ": the trust bundle (the Breadboard CA followed by your machine's public roots), the CA alone, and its own certificate and key. Every app also receives these variables:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1483,7 +1491,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "An app that serves HTTPS passes its certificate paths from the environment, so no path appears in code. This is the consul/service-discovery starter's greeter:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "An app that serves HTTPS passes its certificate paths from the environment, so no path appears in code. This is the consul/service-discovery starter's greeter:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1513,7 +1521,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, "TLS is decided per edge, because proxies and relays make a decision at each hop. To turn it off for one edge, use the long form of ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "TLS is decided per edge, because proxies and relays make a decision at each hop. To turn it off for one edge, use the long form of ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1521,7 +1529,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, " with a reason:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, " with a reason:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1547,7 +1555,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "What actually happens: the target turns on a plaintext listener used only by edges that asked for it, and Breadboard puts that listener on a private segment, an internal compose network named ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "What actually happens: the target turns on a plaintext listener used only by edges that asked for it, and Breadboard puts that listener on a private segment, an internal compose network named ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1555,7 +1563,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, ", shared only with those clients. The target gets the address .10 on the segment and the alias ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, ", shared only with those clients. The target gets the address .10 on the segment and the alias ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1563,7 +1571,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "; the app's variables point there instead, with ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "; the app's variables point there instead, with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1571,7 +1579,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "&#46; Kafka and Consul bind their plaintext listener to that address; Postgres accepts unencrypted connections only from the segment's subnet. Redis and S3 Compatible cannot do either, so they offer no plaintext listener.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "&#46; Kafka and Consul bind their plaintext listener to that address; Postgres accepts unencrypted connections only from the segment's subnet. Redis and S3 Compatible cannot do either, so they offer no plaintext listener.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1615,7 +1623,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "The edge is never hidden: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "The edge is never hidden: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1623,7 +1631,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, " and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, " and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1631,7 +1639,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, " print it as a warning with its reason, the web UI draws it dashed red, and an exported compose file carries the reason as a comment.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, " print it as a warning with its reason, the web UI draws it dashed red, and an exported compose file carries the reason as a comment.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1657,7 +1665,7 @@ func gettingStartedTLS() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "Containers already trust the CA. Your machine does not, and Breadboard never adds it to your trust store. ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "Containers already trust the CA. Your machine does not, and Breadboard never adds it to your trust store. ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1665,7 +1673,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, " shows the CA's subject, the domain it is constrained to, its validity and fingerprint, and the commands to trust it on macOS or Debian and Ubuntu if you choose to. ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, " shows the CA's subject, the domain it is constrained to, its validity and fingerprint, and the commands to trust it on macOS or Debian and Ubuntu if you choose to. ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1673,7 +1681,7 @@ func gettingStartedTLS() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, " prints the certificate itself.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, " prints the certificate itself.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1708,7 +1716,7 @@ func gettingStartedTLSDiagram() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "<svg viewBox=\"0 0 700 230\" width=\"700\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"producer connects to kafka over TLS on port 9093; consumer connects to postgres in plaintext on port 5432, inside the private segment plain-postgres, drawn dashed red\"><defs><marker id=\"gs-tls-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker> <marker id=\"gs-plain-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-red-600\"></path></marker></defs> <rect x=\"40\" y=\"30\" width=\"150\" height=\"40\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"115\" y=\"55\" text-anchor=\"middle\" class=\"fill-slate-900 text-[13px] font-semibold\">producer</text> <line x1=\"190\" y1=\"50\" x2=\"500\" y2=\"50\" stroke-width=\"1.5\" marker-end=\"url(#gs-tls-arrow)\" class=\"stroke-slate-400\"></line> <rect x=\"300\" y=\"40\" width=\"96\" height=\"20\" rx=\"4\" class=\"fill-white stroke-slate-300\"></rect> <text x=\"348\" y=\"54\" text-anchor=\"middle\" class=\"fill-slate-600 font-mono text-[11px]\">TLS :9093</text> <rect x=\"508\" y=\"30\" width=\"150\" height=\"40\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"583\" y=\"55\" text-anchor=\"middle\" class=\"fill-slate-900 text-[13px] font-semibold\">kafka</text> <rect x=\"20\" y=\"104\" width=\"660\" height=\"110\" rx=\"10\" stroke-dasharray=\"5 4\" class=\"fill-red-50 stroke-red-300\"></rect> <text x=\"36\" y=\"126\" class=\"fill-red-700 font-mono text-[12px] font-semibold\">segment: plain-postgres (internal)</text> <rect x=\"40\" y=\"144\" width=\"150\" height=\"40\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"115\" y=\"169\" text-anchor=\"middle\" class=\"fill-slate-900 text-[13px] font-semibold\">consumer</text> <line x1=\"190\" y1=\"164\" x2=\"500\" y2=\"164\" stroke-width=\"1.5\" stroke-dasharray=\"6 4\" marker-end=\"url(#gs-plain-arrow)\" class=\"stroke-red-600\"></line> <rect x=\"282\" y=\"154\" width=\"132\" height=\"20\" rx=\"4\" class=\"fill-red-50 stroke-red-300\"></rect> <text x=\"348\" y=\"168\" text-anchor=\"middle\" class=\"fill-red-700 font-mono text-[11px]\">plaintext :5432</text> <rect x=\"508\" y=\"144\" width=\"150\" height=\"40\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"583\" y=\"169\" text-anchor=\"middle\" class=\"fill-slate-900 text-[13px] font-semibold\">postgres</text></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "<svg viewBox=\"0 0 700 230\" width=\"700\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"producer connects to kafka over TLS on port 9093; consumer connects to postgres in plaintext on port 5432, inside the private segment plain-postgres, drawn dashed red\"><defs><marker id=\"gs-tls-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker> <marker id=\"gs-plain-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-red-600\"></path></marker></defs> <rect x=\"40\" y=\"30\" width=\"150\" height=\"40\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"115\" y=\"55\" text-anchor=\"middle\" class=\"fill-slate-900 text-[13px] font-semibold\">producer</text> <line x1=\"190\" y1=\"50\" x2=\"500\" y2=\"50\" stroke-width=\"1.5\" marker-end=\"url(#gs-tls-arrow)\" class=\"stroke-slate-400\"></line> <rect x=\"300\" y=\"40\" width=\"96\" height=\"20\" rx=\"4\" class=\"fill-white stroke-slate-300\"></rect> <text x=\"348\" y=\"54\" text-anchor=\"middle\" class=\"fill-slate-600 font-mono text-[11px]\">TLS :9093</text> <rect x=\"508\" y=\"30\" width=\"150\" height=\"40\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"583\" y=\"55\" text-anchor=\"middle\" class=\"fill-slate-900 text-[13px] font-semibold\">kafka</text> <rect x=\"20\" y=\"104\" width=\"660\" height=\"110\" rx=\"10\" stroke-dasharray=\"5 4\" class=\"fill-red-50 stroke-red-300\"></rect> <text x=\"36\" y=\"126\" class=\"fill-red-700 font-mono text-[12px] font-semibold\">segment: plain-postgres (internal)</text> <rect x=\"40\" y=\"144\" width=\"150\" height=\"40\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"115\" y=\"169\" text-anchor=\"middle\" class=\"fill-slate-900 text-[13px] font-semibold\">consumer</text> <line x1=\"190\" y1=\"164\" x2=\"500\" y2=\"164\" stroke-width=\"1.5\" stroke-dasharray=\"6 4\" marker-end=\"url(#gs-plain-arrow)\" class=\"stroke-red-600\"></line> <rect x=\"282\" y=\"154\" width=\"132\" height=\"20\" rx=\"4\" class=\"fill-red-50 stroke-red-300\"></rect> <text x=\"348\" y=\"168\" text-anchor=\"middle\" class=\"fill-red-700 font-mono text-[11px]\">plaintext :5432</text> <rect x=\"508\" y=\"144\" width=\"150\" height=\"40\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"583\" y=\"169\" text-anchor=\"middle\" class=\"fill-slate-900 text-[13px] font-semibold\">postgres</text></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1745,7 +1753,7 @@ func gettingStartedStarters() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "A starter takes you from \"I want to try Kafka consumers\" to running code in minutes. It writes a small, working Go project into your experiment, adds its apps to ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "A starter takes you from \"I want to try Kafka consumers\" to running code in minutes. It writes a small, working Go project into your experiment, adds its apps to ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1753,7 +1761,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, ", and adds any infra service it needs that is missing. After that, the code is yours.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, ", and adds any infra service it needs that is missing. After that, the code is yours.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1788,7 +1796,7 @@ func gettingStartedStarters() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "The code reads only environment variables from the catalog's env contract, such as ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "The code reads only environment variables from the catalog's env contract, such as ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1796,7 +1804,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, " or ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, " or ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1804,7 +1812,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, ", and verifies TLS through ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, ", and verifies TLS through ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1812,7 +1820,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "&#46; There are no Breadboard config files and no certificate paths in code, so the project runs anywhere those variables and a trust bundle exist.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "&#46; There are no Breadboard config files and no certificate paths in code, so the project runs anywhere those variables and a trust bundle exist.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1838,7 +1846,7 @@ func gettingStartedStarters() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "Apps are compiled while the image builds, not when the container starts. The dev stage downloads dependencies and builds every app into ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, "Apps are compiled while the image builds, not when the container starts. The dev stage downloads dependencies and builds every app into ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1846,7 +1854,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, ", with a BuildKit cache mount that keeps compiled packages between builds:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, ", with a BuildKit cache mount that keeps compiled packages between builds:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1872,7 +1880,7 @@ func gettingStartedStarters() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "Each app's ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, "Each app's ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1880,7 +1888,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, " is its binary's name, so the program is the container's main process, PID 1. It receives SIGTERM and runs its shutdown code, and when its health check passes the program itself is running, not a compiler. There is no source mount: after you edit code, ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, " is its binary's name, so the program is the container's main process, PID 1. It receives SIGTERM and runs its shutdown code, and when its health check passes the program itself is running, not a compiler. There is no source mount: after you edit code, ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1888,7 +1896,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, " rebuilds the image, recompiling only what changed, and recreates the container.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, " rebuilds the image, recompiling only what changed, and recreates the container.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1918,7 +1926,7 @@ func gettingStartedStarters() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, "The code goes into a directory inside the project named after the starter, such as ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, "The code goes into a directory inside the project named after the starter, such as ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1926,7 +1934,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, ", or wherever ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, ", or wherever ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1934,7 +1942,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, " says. The spec changes are validated before any file is written.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, " says. The spec changes are validated before any file is written.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1956,12 +1964,12 @@ func gettingStartedStarters() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "<ul class=\"my-4 flex flex-col gap-2.5 text-[16px] leading-7 text-slate-700\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "<ul class=\"my-4 flex flex-col gap-2.5 text-[16px] leading-7 text-slate-700\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, s := range gsStarterList {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "<li class=\"flex gap-3\"><span class=\"text-slate-400\">—</span> <span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 115, "<li class=\"flex gap-3\"><span class=\"text-slate-400\">—</span> <span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1969,7 +1977,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 115, "<span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, "<span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1982,12 +1990,12 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, "</span></span></li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 117, "</span></span></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 117, "</ul>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 118, "</ul>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2003,7 +2011,7 @@ func gettingStartedStarters() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 118, "Each technology's docs go deeper: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 119, "Each technology's docs go deeper: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2011,7 +2019,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 119, ", ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 120, ", ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2019,7 +2027,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 120, ", ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 121, ", ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2027,7 +2035,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 121, ", ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 122, ", ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2035,7 +2043,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 122, " and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 123, " and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2043,7 +2051,7 @@ func gettingStartedStarters() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 123, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 124, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

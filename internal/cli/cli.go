@@ -58,6 +58,7 @@ func init() {
 		{"migrate", "", "Upgrade experiment.yaml to the current spec version", (*cli).migrate},
 		{"export", "compose [--out dir] [--secrets inline|dotenv]", "Write a standalone compose stack", (*cli).export},
 		{"serve", "[--addr host:port] [--no-open]", "Open the read-only web UI for this experiment", (*cli).serve},
+		{"mcp", "[--read-only]", "Serve bb as MCP tools over stdio, for AI agents", (*cli).mcpCmd},
 		{"version", "", "Show the bb version", (*cli).version},
 		{"help", "[command]", "Show help", (*cli).help},
 	}

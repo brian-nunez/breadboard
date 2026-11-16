@@ -122,7 +122,11 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
-	mux.HandleFunc("GET /{$}", s.overview)
+	mux.HandleFunc("GET /{$}", s.root)
+	mux.HandleFunc("GET /dashboard", s.overview)
+	mux.HandleFunc("GET /home", s.home)
+	mux.HandleFunc("GET /starters", s.startersList)
+	mux.HandleFunc("GET /starters/{area}/{name}", s.starter)
 	mux.HandleFunc("GET /live/overview", s.overviewLive)
 	mux.HandleFunc("GET /architecture", s.architecture)
 	mux.HandleFunc("GET /live/architecture", s.architectureLive)
@@ -134,6 +138,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /docs/{tech}", s.docsTech)
 	mux.HandleFunc("GET /docs/{tech}/{guide}", s.docsGuide)
 	return s.guard(mux)
+}
+
+// root is the dashboard when this directory has an experiment, and the home
+// page (what to build) when it does not.
+func (s *Server) root(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.eng.ServiceDetails(r.Context(), core.ServiceDetailsRequest{Dir: s.dir}); errors.Is(err, core.ErrNotInitialized) {
+		s.home(w, r)
+		return
+	}
+	s.overview(w, r)
 }
 
 // overview is the dashboard's front page.

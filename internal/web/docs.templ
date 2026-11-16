@@ -318,7 +318,7 @@ templ docCode(filename, code string) {
 			<span class="font-mono text-[13px] text-slate-600">{ filename }</span>
 			<button type="button" data-copy class="text-xs text-slate-500 hover:text-slate-900">Copy</button>
 		</div>
-		<pre class="overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-6 text-slate-800" data-copy-source>
+		<pre class="overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-6 text-slate-800 [tab-size:4]" data-copy-source>
 			for _, line := range strings.Split(strings.Trim(code, "\n"), "\n") {
 				if strings.HasPrefix(strings.TrimSpace(line), "//") || strings.HasPrefix(strings.TrimSpace(line), "#") || strings.HasPrefix(strings.TrimSpace(line), "--") {
 					<div class="min-h-6 whitespace-pre text-slate-400">{ line }</div>

@@ -1,0 +1,182 @@
+package web
+
+import (
+	"slices"
+	"strings"
+)
+
+// startersPage is the starter list; as the home page it asks what to build
+// and offers to skip to the dashboard.
+templ startersPage(d docsData, home bool) {
+	@page(pick(home, "What do you want to build?", "Starters")) {
+		if home {
+			<header class="flex h-16 items-center px-8">
+				@logo()
+				<nav class="ml-auto flex items-center gap-6 text-sm">
+					<a href="/docs" class="text-slate-500 hover:text-slate-900">Docs</a>
+					<a href="/starters" class="text-slate-500 hover:text-slate-900">Starters</a>
+					<a href="/dashboard" class="rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 font-medium text-slate-900 hover:border-slate-400">Skip to dashboard →</a>
+				</nav>
+			</header>
+		} else {
+			@topbar(sectionStarters)
+		}
+		<main class="mx-auto max-w-[880px] px-6 py-12">
+			if home {
+				<h1 class="text-center text-[44px] font-semibold tracking-tight">What do you want to build?</h1>
+				<p class="mt-3 text-center text-[17px] text-slate-500">Pick a scenario to see its architecture and how to run it.</p>
+			} else {
+				<h1 class="text-[32px] font-semibold">Starters</h1>
+				<p class="mt-1 text-slate-500">Small working projects on the official client libraries. Each adds its apps and the services they need to your experiment.</p>
+			}
+			<div class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				for _, id := range starterOrder(d) {
+					{{ st := d.Starters[id] }}
+					<a href={ templ.SafeURL("/starters/" + id) } class="flex flex-col rounded-xl border border-slate-200 bg-white p-5 hover:border-slate-300">
+						<span class="font-semibold">{ cardTitle(st.Title) }</span>
+						<span class="mt-2 text-sm leading-6 text-slate-500">{ st.Summary }</span>
+						<span class="mt-auto pt-4 text-[13px] text-slate-700">{ techNames(st.Requires, d.Catalog) }</span>
+					</a>
+				}
+			</div>
+		</main>
+	}
+}
+
+func pick(b bool, yes, no string) string {
+	if b {
+		return yes
+	}
+	return no
+}
+
+// cardTitle drops the "(recommended)" style suffix on cards; the summary
+// carries the label.
+func cardTitle(t string) string {
+	if i := strings.Index(t, " ("); i > 0 {
+		return t[:i]
+	}
+	return t
+}
+
+func starterOrder(d docsData) []string {
+	ids := make([]string, 0, len(d.Starters))
+	for id := range d.Starters {
+		ids = append(ids, id)
+	}
+	order := []string{"kafka/producer-consumer", "kafka/sink-to-postgres", "redis/cache-invalidation", "consul/service-discovery", "s3/objects-basics", "consul/self-registration"}
+	slices.SortStableFunc(ids, func(a, b string) int {
+		ia, ib := slices.Index(order, a), slices.Index(order, b)
+		if ia < 0 {
+			ia = len(order)
+		}
+		if ib < 0 {
+			ib = len(order)
+		}
+		if ia != ib {
+			return ia - ib
+		}
+		return strings.Compare(a, b)
+	})
+	return ids
+}
+
+templ starterPage(v starterView) {
+	@page(v.Details.Title) {
+		@topbar(sectionStarters)
+		<main class="mx-auto max-w-[1120px] px-6 py-10">
+			<nav class="text-sm text-slate-500"><a href="/starters" class="hover:text-slate-900">Starters</a> <span class="mx-1.5">/</span> { strings.Split(v.Details.ID, "/")[0] }</nav>
+			<h1 class="mt-2 text-[34px] font-semibold leading-tight">{ v.Details.Title }</h1>
+			<p class="mt-1 font-mono text-sm text-slate-500">{ v.Details.ID } · Go 1.27.4 · { techNames(v.Details.Requires, v.Catalog) }</p>
+			<div class="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
+				<div class="min-w-0">
+					<h2 class="text-xl font-semibold">About this example</h2>
+					<p class="mt-3 text-[16px] leading-7 text-slate-700">{ v.Content.About }</p>
+					<div class="mt-6">
+						@card() {
+							<div class="p-5">
+								<h3 class="font-semibold">Architecture</h3>
+								<div class="mt-3 overflow-x-auto rounded-lg bg-slate-50 p-2">
+									@graphSVG(v.Graph, true)
+								</div>
+							</div>
+						}
+					</div>
+					if len(v.Content.Steps) > 0 {
+						<h2 class="mt-8 text-xl font-semibold">How it works</h2>
+						<ol class="mt-3 flex flex-col gap-4">
+							for i, s := range v.Content.Steps {
+								<li class="flex gap-4">
+									<span class="flex size-6 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-xs font-semibold text-indigo-700">{ itoa(i + 1) }</span>
+									<div>
+										<div class="font-semibold">{ s.Title }</div>
+										<div class="mt-0.5 text-[15px] leading-6 text-slate-600">{ s.Text }</div>
+									</div>
+								</li>
+							}
+						</ol>
+					}
+					if v.KeyCode != "" {
+						<h2 class="mt-8 text-xl font-semibold">{ v.Content.KeyTitle }</h2>
+						@docCode(v.Details.Dir+"/"+v.Content.KeyFile, v.KeyCode)
+					}
+					@card() {
+						<div class="p-5">
+							<h3 class="font-semibold">Files it creates</h3>
+							<div class="mt-3 overflow-hidden rounded-lg border border-slate-200">
+								<div class="border-b border-slate-200 px-4 py-2 font-mono text-[13px] font-semibold">{ v.Details.Dir }/</div>
+								for _, f := range v.Details.Files {
+									<div class="border-b border-slate-100 px-4 py-2 pl-8 font-mono text-[13px] text-slate-700 last:border-b-0">{ f.Path }</div>
+								}
+							</div>
+						</div>
+					}
+					<div class="mt-6">
+						@docCode("Added to experiment.yaml", v.Spec)
+					</div>
+				</div>
+				<aside class="flex flex-col gap-6">
+					@labelledTerminal("Run it", "bb init lab", "bb starter "+v.Details.ID, "bb up")
+					if len(v.Content.Covers) > 0 {
+						@card() {
+							<div class="p-5">
+								<h3 class="font-semibold">Covers</h3>
+								<ul class="mt-2 flex flex-col gap-1.5 text-sm text-slate-700">
+									for _, c := range v.Content.Covers {
+										<li>{ c }</li>
+									}
+								</ul>
+								if v.Content.Guide != "" {
+									<a href={ templ.SafeURL(v.Content.Guide) } class="mt-4 inline-block text-sm text-indigo-600 hover:text-indigo-800">Read the guide →</a>
+								}
+							</div>
+						}
+					}
+					@card() {
+						<div class="p-5">
+							<h3 class="font-semibold">Exercises</h3>
+							<div class="mt-2 flex flex-col gap-3 text-sm">
+								for _, it := range v.Readme.section("Try this").bullets() {
+									<div class="grid grid-cols-[48px_1fr] gap-2"><span class="font-semibold text-indigo-700">Try</span><span class="leading-6 text-slate-700">@inlineText(it)</span></div>
+								}
+								for _, it := range v.Readme.section("Break this").bullets() {
+									<div class="grid grid-cols-[48px_1fr] gap-2"><span class="font-semibold text-red-700">Break</span><span class="leading-6 text-slate-700">@inlineText(it)</span></div>
+								}
+							</div>
+						</div>
+					}
+					@card() {
+						<div class="p-5">
+							<h3 class="font-semibold">Libraries</h3>
+							<ul class="mt-2 flex flex-col gap-1 font-mono text-[13px] text-slate-700">
+								for _, l := range v.Libraries {
+									<li>{ l }</li>
+								}
+							</ul>
+						</div>
+					}
+				</aside>
+			</div>
+		</main>
+	}
+}

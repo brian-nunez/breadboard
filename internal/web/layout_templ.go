@@ -158,7 +158,7 @@ func topbar(current section) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = topLink("/", "Dashboard", current == sectionDashboard).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = topLink("/dashboard", "Dashboard", current == sectionDashboard).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -424,7 +424,7 @@ func sidebar(d dashboardData, active string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = sideLink("/", "Overview", active == "overview").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = sideLink("/dashboard", "Overview", active == "overview").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -530,7 +530,7 @@ func sidebar(d dashboardData, active string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = sideLink("/docs/catalog", "Catalog", false).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = sideLink("/docs/getting-started", "Getting started", false).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

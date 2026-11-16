@@ -501,3 +501,52 @@ func (e *Engine) Migrate(ctx context.Context, req MigrateRequest) (*MigrateResul
 	}
 	return &MigrateResult{From: from, To: spec.CurrentVersion, Changed: changed}, nil
 }
+
+// StarterDetailsRequest names a starter.
+type StarterDetailsRequest struct {
+	ID string
+}
+
+// StarterDetails is everything a starter would write and add, without
+// writing anything: for the web UI's starter pages.
+type StarterDetails struct {
+	StarterInfo
+	Dir   string // default directory the code is written to
+	Apps  []StarterApp
+	Files []StarterFile
+}
+
+// StarterApp is an app the starter adds to experiment.yaml.
+type StarterApp struct {
+	Name     string
+	Command  []string
+	Uses     []string // catalog types
+	Register *spec.Register
+}
+
+// StarterFile is one rendered file, relative to the starter's directory.
+type StarterFile struct {
+	Path string
+	Data []byte
+}
+
+// StarterDetails renders a starter's files for an example experiment.
+func (e *Engine) StarterDetails(ctx context.Context, req StarterDetailsRequest) (*StarterDetails, error) {
+	st, ok := starters.Lookup(req.ID)
+	if !ok {
+		return nil, fmt.Errorf("starter %q: %w", req.ID, ErrNotFound)
+	}
+	files, err := starters.Render(st, "lab")
+	if err != nil {
+		return nil, err
+	}
+	d := &StarterDetails{StarterInfo: StarterInfo{ID: st.ID, Title: st.Title, Summary: st.Summary, Language: st.Language, Requires: st.Requires}, Dir: st.Dir}
+	for _, a := range st.Apps {
+		d.StarterInfo.Apps = append(d.StarterInfo.Apps, a.Name)
+		d.Apps = append(d.Apps, StarterApp{Name: a.Name, Command: a.Command, Uses: a.Uses, Register: a.Register})
+	}
+	for _, f := range files {
+		d.Files = append(d.Files, StarterFile{Path: f.Path, Data: f.Data})
+	}
+	return d, nil
+}

@@ -1670,7 +1670,7 @@ func docCode(filename, code string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "</span> <button type=\"button\" data-copy class=\"text-xs text-slate-500 hover:text-slate-900\">Copy</button></div><pre class=\"overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-6 text-slate-800\" data-copy-source>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "</span> <button type=\"button\" data-copy class=\"text-xs text-slate-500 hover:text-slate-900\">Copy</button></div><pre class=\"overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-6 text-slate-800 [tab-size:4]\" data-copy-source>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

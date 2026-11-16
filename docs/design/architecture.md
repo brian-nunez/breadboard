@@ -47,6 +47,7 @@ Operations (Phase 1):
 | `Status`, `Logs` | Per-service state, health, resources, TLS warnings; log stream. |
 | `Creds`, `CA` | Generated credentials and connection strings; CA details. |
 | `PostgresTables`, `RedisKeys`, `ConsulCatalog`, `KafkaTopics`, `S3Buckets` | Read-only explorers for the web UI: each runs the service's own CLI tool with `docker exec` and parses its output (ADR-0012) (Phase 3). |
+| `StarterDetails` | A starter's rendered files and apps without writing anything, for the web UI's starter pages (Phase 3). |
 | `ServiceDetails` | Read-only view of one service for the web UI: listeners, who uses it, the env apps receive (secret values never returned), its certificate (Phase 3). |
 | `ConfigGet`, `ConfigSet` | Install settings. |
 | `Migrate` | Upgrade `experiment.yaml` to the current spec version. |

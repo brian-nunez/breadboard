@@ -5,7 +5,7 @@ Breadboard is secure by default and insecure only by intent. This document is th
 ## Domain and naming
 
 - Install-level setting `domain`, default `bb.internal`, stored in `<BB_HOME>/config.yaml` and overridable by `BB_DOMAIN`. `.internal` is reserved by ICANN for private use and never resolves publicly. The domain must end in a reserved special-use suffix (`.internal`, `.test`, `.localhost`, `.home.arpa`), so the CA's name constraint can never cover a real site.
-- Every infra and app service gets the Docker network alias `<service>.<domain>` (e.g. `postgres.bb.internal`).
+- Every infra and app service gets the Docker network alias `<service>.<domain>` (e.g. `postgres.bb.internal`). An app with replicas runs instances `<app>-<n>`, each with its own alias `<app>-<n>.<domain>` plus the shared alias `<app>.<domain>`, which resolves to every instance.
 - Connection strings, health checks, and certificates always use the FQDN. Bare names like `postgres` still resolve in Docker but are not covered by certificates.
 - Changing the domain mints a new CA (the name constraint is bound to the domain) and reissues all leaf certificates on the next `bb up`.
 
@@ -20,7 +20,9 @@ Breadboard is secure by default and insecure only by intent. This document is th
 
 One per service (infra and app), issued at `bb up`:
 
-- DNS SANs: `<service>.<domain>`; `<service>.<experiment>.<domain>` reserved for host-side access through a proxy (Phase 5).
+- DNS SANs: `<service>.<domain>`; `<service>.<experiment>.<domain>` reserved for host-side access through a proxy (Phase 5). A replica's certificate names both `<app>-<n>.<domain>` and `<app>.<domain>`, so a client verifies it by either name.
+- Replicas of one app share its identity (`.../service/<app>`): authorization by identity (Phase 6) treats them as one workload.
+- Sidecars have no certificate of their own: they present their app instance's certificate, as the address they listen on is the instance's.
 - URI SAN: the service **identity** `spiffe://<domain>/experiment/<exp>/service/<svc>`.
 - Extended key usage: **both** `serverAuth` and `clientAuth`. App services get certificates in v1 even though nothing checks them yet, so mTLS later is a policy change, not a reissue.
 
@@ -50,7 +52,19 @@ TLS is decided per **edge**, because proxies and relays make per-hop decisions.
      - the target gets the static address `.10` on the segment and the alias `<target>.plain.<domain>`; clients on a plaintext edge connect to that alias;
      - the entry binds its plaintext listener to that address (Kafka, Consul) or accepts unencrypted connections only from that subnet (Postgres `hostnossl`). Entries that cannot do either (Redis) offer no plaintext listener;
   3. reports the edge as a warning in `bb status`, draws it dashed red in the UI, and writes the reason as a comment in exported compose files.
-- Loopback inside one container (an app's opt-in `/healthz` checked by its health check) is not an edge and is exempt.
+- Loopback inside one network namespace is not an edge and is exempt: an app's opt-in `/healthz` checked by its health check, and traffic between an app and its own sidecars, which share the pod's namespace and never leave it (D-076). An Envoy sidecar may receive plaintext from its app on `127.0.0.1` and forward it as TLS, or terminate TLS and hand the app plaintext on loopback; the app then binds `127.0.0.1` only (`BB_LISTEN_ADDR`), so nothing can reach it around the sidecar. Every hop between containers stays TLS with full verification: Envoy verifies targets against the lab CA with SNI set to the target's name, and PgBouncer connects to Postgres with `verify-full`.
+
+### Transparent mode (Phase 5)
+
+An Envoy sidecar with `transparent` captures all of its app's TCP traffic, so the app calls `http://<target>.<domain>:<port>` in plain HTTP and the wire is TLS:
+
+- The rules are installed by `<app>-netinit`, a one-shot container in the pod built from a generated Dockerfile (`FROM alpine:3.24.4`, `apk add --no-cache iptables`). It is the **only** container granted `NET_ADMIN`; the app and the long-running Envoy never hold it. It runs with `restart: "no"`, and the sidecars and app start only after it completed successfully, so no packet leaves before the rules exist. It prints the rules it installed (`iptables -t nat -S`).
+- Outbound: `nat OUTPUT` sends TCP to a chain `BB_OUT` that returns for the reserved users and for `127.0.0.0/8`, and redirects everything else to Envoy on 15001. UDP, including DNS to Docker's resolver, is untouched. The script is idempotent (D-090).
+- Reserved users (D-096): in a transparent pod Envoy runs as uid **1337** and a registration agent as uid **1338**; only these are exempt from redirection (not the images' default users). Before any container starts, `bb up` builds each transparent app's image, resolves the user it starts as (`Config.User`; a name through `id -u` inside the image) and refuses to start if it is 1337 or 1338, or if a named user cannot be resolved (use a numeric `USER`). The app also runs with `no-new-privileges` and without `SETUID`/`SETGID`, so a process in it cannot become a reserved user later.
+- Capture mode is part of a pod's identity (D-102): the rules live in the holder's namespace, so switching transparent mode on or off for a pod recreates its holder and every container in it; no stale rules survive.
+- Inbound: only declared external listeners accept connections into the pod. Envoy's `inbound.port` is reached directly, so the TLS handshake is Envoy's; the app's own TLS port (`register.port`, when it is not Envoy's `inbound.port`) is redirected to Envoy's 15006, which hands the still-encrypted bytes to the app on `127.0.0.1`; a registration agent's gossip port 8301 is reached directly. Every other TCP connection into the pod is reset (`filter INPUT`), so the app's plaintext port, Envoy's admin API, outbound listeners, PgBouncer and Fluent Bit are unreachable from other containers. In a transparent pod a published port reaches only a declared listener.
+- Declared outbound targets get TLS origination with CA verification: a plain HTTP connection to a target's TLS port is routed by its `Host` header. On `egress: allow` (default) anything else passes through untouched to its original destination. On `egress: deny` destinations are allowed by port **and address** (D-091): a lab with a transparent pod has a fixed subnet and fixed container addresses, recorded in `.bb/state.json`. A declared target's TLS port at its replicas' addresses accepts plain HTTP (another host gets `403`) and the app's own TLS; each service in `uses` is reachable on its port at its address; everything else, including an undeclared host on an allowed port, is closed by Envoy's RBAC filter (counted as `egress_denied.rbac.denied`).
+- With Envoy stopped, the app reaches nothing: there is no bypass.
 
 ### Proxy and relay modes (Phase 5)
 

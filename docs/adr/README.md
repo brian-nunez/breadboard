@@ -18,3 +18,5 @@ Decisions that shape this project, in [MADR](https://adr.github.io/madr/) format
 | [0012](0012-read-service-data-for-the-web-ui-through-docker.md) | Read service data for the web UI through Docker | accepted | 2026-11-16 |
 | [0013](0013-build-web-ui-components-in-repo-with-templ-and-tailwind.md) | Build web UI components in-repo with templ and Tailwind | accepted | 2026-11-16 |
 | [0014](0014-serve-mcp-with-the-official-go-sdk.md) | Serve MCP with the official Go SDK | accepted | 2026-11-16 |
+| [0015](0015-run-sidecars-in-a-pod-that-shares-the-apps-network-namespace.md) | Run sidecars in a pod that shares the app's network namespace | accepted | 2026-11-16 |
+| [0016](0016-run-replicas-as-named-instances.md) | Run replicas as named instances | accepted | 2026-11-16 |

@@ -297,6 +297,64 @@ func sidecarService(in Input, svc *model.Service, mounts []string, add func(stri
 	return def, mounts
 }
 
+// EnvGroup is a block of an app's environment: Breadboard's own variables
+// (Service empty), or one used service's env contract.
+type EnvGroup struct {
+	Service   string
+	Title     string // the service's catalog title
+	Plaintext bool
+	Reason    string
+	Vars      []catalog.EnvVar
+}
+
+// AppEnv is the environment an app receives, in order: Breadboard's own
+// variables first, then one group per edge. When two used services share a
+// variable name, the later one is prefixed with its service name. ref
+// resolves a service's secrets (values, or ${VAR} references in dotenv mode).
+func AppEnv(m *model.Model, svc *model.Service, ref func(service string) func(key string) string, subnets map[string]netip.Prefix) []EnvGroup {
+	base := []catalog.EnvVar{
+		{Name: "SSL_CERT_FILE", Value: catalog.TrustBundleFile},
+		// The app's own certificate, for apps that serve TLS to other apps.
+		{Name: "TLS_CERT_FILE", Value: catalog.CertFile},
+		{Name: "TLS_KEY_FILE", Value: catalog.KeyFile},
+		{Name: "BB_SERVICE", Value: svc.Name},
+		// The app's own address, matching its certificate.
+		{Name: "BB_FQDN", Value: svc.FQDN},
+	}
+	if svc.Health != nil {
+		base = append(base, catalog.EnvVar{Name: "BB_HEALTH_PORT", Value: strconv.Itoa(svc.Health.Port)})
+	}
+	groups := []EnvGroup{{Vars: base}}
+	seen := map[string]bool{}
+	for _, e := range base {
+		seen[e.Name] = true
+	}
+	for _, edge := range m.EdgesFrom(svc.Name) {
+		target, _ := m.Service(edge.To)
+		cl := catalog.Client{
+			Service: target.Name,
+			FQDN:    target.FQDN,
+			Config:  target.Config,
+			Secret:  ref(target.Name),
+		}
+		if !edge.TLS {
+			seg, _ := m.Segment(target.Name)
+			cl.Plain = &catalog.Plain{FQDN: model.SegmentFQDN(target.Name, m.Domain), Subnet: subnets[seg.Name].String()}
+		}
+		g := EnvGroup{Service: target.Name, Title: target.Entry.Title, Plaintext: !edge.TLS, Reason: edge.Reason}
+		for _, v := range target.Entry.Client(cl) {
+			if seen[v.Name] {
+				// A second service of the same type: prefix its variables.
+				v.Name = secrets.EnvPrefixed(target.Name, v.Name)
+			}
+			seen[v.Name] = true
+			g.Vars = append(g.Vars, v)
+		}
+		groups = append(groups, g)
+	}
+	return groups
+}
+
 func appService(in Input, svc *model.Service) *yaml.Node {
 	m := in.Model
 	app := svc.App
@@ -311,55 +369,21 @@ func appService(in Input, svc *model.Service) *yaml.Node {
 		}
 		def.Content = append(def.Content, str("command"), command(cmd))
 	}
-	env := []catalog.EnvVar{
-		{Name: "SSL_CERT_FILE", Value: catalog.TrustBundleFile},
-		// The app's own certificate, for apps that serve TLS to other apps.
-		{Name: "TLS_CERT_FILE", Value: catalog.CertFile},
-		{Name: "TLS_KEY_FILE", Value: catalog.KeyFile},
-		{Name: "BB_SERVICE", Value: svc.Name},
-		// The app's own address, matching its certificate.
-		{Name: "BB_FQDN", Value: svc.FQDN},
-	}
-	if svc.Health != nil {
-		env = append(env, catalog.EnvVar{Name: "BB_HEALTH_PORT", Value: strconv.Itoa(svc.Health.Port)})
-	}
-	seen := map[string]bool{}
-	for _, e := range env {
-		seen[e.Name] = true
-	}
-	envNode := environment(env)
+	groups := AppEnv(m, svc, in.Secrets.Ref, in.Subnets)
+	envNode := environment(groups[0].Vars)
 	depends := mapping()
-	for _, edge := range m.EdgesFrom(svc.Name) {
-		target, _ := m.Service(edge.To)
-		cl := catalog.Client{
-			Service: target.Name,
-			FQDN:    target.FQDN,
-			Config:  target.Config,
-			Secret:  in.Secrets.Ref(target.Name),
-		}
-		if !edge.TLS {
-			seg, _ := m.Segment(target.Name)
-			cl.Plain = &catalog.Plain{FQDN: model.SegmentFQDN(target.Name, m.Domain), Subnet: in.Subnets[seg.Name].String()}
-		}
-		first := true
-		for _, v := range target.Entry.Client(cl) {
-			name := v.Name
-			if seen[name] {
-				// A second service of the same type: prefix its variables.
-				name = secrets.EnvPrefixed(target.Name, v.Name)
-			}
-			seen[name] = true
-			k := str(name)
-			if first {
-				k.HeadComment = fmt.Sprintf("%s (%s)", target.Name, target.Entry.Title)
-				if !edge.TLS {
-					k.HeadComment = fmt.Sprintf("%s (%s): PLAINTEXT edge (tls.mode: off). Reason: %s", target.Name, target.Entry.Title, edge.Reason)
+	for _, g := range groups[1:] {
+		for i, v := range g.Vars {
+			k := str(v.Name)
+			if i == 0 {
+				k.HeadComment = fmt.Sprintf("%s (%s)", g.Service, g.Title)
+				if g.Plaintext {
+					k.HeadComment = fmt.Sprintf("%s (%s): PLAINTEXT edge (tls.mode: off). Reason: %s", g.Service, g.Title, g.Reason)
 				}
-				first = false
 			}
 			envNode.Content = append(envNode.Content, k, str(v.Value))
 		}
-		depends.Content = append(depends.Content, str(target.Name), mapping(str("condition"), str("service_healthy")))
+		depends.Content = append(depends.Content, str(g.Service), mapping(str("condition"), str("service_healthy")))
 	}
 	def.Content = append(def.Content, str("environment"), envNode)
 	if len(app.Ports) > 0 {

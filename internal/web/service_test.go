@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -144,5 +145,34 @@ func TestDirectRequires(t *testing.T) {
 	got := directRequires("module x\n\nrequire github.com/a/b v1.0.0\n\nrequire (\n\tgithub.com/c/d v1.0.0\n\tgithub.com/e/f v1.0.0 // indirect\n)\n")
 	if !slices.Equal(got, []string{"github.com/a/b", "github.com/c/d"}) {
 		t.Errorf("directRequires = %v", got)
+	}
+}
+
+func TestSearchIndexListsEveryPage(t *testing.T) {
+	s := newProject(t)
+	rec := s.get(t, "/search-index", map[string]string{"Cookie": signIn(t, s)})
+	var entries []searchEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &entries); err != nil {
+		t.Fatalf("index: %v\n%s", err, rec.Body.String())
+	}
+	urls := map[string]bool{}
+	for _, e := range entries {
+		urls[e.URL] = true
+	}
+	for _, want := range []string{"/docs/kafka", "/docs/kafka/consumer-groups", "/starters/kafka/sink-to-postgres", "/services/sink", "/services/postgres"} {
+		if !urls[want] {
+			t.Errorf("index lacks %s", want)
+		}
+	}
+}
+
+// Phones get a menu and container cards; wider screens the table.
+func TestMobileLayout(t *testing.T) {
+	s := newProject(t)
+	body := s.get(t, "/dashboard", map[string]string{"Cookie": signIn(t, s)}).Body.String()
+	for _, want := range []string{"<details", ">Menu</summary>", "md:hidden", "hidden md:block", "data-search-open", `id="search"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard lacks %q", want)
+		}
 	}
 }

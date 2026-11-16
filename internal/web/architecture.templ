@@ -25,12 +25,15 @@ templ architectureBody(d dashboardData, selected string) {
 				</span>
 			</div>
 			<div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
-				@card() {
-					<div class="overflow-x-auto p-4">
-						@graphSVG(layout(d.Services, selected), true)
-					</div>
-					@legend()
-				}
+				<div class="hidden md:block">
+					@card() {
+						<div class="overflow-x-auto p-4">
+							@graphSVG(layout(d.Services, selected), true)
+						</div>
+						@legend()
+					}
+				</div>
+				@connectionList(d)
 				if r, ok := find(d.Services, selected); ok {
 					@inspector(d, r)
 				}
@@ -169,4 +172,18 @@ templ inspector(d dashboardData, r row) {
 		</div>
 		<a href={ templ.SafeURL("/services/" + r.Name) } class="mt-5 inline-block text-sm text-indigo-600 hover:text-indigo-800">Open service page →</a>
 	</aside>
+}
+
+// connectionList is the architecture on a phone: every edge as a row.
+templ connectionList(d dashboardData) {
+	<div class="flex flex-col gap-2 md:hidden">
+		for _, r := range d.Services {
+			for _, e := range r.Uses {
+				<a href={ templ.SafeURL("/architecture?node=" + r.Name) } class={ "flex items-center justify-between rounded-xl border px-4 py-3 text-sm", templ.KV("border-red-200 bg-red-50", !e.TLS), templ.KV("border-slate-200 bg-white", e.TLS) }>
+					<span><span class="font-semibold">{ r.Name }</span> → { e.To }</span>
+					<span class={ "font-mono text-xs", templ.KV("text-red-700", !e.TLS), templ.KV("text-slate-600", e.TLS) }>{ edgeLabel(e.TLS, e.Port) }</span>
+				</a>
+			}
+		}
+	</div>
 }

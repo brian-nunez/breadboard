@@ -134,6 +134,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /live/logs/{name}", s.logs)
 	mux.HandleFunc("GET /fragments/explore/{name}", s.exploreFragment)
 	mux.HandleFunc("GET /fragments/live/{name}", s.liveFragment)
+	mux.HandleFunc("GET /search-index", s.searchIndex)
 	mux.HandleFunc("GET /docs", s.docsHome)
 	mux.HandleFunc("GET /docs/{tech}", s.docsTech)
 	mux.HandleFunc("GET /docs/{tech}/{guide}", s.docsGuide)

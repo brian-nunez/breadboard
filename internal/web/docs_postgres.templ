@@ -1,0 +1,471 @@
+package web
+
+// Postgres docs, following the Kafka template (D-031, D-061).
+
+func init() {
+	registerTech(tech{
+		ID:      "postgres",
+		Name:    "Postgres",
+		Tagline: "Relational database with strong consistency.",
+		Order:   20,
+		Intro:   postgresIntro(),
+		GoodFit: []string{"The system of record for business data", "Data with relations and constraints", "Transactions across several rows or tables", "Ad-hoc queries and reporting"},
+		PoorFit: []string{"Very high write rates spread across many machines", "Large binary files", "A cache in front of slow reads", "Fan-out event streams to many readers"},
+		Diagram: postgresDiagram(),
+		Official: []link{
+			{"PostgreSQL documentation", "https://www.postgresql.org/docs/current/"},
+			{"Concurrency control", "https://www.postgresql.org/docs/current/mvcc.html"},
+			{"pgx client", "https://pkg.go.dev/github.com/jackc/pgx/v5"},
+		},
+		Starters: []string{"kafka/sink-to-postgres", "redis/cache-invalidation"},
+		Guides: []guide{
+			{
+				Slug: "basic-usage", Title: "Connecting and querying", Summary: "Connect with pgx, write, and read rows back.",
+				Starter:  "redis/cache-invalidation",
+				Sections: []docSection{{"connect", "Connecting"}, {"handshake", "What happens on connect"}, {"query", "Writing and reading"}, {"protocol", "Prepared statements"}, {"pool", "One connection or a pool"}},
+				Body:     postgresBasicUsage(),
+			},
+			{
+				Slug: "transactions", Title: "Transactions and isolation", Summary: "MVCC and what each isolation level does.",
+				Sections: []docSection{{"tx", "A transaction in pgx"}, {"mvcc", "Row versions, not read locks"}, {"read-committed", "Read Committed"}, {"stricter", "Repeatable Read and Serializable"}},
+				Body:     postgresTransactions(),
+			},
+			{
+				Slug: "upserts", Title: "Upserts and idempotent writes", Summary: "INSERT ... ON CONFLICT and its arbiter index.",
+				Starter:  "kafka/sink-to-postgres",
+				Sections: []docSection{{"conflict", "INSERT ... ON CONFLICT"}, {"arbiter", "The unique index decides"}, {"update", "Updating instead"}, {"sink", "Idempotence in the sink"}},
+				Body:     postgresUpserts(),
+			},
+			{
+				Slug: "indexes", Title: "Indexes and EXPLAIN", Summary: "B-trees, query plans, and how to read them.",
+				Sections: []docSection{{"btree", "B-tree indexes"}, {"explain", "Reading EXPLAIN"}, {"analyze", "EXPLAIN ANALYZE"}, {"try", "Try it in Breadboard"}},
+				Body:     postgresIndexes(),
+			},
+			{
+				Slug: "in-breadboard", Title: "Postgres in Breadboard", Summary: "The image, roles, TLS, env vars.",
+				Sections: []docSection{{"server", "One server, one app database"}, {"tls", "TLS only, verify-full"}, {"env", "What your app receives"}, {"plaintext", "A plaintext edge"}, {"tools", "Data and tools"}},
+				Body:     postgresInBreadboard(),
+			},
+		},
+	})
+}
+
+const pgConnectCode = `db, err := pgx.Connect(ctx, os.Getenv("DATABASE_URL"))
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close(ctx)`
+
+const pgExecCode = `if _, err := db.Exec(ctx, ` + "`" + `CREATE TABLE IF NOT EXISTS products (id text PRIMARY KEY, price_cents integer NOT NULL)` + "`" + `); err != nil {
+    log.Fatal(err)
+}
+// ...
+if _, err := db.Exec(ctx, ` + "`" + `UPDATE products SET price_cents = $2 WHERE id = $1` + "`" + `, id, price); err != nil {
+    log.Fatal(err)
+}`
+
+const pgQueryRowCode = `// Scan returns pgx.ErrNoRows when the query finds nothing.
+if err := db.QueryRow(ctx, ` + "`" + `SELECT price_cents FROM products WHERE id = $1` + "`" + `, id).Scan(&price); err != nil {
+    return 0, false, err
+}`
+
+const pgQueryCode = `rows, err := db.Query(ctx, ` + "`" + `SELECT id, price_cents FROM products ORDER BY id` + "`" + `)
+if err != nil {
+    return err
+}
+defer rows.Close()
+for rows.Next() {
+    var id string
+    var price int
+    if err := rows.Scan(&id, &price); err != nil {
+        return err
+    }
+    log.Printf("%s costs %d", id, price)
+}
+// Next returns false at the end and on an error: Err says which.
+return rows.Err()`
+
+const pgPoolCode = `// A pool is safe to share between goroutines. Each call borrows a
+// connection, runs, and gives it back.
+pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+if err != nil {
+    log.Fatal(err)
+}
+defer pool.Close()`
+
+const pgTxCode = `tx, err := db.Begin(ctx)
+if err != nil {
+    return err
+}
+// Rollback after a successful Commit does nothing, so this is always safe.
+defer tx.Rollback(ctx)
+
+if _, err := tx.Exec(ctx, ` + "`" + `UPDATE accounts SET balance = balance - $2 WHERE id = $1` + "`" + `, from, amount); err != nil {
+    return err
+}
+if _, err := tx.Exec(ctx, ` + "`" + `UPDATE accounts SET balance = balance + $2 WHERE id = $1` + "`" + `, to, amount); err != nil {
+    return err
+}
+return tx.Commit(ctx)`
+
+const pgSerializableCode = `tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+// ... reads and writes, then Commit ...
+
+// Any statement, or the Commit itself, can fail with SQLSTATE 40001.
+var pgErr *pgconn.PgError
+if errors.As(err, &pgErr) && pgErr.Code == "40001" {
+    // Roll back and run the whole transaction again from the start.
+}`
+
+const pgSinkUpsertCode = `// The primary key makes the insert idempotent: a redelivered event
+// (after a crash before the commit below) inserts nothing.
+tag, err := db.Exec(ctx,
+    ` + "`" + `INSERT INTO orders (id, customer, amount_cents) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING` + "`" + `,
+    o.ID, o.Customer, o.AmountCents)
+switch {
+case err != nil:
+    log.Fatal(err) // exit without committing; the record is read again after restart
+case tag.RowsAffected() == 0:
+    log.Printf("duplicate id=%s", o.ID)
+default:
+    log.Printf("stored id=%s", o.ID)
+}`
+
+const pgSinkTableCode = `CREATE TABLE IF NOT EXISTS orders (
+    id           text PRIMARY KEY,
+    customer     text NOT NULL,
+    amount_cents integer NOT NULL,
+    stored_at    timestamptz NOT NULL DEFAULT now()
+)`
+
+const pgDoUpdateCode = `-- Insert the product, or set its price if the id already exists.
+-- EXCLUDED is the row that was proposed for insertion.
+INSERT INTO products (id, price_cents) VALUES ($1, $2)
+ON CONFLICT (id) DO UPDATE SET price_cents = EXCLUDED.price_cents`
+
+const pgSeedCode = `for _, id := range products {
+    if _, err := db.Exec(ctx, ` + "`" + `INSERT INTO products VALUES ($1, 100) ON CONFLICT (id) DO NOTHING` + "`" + `, id); err != nil {
+        log.Fatal(err)
+    }
+}`
+
+const pgExplainDocsCode = `-- From the PostgreSQL manual's EXPLAIN chapter:
+EXPLAIN SELECT * FROM tenk1;
+ Seq Scan on tenk1  (cost=0.00..445.00 rows=10000 width=244)
+
+EXPLAIN SELECT * FROM tenk1 WHERE unique1 = 42;
+ Index Scan using tenk1_unique1 on tenk1  (cost=0.29..8.30 rows=1 width=244)
+   Index Cond: (unique1 = 42)`
+
+const pgExplainTryCode = `-- 100,000 rows, no index yet.
+CREATE TABLE events AS
+  SELECT g AS id, md5(g::text) AS body FROM generate_series(1, 100000) AS g;
+ANALYZE events;
+EXPLAIN SELECT * FROM events WHERE id = 42;   -- Seq Scan on events
+
+CREATE INDEX events_id_idx ON events (id);
+EXPLAIN SELECT * FROM events WHERE id = 42;   -- Index Scan using events_id_idx
+
+EXPLAIN ANALYZE SELECT * FROM events WHERE id = 42;
+DROP TABLE events;`
+
+const pgHbaCode = `# TYPE    DATABASE USER ADDRESS METHOD
+# Unix socket inside the container only (init scripts, docker exec).
+local     all      all          trust
+# Every network connection must use TLS.
+hostssl   all      all  all     scram-sha-256`
+
+const pgInitCode = `CREATE ROLE :"app_user" LOGIN PASSWORD :'app_password';
+CREATE DATABASE :"app_db" OWNER :"app_user";`
+
+const pgPlainCode = `apps:
+  api:
+    path: ./api
+    uses:
+      - service: postgres
+        tls:
+          mode: off
+          reason: practice TLS termination at a pooler`
+
+templ postgresIntro() {
+	@docP() {
+		Postgres stores data in tables of typed columns and answers SQL queries over them. Constraints such as primary keys, foreign keys and NOT NULL are checked by the server on every write, so bad data is rejected before it is stored.
+	}
+	@docP() {
+		Every change happens inside a transaction. A transaction's changes become visible to others all at once when it commits, or not at all if it rolls back. Before a commit returns, the change is written to the write-ahead log (WAL) on disk, so a crash cannot lose it.
+	}
+	@docP() {
+		Readers and writers don't block each other. When a row is updated, Postgres keeps the old version next to the new one, and each statement reads from a snapshot of committed data. This is multiversion concurrency control (MVCC).
+	}
+}
+
+templ postgresDiagram() {
+	<svg viewBox="0 0 900 220" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="An app's pgx connection reaches the postmaster over TLS; the postmaster starts one backend process per connection, which reads and writes tables and indexes and logs changes to the WAL">
+		<defs>
+			<marker id="pg-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<rect x="20" y="60" width="170" height="90" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="36" y="86" class="fill-slate-900 font-mono text-[13px] font-semibold">app</text>
+		<rect x="36" y="98" width="138" height="34" rx="6" class="fill-white stroke-slate-200"></rect>
+		<text x="48" y="120" class="fill-slate-700 text-[13px]">pgx.Conn</text>
+		<line x1="190" y1="105" x2="268" y2="105" stroke-width="1.5" marker-end="url(#pg-arrow)" class="stroke-slate-400"></line>
+		<text x="229" y="96" text-anchor="middle" class="fill-slate-500 text-[12px]">TLS :5432</text>
+		<rect x="276" y="20" width="390" height="180" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="292" y="46" class="fill-indigo-800 font-mono text-[13px] font-semibold">postgres server</text>
+		<rect x="292" y="60" width="150" height="34" rx="6" class="fill-white stroke-indigo-200"></rect>
+		<text x="304" y="82" class="fill-slate-700 text-[13px]">postmaster</text>
+		<line x1="367" y1="94" x2="367" y2="128" stroke-width="1.5" marker-end="url(#pg-arrow)" class="stroke-slate-400"></line>
+		<text x="377" y="116" class="fill-slate-500 text-[12px]">starts</text>
+		<rect x="292" y="136" width="150" height="34" rx="6" class="fill-white stroke-indigo-200"></rect>
+		<text x="304" y="158" class="fill-slate-700 text-[13px]">backend process</text>
+		<text x="292" y="190" class="fill-slate-500 text-[12px]">one per connection</text>
+		<rect x="478" y="60" width="172" height="110" rx="6" class="fill-white stroke-indigo-200"></rect>
+		<text x="490" y="82" class="fill-slate-700 text-[13px]">shared memory</text>
+		<text x="490" y="102" class="fill-slate-500 text-[12px]">buffered pages, locks</text>
+		<line x1="442" y1="153" x2="470" y2="153" stroke-width="1.5" marker-end="url(#pg-arrow)" class="stroke-slate-400"></line>
+		<line x1="666" y1="80" x2="728" y2="80" stroke-width="1.5" marker-end="url(#pg-arrow)" class="stroke-slate-400"></line>
+		<text x="697" y="71" text-anchor="middle" class="fill-slate-500 text-[12px]">1. log</text>
+		<line x1="666" y1="150" x2="728" y2="150" stroke-width="1.5" marker-end="url(#pg-arrow)" class="stroke-slate-400"></line>
+		<text x="697" y="141" text-anchor="middle" class="fill-slate-500 text-[12px]">2. write</text>
+		<rect x="736" y="56" width="144" height="48" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="752" y="85" class="fill-slate-900 font-mono text-[13px] font-semibold">WAL</text>
+		<rect x="736" y="126" width="144" height="48" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="752" y="155" class="fill-slate-900 font-mono text-[13px] font-semibold">tables, indexes</text>
+	</svg>
+}
+
+templ postgresBasicUsage() {
+	@docLead() {
+		An app needs one connection string to talk to Postgres. These are the lines the redis/cache-invalidation and kafka/sink-to-postgres starters run, using the pgx client.
+	}
+	@docH2("connect", "Connecting")
+	@docP() {
+		Breadboard puts the full connection string in @docCodeWord("DATABASE_URL"): user, password, host, port, database and @docCodeWord("sslmode=verify-full")&#46; It also sets @docCodeWord("PGSSLROOTCERT") to the Breadboard CA. pgx reads the standard PG* variables as defaults, so the code passes the URL and nothing else.
+	}
+	@docCode("cmd/cache-reader/main.go", pgConnectCode)
+	@docP() {
+		Unlike Kafka's client, @docCodeWord("pgx.Connect") connects immediately. It returns once the server says it is ready for queries, or an error if any step fails.
+	}
+	@docH2("handshake", "What happens on connect")
+	@docSteps(
+		"pgx opens a TCP connection to postgres.bb.internal:5432. The postmaster, which listens on that port, starts a new backend process to serve this connection alone.",
+		"pgx sends an SSLRequest. The server answers with one byte: S to accept TLS.",
+		"The TLS handshake runs. With verify-full, pgx checks that the certificate chains to the CA in PGSSLROOTCERT and that it was issued for the host name in the URL.",
+		"Inside TLS, pgx sends a startup message naming the user and database.",
+		"The server asks for SCRAM-SHA-256 authentication, and pgx proves it knows the password without sending it.",
+		"The server sends its settings (ParameterStatus), a key for cancelling queries (BackendKeyData), and ReadyForQuery.",
+	)
+	@docP() {
+		Every connection is a separate process on the server. That is why connections are relatively expensive to open and why the server caps them with @docCodeWord("max_connections"), 100 by default.
+	}
+	@docH2("query", "Writing and reading")
+	@docP() {
+		@docCodeWord("Exec") runs a statement and returns its command tag, such as @docCodeWord("UPDATE 1")&#46; Values go in as @docCodeWord("$1"), @docCodeWord("$2") placeholders and travel separately from the SQL text, so they are never parsed as SQL.
+	}
+	@docCode("cmd/cache-writer/main.go", pgExecCode)
+	@docP() {
+		@docCodeWord("QueryRow") is for exactly one row. It reads the first row and @docCodeWord("Scan") copies its columns into Go variables, in order:
+	}
+	@docCode("cmd/cache-reader/main.go", pgQueryRowCode)
+	@docP() {
+		@docCodeWord("Query") is for many rows. The rows stream from the server while you iterate, and the connection stays busy until they are all read or closed. A second query on the same connection before then fails with @docCodeWord("conn busy")&#46;
+	}
+	@docCode("main.go", pgQueryCode)
+	@docH2("protocol", "Prepared statements")
+	@docP() {
+		By default pgx uses the extended query protocol and caches prepared statements. The first time a connection sees a query with arguments, pgx sends Parse to prepare it under a name derived from a SHA-256 of the SQL, and the server returns the parameter and column types. pgx keeps that in a per-connection LRU cache of 512 statements. Every later run of the same SQL skips Parse: one round trip with Bind and Execute.
+	}
+	@docList(
+		"A statement with no arguments passed to Exec uses the simple protocol instead: one Query message, nothing prepared.",
+		"The cache holds column types. If the schema changes under a cached statement (a column type changes, or SELECT * gains a column), the first run after the change can fail. pgx then drops that statement from the cache.",
+		"Settings in the URL change this: statement_cache_capacity sets the size, and default_query_exec_mode picks another mode.",
+	)
+	@docH2("pool", "One connection or a pool")
+	@docP() {
+		A @docCodeWord("*pgx.Conn") is one connection and is not safe to use from several goroutines at once. The starters run a single loop, so one connection is enough. A server handling concurrent requests uses @docCodeWord("pgxpool") instead:
+	}
+	@docCode("main.go", pgPoolCode)
+	@docP() {
+		@docCodeWord("pgxpool.New") does not connect. Connections open when they are first needed, up to @docCodeWord("pool_max_conns"), which defaults to 4 or the number of CPUs, whichever is greater. Errors appear on the first query, not from @docCodeWord("New")&#46;
+	}
+	@docTerminal("bb init cache-lab", "bb starter redis/cache-invalidation", "bb up", "bb logs cache-reader -f")
+}
+
+templ postgresTransactions() {
+	@docLead() {
+		A transaction groups statements so they take effect together or not at all. The isolation level decides what a transaction sees of other transactions running at the same time.
+	}
+	@docH2("tx", "A transaction in pgx")
+	@docP() {
+		Without @docCodeWord("BEGIN"), every statement is its own transaction: Postgres wraps it in an implicit BEGIN and COMMIT. To make several statements atomic, open a transaction explicitly:
+	}
+	@docCode("main.go", pgTxCode)
+	@docP() {
+		What actually happens: @docCodeWord("Begin") sends @docCodeWord("begin") on the connection, and every @docCodeWord("tx.Exec") runs on that same connection. @docCodeWord("Commit") sends @docCodeWord("commit")&#46; If a statement failed earlier, the server treats that commit as a rollback and pgx returns @docCodeWord("ErrTxCommitRollback")&#46; Once either has run, the transaction is closed and the deferred @docCodeWord("Rollback") returns @docCodeWord("ErrTxClosed") without touching the server.
+	}
+	@docCallout("The context only covers Begin") {
+		In pgx, cancelling the context passed to @docCodeWord("Begin") does not roll the transaction back later. Only Commit or Rollback ends it, which is why the deferred Rollback matters.
+	}
+	@docH2("mvcc", "Row versions, not read locks")
+	@docP() {
+		An @docCodeWord("UPDATE") does not overwrite a row in place. It writes a new version of the row and marks the old one as replaced by this transaction. A @docCodeWord("DELETE") marks the row the same way. Each statement reads through a snapshot that decides which versions are visible to it, so a reader sees the last committed version and never waits for the writer.
+	}
+	@docList(
+		"Reading never blocks writing, and writing never blocks reading.",
+		"Two transactions writing the same row do conflict: the second waits for the first to commit or roll back.",
+		"Old versions stay on disk until no snapshot can see them. VACUUM, run automatically by autovacuum, then reclaims the space.",
+	)
+	@docH2("read-committed", "Read Committed")
+	@docP() {
+		Read Committed is the default. Each statement takes a new snapshot when it starts, so two SELECTs in one transaction can see different data if another transaction committed in between.
+	}
+	@docP() {
+		When an UPDATE finds a row that a concurrent transaction is changing, it waits. If that transaction commits, Postgres re-checks the WHERE clause against the new version of the row and, if it still matches, applies the update to it. So @docCodeWord("SET balance = balance - 10") from two transactions subtracts 20. The trap is reading a value in one statement, computing in Go, and writing it back in another: the second writer overwrites the first one's result.
+	}
+	@docH2("stricter", "Repeatable Read and Serializable")
+	@docP() {
+		Repeatable Read takes one snapshot, at the transaction's first statement, and uses it until the end. Every read in the transaction sees the same data. If it tries to update or lock a row that another transaction changed and committed after that snapshot, Postgres aborts it with @docCodeWord("could not serialize access due to concurrent update")&#46;
+	}
+	@docP() {
+		Serializable adds checks on top of that snapshot. Postgres tracks what each transaction read using predicate locks, which never block, and aborts a transaction when the combined result could not have come from running the transactions one at a time. Both levels report this as SQLSTATE 40001, and the fix is always the same: roll back and retry the whole transaction.
+	}
+	@docCode("main.go", pgSerializableCode)
+	@docList(
+		"Read Uncommitted can be requested but behaves exactly like Read Committed: Postgres never shows uncommitted data.",
+		"pgx sends the level in the begin statement: begin isolation level serializable.",
+	)
+}
+
+templ postgresUpserts() {
+	@docLead() {
+		An upsert inserts a row or, if one with the same key exists, does something else instead, in a single statement. It is how a consumer makes a redelivered message harmless.
+	}
+	@docH2("conflict", "INSERT ... ON CONFLICT")
+	@docP() {
+		A plain INSERT of a key that already exists fails with a unique violation. Adding @docCodeWord("ON CONFLICT") tells Postgres what to do instead. The redis/cache-invalidation starter seeds its products this way, so running the seed on every start adds missing rows and leaves existing ones alone:
+	}
+	@docCode("cmd/cache-writer/main.go", pgSeedCode)
+	@docP() {
+		The command tag counts the rows inserted or updated. A row skipped by @docCodeWord("DO NOTHING") is not counted, so pgx's @docCodeWord("RowsAffected()") returns 0 for it. That is how code can tell a new row from a duplicate.
+	}
+	@docH2("arbiter", "The unique index decides")
+	@docP() {
+		Postgres detects a conflict through a unique index, called the arbiter. In @docCodeWord("ON CONFLICT (id)"), the column list is used to find a unique index on exactly those columns. If none exists, the statement fails with an error. A primary key or a UNIQUE constraint creates such an index automatically, so both work as arbiters.
+	}
+	@docList(
+		"DO NOTHING may omit the column list; then a conflict with any unique index or constraint is skipped.",
+		"DO UPDATE must name the columns or the constraint.",
+		"By default NULLs are not equal to each other in a unique index, so rows with a NULL key never conflict.",
+	)
+	@docH2("update", "Updating instead")
+	@docP() {
+		@docCodeWord("DO UPDATE") changes the existing row. The special table @docCodeWord("EXCLUDED") holds the values that were proposed for insertion:
+	}
+	@docCode("upsert.sql", pgDoUpdateCode)
+	@docP() {
+		Postgres guarantees an atomic outcome: each row is either inserted or updated, even when many sessions run the same statement concurrently. One DO UPDATE statement may not affect the same row twice, so a multi-row VALUES list with two rows for one key fails with a cardinality violation.
+	}
+	@docH2("sink", "Idempotence in the sink")
+	@docP() {
+		The kafka/sink-to-postgres starter delivers each Kafka record at least once, so the same order can arrive twice after a crash. Its table makes the order id the primary key:
+	}
+	@docCode("cmd/sink/main.go", pgSinkTableCode)
+	@docP() {
+		and every insert names that key as the arbiter. A replayed order hits the primary key index, inserts nothing, and is logged as a duplicate:
+	}
+	@docCode("cmd/sink/main.go", pgSinkUpsertCode)
+	@docP() {
+		Redelivery plus an idempotent write gives the effect of exactly-once processing. The Kafka side is covered in @docLink("/docs/kafka/offsets-and-delivery", "Offsets and delivery")&#46;
+	}
+	@docTerminal("bb init kafka-lab", "bb starter kafka/sink-to-postgres", "bb up", "docker kill bb-kafka-lab-sink-1 && bb up", "bb logs sink | grep duplicate")
+}
+
+templ postgresIndexes() {
+	@docLead() {
+		An index is a separate structure that maps column values to row locations. The planner decides for each query whether using one is cheaper than reading the whole table, and EXPLAIN shows what it decided.
+	}
+	@docH2("btree", "B-tree indexes")
+	@docP() {
+		@docCodeWord("CREATE INDEX") builds a B-tree unless told otherwise. A B-tree keeps values sorted, so it can find one value, a range, or return rows in order without sorting them.
+	}
+	@docList(
+		"It serves comparisons with =, less than, greater than, and combinations of them such as BETWEEN and IN.",
+		"It serves IS NULL, and LIKE 'abc%' patterns anchored at the start (with a special operator class outside the C locale).",
+		"Every primary key and UNIQUE constraint has one, created automatically.",
+		"Every insert also adds an entry to each of the table's indexes, so each index costs write time and space.",
+	)
+	@docH2("explain", "Reading EXPLAIN")
+	@docP() {
+		@docCodeWord("EXPLAIN") prints the plan the planner chose, as a tree of nodes, without running the query. These examples are from the PostgreSQL manual:
+	}
+	@docCode("psql", pgExplainDocsCode)
+	@docList(
+		"Seq Scan reads every page of the table and filters the rows.",
+		"Index Scan walks the index to the matching entries and fetches each row from the table.",
+		"cost=start..total is an estimate in arbitrary units, where reading one page sequentially costs 1.0 by default.",
+		"rows is the estimated number of rows the node returns; width is their average size in bytes.",
+	)
+	@docP() {
+		The estimates come from statistics that ANALYZE collects (autovacuum runs it in the background). For a table of a few pages, a sequential scan beats any index, so on a small table the planner may ignore the index you just made. That is the planner working, not a bug.
+	}
+	@docH2("analyze", "EXPLAIN ANALYZE")
+	@docP() {
+		@docCodeWord("EXPLAIN ANALYZE") runs the query and adds what really happened to each node: @docCodeWord("actual time") in milliseconds, the real @docCodeWord("rows"), and @docCodeWord("loops"), how many times the node ran. Times and rows are per loop. In Postgres 18 it also reports buffer usage, which shows how many pages came from memory and how many were read. The output ends with Planning Time and Execution Time.
+	}
+	@docCallout("It really runs") {
+		EXPLAIN ANALYZE on an UPDATE or DELETE changes the data. Wrap it in BEGIN and ROLLBACK to look without keeping the change.
+	}
+	@docH2("try", "Try it in Breadboard")
+	@docP() {
+		Open psql as the superuser inside the Postgres container, in the app database. Replace the experiment name with yours; the service's Tables tab shows the exact command.
+	}
+	@docTerminal("docker exec -it bb-<experiment>-postgres-1 psql -U postgres app")
+	@docP() {
+		Then build a table large enough for an index to matter, and compare the plans before and after creating one:
+	}
+	@docCode("psql", pgExplainTryCode)
+}
+
+templ postgresInBreadboard() {
+	@docLead() {
+		What Breadboard runs when you add Postgres, and how it is wired.
+	}
+	@docH2("server", "One server, one app database")
+	@docP() {
+		The service runs the official @docCodeWord("postgres:18.7-alpine3.24") image with 512 MB of memory and half a CPU. On the first start, when the data volume is empty, the image runs Breadboard's init script, which creates an application role and a database it owns:
+	}
+	@docCode("/docker-entrypoint-initdb.d/10-init-app.sh", pgInitCode)
+	@docList(
+		"Both are named app by default; config.database and config.user change them.",
+		"The role cannot be postgres. Apps connect as their own role, not the superuser, whose password is generated but never given to apps.",
+		"The script runs only on an empty volume. After changing config.user or config.database, run bb down --volumes so the next bb up creates them.",
+	)
+	@docH2("tls", "TLS only, verify-full")
+	@docP() {
+		The server starts with @docCodeWord("ssl=on"), a certificate issued by your Breadboard CA for @docCodeWord("postgres.bb.internal"), and a minimum of TLS 1.2. Postgres refuses a private key that others can read or another user owns, so the start script first copies the mounted key with mode 0600 and the postgres owner. Breadboard also writes the server's @docCodeWord("pg_hba.conf"), the file Postgres checks line by line to decide who may connect, from where, and how:
+	}
+	@docCode("/etc/bb/config/pg_hba.conf", pgHbaCode)
+	@docP() {
+		A network connection without TLS matches no line and is rejected. Apps use @docCodeWord("sslmode=verify-full"), the only mode that checks both the certificate chain and the host name; @docCodeWord("require") encrypts but accepts any certificate. The health check itself connects this way, as the app role, and runs @docCodeWord("select 1")&#46;
+	}
+	@docH2("env", "What your app receives")
+	@docList(
+		"DATABASE_URL: postgres://app:<password>@postgres.bb.internal:5432/app?sslmode=verify-full.",
+		"PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE: the same values, for psql and other libpq-style clients.",
+		"PGSSLMODE: verify-full. PGSSLROOTCERT: /etc/bb/ca.pem, the CA that signed the server's certificate.",
+		"An app that uses two Postgres services gets the second one's variables prefixed with its name, such as ANALYTICS_DATABASE_URL.",
+	)
+	@docH2("plaintext", "A plaintext edge")
+	@docP() {
+		To practise without TLS, for example behind a pooler that terminates it, an app can ask for plaintext on its edge. A reason is required:
+	}
+	@docCode("experiment.yaml", pgPlainCode)
+	@docP() {
+		Breadboard then creates a private network shared only by Postgres and the apps that asked, and appends one @docCodeWord("hostnossl") line to pg_hba.conf that accepts unencrypted connections only from that network's subnet. Those apps connect to @docCodeWord("postgres.plain.bb.internal") with @docCodeWord("sslmode=disable")&#46; Every other app still needs TLS.
+	}
+	@docH2("tools", "Data and tools")
+	@docP() {
+		Data lives in a named volume mounted at @docCodeWord("/var/lib/postgresql"), so it survives @docCodeWord("bb down") and is deleted by @docCodeWord("bb down --volumes")&#46; The service's Tables tab in the dashboard lists every table in the app database with its exact row count and size. It runs psql inside the container as the superuser, over the local socket that pg_hba.conf trusts, and shows the command so you can open the same session:
+	}
+	@docTerminal("docker exec -it bb-<experiment>-postgres-1 psql -U postgres app")
+}

@@ -17,6 +17,8 @@ func types(id string) (TypeInfo, bool) {
 		return TypeInfo{Plaintext: true}, true
 	case "redis":
 		return TypeInfo{}, true
+	case "consul":
+		return TypeInfo{Registry: true}, true
 	case "postgres":
 		return TypeInfo{Plaintext: true, Config: func(k, v string) error {
 			if k != "database" {
@@ -386,5 +388,85 @@ func TestNamesThatLookLikeOtherTypesStayStrings(t *testing.T) {
 		if err != nil || s.Name != name {
 			t.Errorf("New(%q) round trip = %+v %v\n%s", name, s, err, out)
 		}
+	}
+}
+
+func TestRegister(t *testing.T) {
+	ok := `version: 1
+name: lab
+services:
+  consul:
+    type: consul
+apps:
+  greeter:
+    path: ./g
+    uses: [consul]
+    register:
+      port: 8443
+      check: /healthz
+`
+	s, err := load(t, ok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := s.Apps[0].Register; r == nil || *r != (Register{Port: 8443, Check: "/healthz"}) {
+		t.Fatalf("register = %+v", r)
+	}
+
+	missing, err := Parse([]byte("version: 1\nname: lab\napps:\n  g:\n    path: ./g\n    register: {check: /x}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := missing.Decode(); !slices.Equal(paths(t, err), []string{"apps.g.register.port"}) {
+		t.Fatalf("decode violations = %v", paths(t, err))
+	}
+
+	bad := `version: 1
+name: lab
+services:
+  consul:
+    type: consul
+  cache:
+    type: redis
+apps:
+  badfields:
+    path: ./a
+    uses: [consul]
+    register: {port: 8443, name: Bad_Name, check: healthz}
+  noregistry:
+    path: ./b
+    uses: [cache]
+    register: {port: 70000}
+  web:
+    path: ./c
+    uses: [consul]
+    register: {port: 443}
+  web-agent:
+    path: ./d
+`
+	_, err = load(t, bad)
+	want := []string{
+		"apps.badfields.register.check",
+		"apps.badfields.register.name",
+		"apps.noregistry.register",
+		"apps.noregistry.register.port",
+		"apps.web-agent",
+	}
+	if got := paths(t, err); !slices.Equal(got, want) {
+		t.Fatalf("violation paths:\n got %v\nwant %v", got, want)
+	}
+
+	// AddApp writes register so it round-trips.
+	d := New("lab")
+	if err := d.AddService("consul", "consul"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.AddApp(App{Name: "greeter", Path: "./g", Uses: []Use{{Service: "consul"}}, Register: &Register{Port: 8443}}); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := d.Bytes()
+	s, err = load(t, string(out))
+	if err != nil || s.Apps[0].Register == nil || s.Apps[0].Register.Port != 8443 {
+		t.Fatalf("round trip = %+v %v\n%s", s, err, out)
 	}
 }

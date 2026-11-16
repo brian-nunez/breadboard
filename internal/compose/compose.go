@@ -121,16 +121,24 @@ func Render(in Input) (*Bundle, error) {
 	hasApps := false
 
 	for _, svc := range m.Services {
-		cert, ok := in.Certs[svc.Name]
-		if !ok {
-			return nil, fmt.Errorf("compose: no certificate for %s", svc.Name)
+		// A sidecar shares its app's network identity, so it mounts the app's
+		// certificate files instead of having its own.
+		owner := svc.Name
+		if svc.Kind == model.Sidecar {
+			owner = svc.Parent
 		}
-		tlsDir := "tls/" + svc.Name
-		add(tlsDir+"/tls.crt", cert.Cert, 0o644)
-		// Keys are readable inside the bundle so non-root container users can
-		// load them; the bundle's directories are private to the host user.
-		add(tlsDir+"/tls.key", cert.Key, 0o644)
-		add(tlsDir+"/keystore.pem", append(append([]byte{}, cert.Key...), cert.Cert...), 0o644)
+		cert, ok := in.Certs[owner]
+		if !ok {
+			return nil, fmt.Errorf("compose: no certificate for %s", owner)
+		}
+		tlsDir := "tls/" + owner
+		if owner == svc.Name {
+			add(tlsDir+"/tls.crt", cert.Cert, 0o644)
+			// Keys are readable inside the bundle so non-root container users can
+			// load them; the bundle's directories are private to the host user.
+			add(tlsDir+"/tls.key", cert.Key, 0o644)
+			add(tlsDir+"/keystore.pem", append(append([]byte{}, cert.Key...), cert.Cert...), 0o644)
+		}
 
 		mounts := []string{
 			"./" + tlsDir + "/tls.crt:" + catalog.CertFile + ":ro",
@@ -157,6 +165,12 @@ func Render(in Input) (*Bundle, error) {
 			}
 			vol := svc.Name + "-data"
 			volumes.Content = append(volumes.Content, str(vol), mapping(str("labels"), in.labels("", "")))
+		case model.Sidecar:
+			def, mounts = sidecarService(in, svc, mounts, func(p string, data []byte, mode os.FileMode) {
+				hash.Write([]byte(p))
+				hash.Write(data)
+				add(p, data, mode)
+			})
 		case model.App:
 			hasApps = true
 			def = appService(in, svc)
@@ -170,7 +184,12 @@ func Render(in Input) (*Bundle, error) {
 			))
 		}
 		def.Content = append(def.Content, str("volumes"), seq(strs(mounts...)...))
-		def.Content = append(def.Content, str("networks"), networks(in, svc))
+		if svc.Kind == model.Sidecar {
+			// Same network namespace as the app: same address, same aliases.
+			def.Content = append(def.Content, str("network_mode"), str("service:"+svc.Parent))
+		} else {
+			def.Content = append(def.Content, str("networks"), networks(in, svc))
+		}
 		lbl := in.labels(svc.Name, string(svc.Kind))
 		lbl.Content = append(lbl.Content, str(LabelConfigHash), str(hex.EncodeToString(hash.Sum(nil))[:16]))
 		def.Content = append(def.Content, str("labels"), lbl)
@@ -270,6 +289,45 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 	mounts = append([]string{svc.Name + "-data:" + svc.Entry.DataPath}, mounts...)
 	def.Content = append(def.Content, str("healthcheck"), healthcheck(c.Health))
 	return def, mounts, nil
+}
+
+// sidecarService renders the agent that registers an app with its registry.
+func sidecarService(in Input, svc *model.Service, mounts []string, add func(string, []byte, os.FileMode)) (*yaml.Node, []string) {
+	m := in.Model
+	registry, _ := m.Service(svc.Registry)
+	c := svc.Entry.Sidecar(catalog.Sidecar{
+		App:      svc.Parent,
+		AppFQDN:  svc.FQDN,
+		Registry: registry.FQDN,
+		Secret:   in.Secrets.Ref(registry.Name),
+		Service:  svc.Register.Name,
+		Port:     svc.Register.Port,
+		Check:    svc.Register.Check,
+	})
+	def := mapping(str("image"), str(svc.Entry.Image))
+	if len(c.Entrypoint) > 0 {
+		def.Content = append(def.Content, str("entrypoint"), command(c.Entrypoint))
+	}
+	if len(c.Command) > 0 {
+		def.Content = append(def.Content, str("command"), command(c.Command))
+	}
+	env := append([]catalog.EnvVar{{Name: "SSL_CERT_FILE", Value: catalog.TrustBundleFile}}, c.Environment...)
+	def.Content = append(def.Content, str("environment"), environment(env))
+	for _, f := range c.Files {
+		p := "config/" + svc.Name + "/" + f.Name
+		mode := os.FileMode(f.Mode)
+		if mode == 0 {
+			mode = 0o644
+		}
+		add(p, f.Data, mode)
+		mounts = append(mounts, "./"+p+":"+f.MountPath()+":ro")
+	}
+	def.Content = append(def.Content, str("healthcheck"), healthcheck(c.Health))
+	def.Content = append(def.Content, str("depends_on"), mapping(
+		str(svc.Parent), mapping(str("condition"), str("service_started")),
+		str(registry.Name), mapping(str("condition"), str("service_healthy")),
+	))
+	return def, mounts
 }
 
 func appService(in Input, svc *model.Service) *yaml.Node {

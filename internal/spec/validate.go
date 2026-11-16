@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,8 @@ type TypeInfo struct {
 	Config func(key, value string) error
 	// Plaintext reports whether the entry can enable a plaintext listener for an edge.
 	Plaintext bool
+	// Registry reports whether apps using this type can set register.
+	Registry bool
 }
 
 // TypeLookup finds a catalog entry by id.
@@ -145,6 +148,31 @@ func Validate(s *Spec, types TypeLookup) error {
 			}
 			if app.Health.Port != 0 {
 				add(check(isPort, join(hp, "port"), "must be between 1 and 65535")(app.Health.Port))
+			}
+		}
+		if r := app.Register; r != nil {
+			rp := join(p, "register")
+			// The sidecar is a service of its own and shares the namespace.
+			claim(SidecarName(app.Name), rp)
+			if r.Port != 0 {
+				add(check(isPort, join(rp, "port"), "must be between 1 and 65535")(r.Port))
+			}
+			if r.Name != "" {
+				add(check(IsServiceOK, join(rp, "name"), "must be a lowercase DNS label of at most 63 characters")(r.Name))
+			}
+			if r.Check != "" {
+				add(check(func(s string) bool { return strings.HasPrefix(s, "/") }, join(rp, "check"), "must start with /")(r.Check))
+			}
+			registry := slices.ContainsFunc(app.Uses, func(u Use) bool {
+				svc, ok := s.Service(u.Service)
+				if !ok {
+					return false
+				}
+				info, ok := types(svc.Type)
+				return ok && info.Registry
+			})
+			if !registry {
+				add(Violation{Path: rp, Message: "needs a service registry (consul) in uses"})
 			}
 		}
 		seenUses := map[string]bool{}

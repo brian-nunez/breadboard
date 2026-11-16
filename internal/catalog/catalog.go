@@ -46,6 +46,9 @@ type Entry struct {
 	Server func(Server) Container
 	// Client renders the env contract for one app that uses the service.
 	Client func(Client) []EnvVar
+	// Sidecar renders the agent that registers an app with this service, for
+	// service registries. Nil means apps cannot register with it.
+	Sidecar func(Sidecar) Container
 }
 
 // Listener is a port the service accepts connections on.
@@ -122,6 +125,21 @@ type Client struct {
 	Secret  func(key string) string
 	// Plain is set when this edge is plaintext.
 	Plain *Plain
+}
+
+// Sidecar is the input for rendering an app's registration agent. The agent
+// shares the app's network namespace, so it has the app's address and uses
+// the app's certificate.
+type Sidecar struct {
+	App      string // the app's service name, used as the agent's node name
+	AppFQDN  string
+	Registry string // FQDN of the registry server the agent joins
+	// Secret returns a reference to one of the registry service's secrets.
+	Secret func(key string) string
+	// What to register.
+	Service string
+	Port    int
+	Check   string // HTTPS check path; empty means a TCP check
 }
 
 // Container is a rendered service definition.
@@ -232,7 +250,7 @@ func Types(id string) (spec.TypeInfo, bool) {
 	if !ok {
 		return spec.TypeInfo{}, false
 	}
-	info := spec.TypeInfo{Plaintext: e.SupportsPlaintext()}
+	info := spec.TypeInfo{Plaintext: e.SupportsPlaintext(), Registry: e.Sidecar != nil}
 	if len(e.Config) > 0 {
 		info.Config = e.CheckConfig
 	}

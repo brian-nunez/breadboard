@@ -56,6 +56,7 @@ type App struct {
 	Uses      []Use
 	Ports     []int
 	Health    *Health
+	Register  *Register
 	Resources Resources
 }
 
@@ -79,6 +80,17 @@ type Health struct {
 	Path string
 	Port int
 }
+
+// Register asks Breadboard to register an app in a service registry (Consul)
+// through a sidecar agent, so the app's code does not register itself.
+type Register struct {
+	Name  string // service name in the registry; empty means the app's name
+	Port  int    // the port the app serves on
+	Check string // path of an HTTPS health check; empty means a TCP check
+}
+
+// SidecarName is the name of the sidecar service that registers an app.
+func SidecarName(app string) string { return app + "-agent" }
 
 // Service returns the infra service with the given name.
 func (s *Spec) Service(name string) (Service, bool) {

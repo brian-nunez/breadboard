@@ -77,7 +77,7 @@ Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/et
   - `CONSUL_HTTP_ADDR=https://consul.bb.internal:8501`
   - `CONSUL_CACERT=/etc/bb/trust-bundle.pem`
   - On a plaintext edge: `CONSUL_HTTP_ADDR=http://consul.plain.bb.internal:8500` only.
-- Service registration for apps follows the sidecar pattern in Phase 2 ([`starters.md`](starters.md)).
+- **Registration sidecar.** An app with `register` in `experiment.yaml` gets a service `<app>-agent`: a Consul client agent in the app's network namespace (`network_mode: service:<app>`), so it has the app's address and presents the app's certificate. It joins the server over encrypted gossip and mutually authenticated RPC, registers the app with a check (a TCP connection with a verified TLS handshake by default, or HTTPS on `register.check`), and leaves the cluster when it stops, which deregisters the app. Its HTTPS API listens on `127.0.0.1` only; it is healthy once the registration reaches the server's catalog. This is the recommended way to register; apps can also call the Consul API themselves (`consul/self-registration`).
 - ACLs are out of scope for v1.
 
 ## Later entries

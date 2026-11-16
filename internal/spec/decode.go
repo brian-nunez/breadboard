@@ -168,7 +168,7 @@ func (dec *decoder) app(name, path string, n *yaml.Node) App {
 		dec.add(join(path, "path"), "is required")
 		return app
 	}
-	f := dec.fields(path, n, nil, "path", "command", "uses", "ports", "health", "resources")
+	f := dec.fields(path, n, nil, "path", "command", "uses", "ports", "health", "register", "resources")
 	if v, ok := f["path"]; ok {
 		app.Path = dec.str(join(path, "path"), v)
 	} else {
@@ -208,6 +208,23 @@ func (dec *decoder) app(name, path string, n *yaml.Node) App {
 			h.Port = dec.int(join(hp, "port"), p)
 		}
 		app.Health = h
+	}
+	if v, ok := f["register"]; ok && !isNull(v) {
+		rp := join(path, "register")
+		rf := dec.fields(rp, v, nil, "name", "port", "check")
+		r := &Register{}
+		if p, ok := rf["name"]; ok {
+			r.Name = dec.str(join(rp, "name"), p)
+		}
+		if p, ok := rf["port"]; ok {
+			r.Port = dec.int(join(rp, "port"), p)
+		} else {
+			dec.add(join(rp, "port"), "is required")
+		}
+		if p, ok := rf["check"]; ok {
+			r.Check = dec.str(join(rp, "check"), p)
+		}
+		app.Register = r
 	}
 	if v, ok := f["resources"]; ok {
 		app.Resources = dec.resources(join(path, "resources"), v)

@@ -149,6 +149,17 @@ func (d *Document) AddApp(app App) error {
 		}
 		body.Content = append(body.Content, scalar("health"), h)
 	}
+	if app.Register != nil {
+		r := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		if app.Register.Name != "" {
+			r.Content = append(r.Content, scalar("name"), scalar(app.Register.Name))
+		}
+		r.Content = append(r.Content, scalar("port"), intScalar(app.Register.Port))
+		if app.Register.Check != "" {
+			r.Content = append(r.Content, scalar("check"), scalar(app.Register.Check))
+		}
+		body.Content = append(body.Content, scalar("register"), r)
+	}
 	if r := resourcesNode(app.Resources); r != nil {
 		body.Content = append(body.Content, scalar("resources"), r)
 	}

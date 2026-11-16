@@ -247,6 +247,9 @@ func (e *Engine) reconcileCerts(p *project, m *model.Model, ca *pki.CA, ps *stat
 	now := e.now()
 	certs := map[string]compose.Cert{}
 	for _, svc := range m.Services {
+		if svc.Kind == model.Sidecar {
+			continue // a sidecar presents its app's certificate
+		}
 		req := pki.LeafRequest{DNSNames: []string{svc.FQDN}, Identity: svc.Identity}
 		certPEM, keyPEM, ok, err := p.ReadCert(svc.Name)
 		if err != nil {

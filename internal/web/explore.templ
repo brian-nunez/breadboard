@@ -7,7 +7,20 @@ import (
 	"github.com/brian-nunez/breadboard/internal/core"
 )
 
+// exploreTab is a placeholder the page script replaces with the explorer's
+// result, fetched once from /fragments/explore/<name>.
 templ exploreTab(p servicePage) {
+	<div data-load={ "/fragments/explore/" + p.Row.Name }>
+		@card() {
+			<div class="flex items-center gap-3 p-6 text-sm text-slate-600">
+				<svg viewBox="0 0 24 24" class="size-4 animate-spin" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke-width="3" class="stroke-slate-200"></circle><path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke-width="3" class="stroke-slate-500"></path></svg>
+				Reading { p.Row.Name } with its own tools inside the container…
+			</div>
+		}
+	</div>
+}
+
+templ exploreResult(p servicePage) {
 	if p.ExploreErr != "" {
 		@card() {
 			<div class="p-6">
@@ -27,6 +40,10 @@ templ exploreTab(p servicePage) {
 				@redisKeys(p.Row.Name, x)
 			case *core.ConsulCatalog:
 				@consulCatalog(x)
+			case *core.KafkaOverview:
+				@kafkaOverview(p.Dash.Experiment, p.Dash.Domain, p.Row.Name, x)
+			case *core.S3Buckets:
+				@s3Buckets(x)
 		}
 	}
 }
@@ -178,5 +195,107 @@ templ consulHealth(s core.ConsulService) {
 			@statusWord(status{fmt.Sprintf("%d warning", s.Warning), "amber"})
 		default:
 			@statusWord(status{fmt.Sprintf("%d passing", s.Passing), "green"})
+	}
+}
+
+templ kafkaOverview(experiment, domain, name string, x *core.KafkaOverview) {
+	<div class="flex flex-col gap-6">
+		@explorerCard("Topics", "kafka-topics.sh") {
+			<table class="w-full text-left text-sm">
+				<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+					<tr>
+						@th("Topic")
+						@th("Partitions")
+						@th("Replication")
+						@th("Messages")
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-200">
+					for _, t := range x.Topics {
+						<tr class={ templ.KV("text-slate-500", t.Internal) }>
+							<td class="px-5 py-2.5 font-mono text-[13px]">{ t.Name }</td>
+							<td class="px-5 py-2.5">{ itoa(t.Partitions) }</td>
+							<td class="px-5 py-2.5">{ itoa(t.ReplicationFactor) }</td>
+							<td class="px-5 py-2.5">
+								if t.Internal {
+									internal
+								} else {
+									{ commas(t.Messages) }
+								}
+							</td>
+						</tr>
+					}
+					if len(x.Topics) == 0 {
+						@emptyRow(4, "No topics yet. The broker never creates them on its own.")
+					}
+				</tbody>
+			</table>
+		}
+		@explorerCard("Consumer groups", "kafka-consumer-groups.sh") {
+			<table class="w-full text-left text-sm">
+				<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+					<tr>
+						@th("Group")
+						@th("Topics")
+						@th("Members")
+						@th("Lag")
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-200">
+					for _, g := range x.Groups {
+						<tr>
+							<td class="px-5 py-2.5 font-mono text-[13px]">{ g.Name }</td>
+							<td class="px-5 py-2.5 font-mono text-[13px] text-slate-600">{ strings.Join(g.Topics, ", ") }</td>
+							<td class="px-5 py-2.5">
+								if g.Members == 0 {
+									<span class="text-slate-500">none active</span>
+								} else {
+									{ itoa(g.Members) }
+								}
+							</td>
+							<td class={ "px-5 py-2.5", templ.KV("font-medium text-amber-700", g.Lag > 1000) }>{ commas(g.Lag) } messages</td>
+						</tr>
+					}
+					if len(x.Groups) == 0 {
+						@emptyRow(4, "No consumer groups have committed offsets yet.")
+					}
+				</tbody>
+			</table>
+			<p class="px-5 pt-3 text-xs text-slate-500">Lag is records written but not yet committed by the group, summed over its partitions.</p>
+			<div class="p-5">
+				@terminal(fmt.Sprintf("docker exec -it %s /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server %s.%s:9093 --command-config /etc/bb/config/client.properties --describe --all-groups", container(experiment, name), name, domain))
+			</div>
+		}
+	</div>
+}
+
+templ s3Buckets(x *core.S3Buckets) {
+	@explorerCard("Buckets", "curl --aws-sigv4") {
+		<table class="w-full text-left text-sm">
+			<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+				<tr>
+					@th("Bucket")
+					@th("Objects")
+					@th("Size")
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-slate-200">
+				for _, b := range x.Buckets {
+					<tr>
+						<td class="px-5 py-2.5 font-mono text-[13px]">{ b.Name }</td>
+						<td class="px-5 py-2.5">
+							{ itoa(b.Objects) }
+							if b.Truncated {
+								<span class="text-slate-500">+ (first { itoa(core.S3ObjectLimit) } counted)</span>
+							}
+						</td>
+						<td class="px-5 py-2.5 text-slate-600">{ size(b.Bytes) }</td>
+					</tr>
+				}
+				if len(x.Buckets) == 0 {
+					@emptyRow(3, "No buckets yet. Create one from code, or list them under config.buckets.")
+				}
+			</tbody>
+		</table>
 	}
 }

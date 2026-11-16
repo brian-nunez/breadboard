@@ -99,3 +99,66 @@ func TestExplorersRunTheServicesOwnTools(t *testing.T) {
 		t.Errorf("wrong type error = %v", err)
 	}
 }
+
+func TestKafkaAndS3Parsers(t *testing.T) {
+	sections := splitSections(fixture(t, "kafka.txt"))
+	k, err := parseKafka(sections["topics"], fixture(t, "kafka-offsets.txt"), sections["offsets"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(k.Topics) != 2 || k.Topics[0].Name != "orders" || k.Topics[1].Name != "__consumer_offsets" {
+		t.Fatalf("topics (user topics first) = %+v", k.Topics)
+	}
+	if o := k.Topics[0]; o.Partitions != 3 || o.ReplicationFactor != 1 || o.Messages != 217+648+217 || o.Internal {
+		t.Errorf("orders = %+v", o)
+	}
+	if !k.Topics[1].Internal || k.Topics[1].Partitions != 50 {
+		t.Errorf("__consumer_offsets = %+v", k.Topics[1])
+	}
+	if len(k.Groups) != 1 || k.Groups[0].Name != "orders-consumers" || k.Groups[0].Members != 1 || k.Groups[0].Lag != 5 || k.Groups[0].Topics[0] != "orders" {
+		t.Errorf("groups = %+v", k.Groups)
+	}
+	idle, _ := parseKafka("", "", "\nConsumer group 'sink' has no active members.\n\nGROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\nsink events 0 10 25 15 - - -\n")
+	if len(idle.Groups) != 1 || idle.Groups[0].Members != 0 || idle.Groups[0].Lag != 15 {
+		t.Errorf("idle group = %+v", idle.Groups)
+	}
+
+	names, err := parseS3Buckets([]byte(fixture(t, "s3-buckets.xml")))
+	if err != nil || len(names) != 2 || names[0] != "empty" || names[1] != "uploads" {
+		t.Errorf("buckets = %v %v", names, err)
+	}
+	b, err := parseS3Objects([]byte(fixture(t, "s3-objects.xml")))
+	if err != nil || b.Objects != 2 || b.Bytes != 12 || b.Truncated {
+		t.Errorf("objects = %+v %v", b, err)
+	}
+	if _, err := parseS3Buckets([]byte("<html>")); err == nil {
+		t.Error("garbage parsed as ListBuckets")
+	}
+}
+
+func TestKafkaAndS3ExplorersRunTheirTools(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.add("kafka")
+	h.add("s3-compatible")
+	sections := splitSections(fixture(t, "kafka.txt"))
+	h.rt.execOut = map[string]string{
+		"kafka":                   "### topics\n" + sections["topics"] + "### offsets\n" + fixture(t, "kafka-offsets.txt") + "### groups\n" + sections["offsets"],
+		"s3-compatible|list-type": fixture(t, "s3-objects.xml"),
+		"s3-compatible":           fixture(t, "s3-buckets.xml"),
+	}
+	k, err := h.eng.KafkaTopics(h.ctx(), ExploreRequest{Dir: h.dir, Service: "kafka"})
+	if err != nil || len(k.Topics) != 2 || len(k.Groups) != 1 {
+		t.Fatalf("KafkaTopics = %+v %v", k, err)
+	}
+	s3, err := h.eng.S3Buckets(h.ctx(), ExploreRequest{Dir: h.dir, Service: "s3-compatible"})
+	if err != nil || len(s3.Buckets) != 2 || s3.Buckets[1].Name != "uploads" || s3.Buckets[1].Objects != 2 {
+		t.Fatalf("S3Buckets = %+v %v", s3, err)
+	}
+	joined := strings.Join(h.rt.execs, "\n")
+	for _, want := range []string{"kafka-topics.sh --bootstrap-server kafka.bb.internal:9093 --command-config /etc/bb/config/client.properties", "kafka-get-offsets.sh", "--aws-sigv4", "https://s3-compatible.bb.internal:8333/uploads?list-type=2&max-keys=1000"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("no exec containing %q", want)
+		}
+	}
+}

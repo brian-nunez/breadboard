@@ -428,3 +428,29 @@ func TestIntegrationExplorers(t *testing.T) {
 		return false
 	})
 }
+
+// TestIntegrationKafkaAndS3Explorers runs the Kafka CLI tools and signed S3
+// requests inside the pinned images.
+func TestIntegrationKafkaAndS3Explorers(t *testing.T) {
+	eng, dir, name := starterLab(t, "explore2", "kafka/producer-consumer")
+	ctx := context.Background()
+	if _, err := eng.AddService(ctx, AddServiceRequest{Dir: dir, Type: "s3-compatible"}); err != nil {
+		t.Fatal(err)
+	}
+	upHealthy(t, eng, dir)
+	eventually(t, time.Minute, "the consumer group to commit", func() bool {
+		k, err := eng.KafkaTopics(ctx, ExploreRequest{Dir: dir, Service: "kafka"})
+		if err != nil || len(k.Groups) == 0 {
+			return false
+		}
+		orders := k.Topics[0]
+		return orders.Name == "orders" && orders.Partitions == 3 && orders.Messages > 0 &&
+			k.Groups[0].Name == "orders-consumers" && k.Groups[0].Members == 1
+	})
+	docker(t, "exec", containerOf(t, name, "s3-compatible"), "sh", "-c",
+		`S="--aws-sigv4 aws:amz:us-east-1:s3 --user $AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY --cacert /etc/bb/ca.pem"; E=https://s3-compatible.bb.internal:8333; curl -sf $S -X PUT $E/media >/dev/null && echo hello > /tmp/x && curl -sf $S -T /tmp/x $E/media/x.txt`)
+	s3, err := eng.S3Buckets(ctx, ExploreRequest{Dir: dir, Service: "s3-compatible"})
+	if err != nil || len(s3.Buckets) != 1 || s3.Buckets[0].Name != "media" || s3.Buckets[0].Objects != 1 || s3.Buckets[0].Bytes != 6 {
+		t.Errorf("S3Buckets = %+v %v", s3, err)
+	}
+}

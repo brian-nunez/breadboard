@@ -1,0 +1,18 @@
+### topics
+Topic: __consumer_offsets	TopicId: z3FbtbT1TvqIazdaOIDrYw	PartitionCount: 50	ReplicationFactor: 1	Configs: compression.type=producer,min.insync.replicas=1,cleanup.policy=compact,segment.bytes=104857600
+	Topic: __consumer_offsets	Partition: 0	Leader: 1	Replicas: 1	Isr: 1	Elr: 	LastKnownElr: 
+	Topic: __consumer_offsets	Partition: 1	Leader: 1	Replicas: 1	Isr: 1	Elr: 	LastKnownElr: 
+Topic: orders	TopicId: kwxPlN02SR-qfjH96UM72A	PartitionCount: 3	ReplicationFactor: 1	Configs: min.insync.replicas=1
+	Topic: orders	Partition: 0	Leader: 1	Replicas: 1	Isr: 1	Elr: 	LastKnownElr: 
+	Topic: orders	Partition: 1	Leader: 1	Replicas: 1	Isr: 1	Elr: 	LastKnownElr: 
+	Topic: orders	Partition: 2	Leader: 1	Replicas: 1	Isr: 1	Elr: 	LastKnownElr: 
+### offsets
+
+GROUP            TOPIC           PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID                              HOST            CLIENT-ID
+orders-consumers orders          0          211             212             1               kgo-9ad3294e-297c-4ee6-bdbc-3534cc02af15 /172.22.0.7     kgo
+orders-consumers orders          1          633             636             3               kgo-9ad3294e-297c-4ee6-bdbc-3534cc02af15 /172.22.0.7     kgo
+orders-consumers orders          2          211             212             1               kgo-9ad3294e-297c-4ee6-bdbc-3534cc02af15 /172.22.0.7     kgo
+### state
+
+GROUP            COORDINATOR (ID)            ASSIGNMENT-STRATEGY  STATE                #MEMBERS
+orders-consumers kafka.bb.internal:9093  (1) cooperative-sticky   Stable               1

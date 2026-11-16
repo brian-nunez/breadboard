@@ -89,9 +89,16 @@ func TestServicePages(t *testing.T) {
 // failing the page.
 func TestExplorerTabWhenTheServiceIsDown(t *testing.T) {
 	s := newProject(t)
-	rec := s.get(t, "/services/postgres?tab=explore", map[string]string{"Cookie": signIn(t, s)})
-	body := rec.Body.String()
-	if rec.Code != http.StatusOK || !strings.Contains(body, "Could not read postgres") || !strings.Contains(body, ">Tables<") {
+	cookie := map[string]string{"Cookie": signIn(t, s)}
+	rec := s.get(t, "/services/postgres?tab=explore", cookie)
+	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, `data-load="/fragments/explore/postgres"`) || !strings.Contains(body, ">Tables<") {
 		t.Errorf("explore tab = %d\n%s", rec.Code, body)
+	}
+	rec = s.get(t, "/fragments/explore/postgres", cookie)
+	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, "Could not read postgres") || strings.Contains(body, "<html") {
+		t.Errorf("explore fragment = %d\n%s", rec.Code, body)
+	}
+	if rec := s.get(t, "/fragments/explore/sink", cookie); rec.Code != http.StatusNotFound {
+		t.Errorf("explorer for an app = %d", rec.Code)
 	}
 }

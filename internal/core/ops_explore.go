@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"slices"
 	"strconv"
@@ -287,4 +288,254 @@ func parseConsulCatalog(services, checks, nodes []byte) (*ConsulCatalog, error) 
 	}
 	slices.SortFunc(res.Nodes, func(a, b ConsulNode) int { return strings.Compare(a.Name, b.Name) })
 	return res, nil
+}
+
+// --- Kafka ------------------------------------------------------------------
+
+// KafkaOverview lists topics and consumer groups.
+type KafkaOverview struct {
+	Topics []KafkaTopic
+	Groups []KafkaGroup
+}
+
+// KafkaTopic is one topic. Messages is the sum of its partitions' end
+// offsets: every record ever written, before retention deleted any.
+type KafkaTopic struct {
+	Name              string
+	Partitions        int
+	ReplicationFactor int
+	Messages          int64
+	Internal          bool // names starting with __, such as __consumer_offsets
+}
+
+// KafkaGroup is one consumer group's progress.
+type KafkaGroup struct {
+	Name    string
+	Topics  []string
+	Members int   // distinct consumers holding partitions
+	Lag     int64 // records written but not yet committed, over all partitions
+}
+
+// KafkaTopics runs the broker's own CLI tools over TLS with the client
+// configuration the health check uses. The three JVMs run in parallel.
+func (e *Engine) KafkaTopics(ctx context.Context, req ExploreRequest) (*KafkaOverview, error) {
+	svc, run, err := e.explore(ctx, req, "kafka")
+	if err != nil {
+		return nil, err
+	}
+	conn := fmt.Sprintf("--bootstrap-server %s:%d --command-config %s/client.properties", svc.FQDN, svc.Entry.Listeners[0].Port, catalog.ConfigDir)
+	script := strings.Join([]string{
+		"export KAFKA_HEAP_OPTS=-Xmx128m",
+		"t=$(mktemp -d)",
+		"/opt/kafka/bin/kafka-topics.sh " + conn + " --describe > $t/topics &",
+		"/opt/kafka/bin/kafka-get-offsets.sh " + conn + " > $t/offsets &",
+		"/opt/kafka/bin/kafka-consumer-groups.sh " + conn + " --describe --all-groups > $t/groups 2>&1 &",
+		"wait",
+		"echo '### topics'; cat $t/topics; echo '### offsets'; cat $t/offsets; echo '### groups'; cat $t/groups; rm -rf $t",
+	}, "\n")
+	out, err := run("sh", "-c", script)
+	if err != nil {
+		return nil, err
+	}
+	sections := splitSections(string(out))
+	return parseKafka(sections["topics"], sections["offsets"], sections["groups"])
+}
+
+// splitSections splits "### name" delimited output.
+func splitSections(out string) map[string]string {
+	res := map[string]string{}
+	var name string
+	var b strings.Builder
+	for _, line := range strings.Split(out, "\n") {
+		if n, ok := strings.CutPrefix(line, "### "); ok {
+			if name != "" {
+				res[name] = b.String()
+			}
+			name = strings.TrimSpace(n)
+			b.Reset()
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	if name != "" {
+		res[name] = b.String()
+	}
+	return res
+}
+
+func parseKafka(topics, offsets, groups string) (*KafkaOverview, error) {
+	res := &KafkaOverview{}
+	index := map[string]int{}
+	for _, line := range strings.Split(topics, "\n") {
+		// Topic summary lines start at column 0; partition lines are indented.
+		if !strings.HasPrefix(line, "Topic: ") || !strings.Contains(line, "PartitionCount:") {
+			continue
+		}
+		f := tabFields(line)
+		t := KafkaTopic{Name: f["Topic"]}
+		t.Partitions, _ = strconv.Atoi(f["PartitionCount"])
+		t.ReplicationFactor, _ = strconv.Atoi(f["ReplicationFactor"])
+		t.Internal = strings.HasPrefix(t.Name, "__")
+		index[t.Name] = len(res.Topics)
+		res.Topics = append(res.Topics, t)
+	}
+	for _, line := range strings.Split(offsets, "\n") {
+		// topic:partition:offset, where a topic name may contain colons.
+		i := strings.LastIndexByte(line, ':')
+		j := strings.LastIndexByte(line[:max(i, 0)], ':')
+		if i < 0 || j < 0 {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(line[i+1:]), 10, 64)
+		if err != nil {
+			continue
+		}
+		if k, ok := index[line[:j]]; ok {
+			res.Topics[k].Messages += n
+		}
+	}
+	type acc struct {
+		topics  []string
+		members map[string]bool
+		lag     int64
+	}
+	byGroup := map[string]*acc{}
+	var order []string
+	inTable := false
+	for _, line := range strings.Split(groups, "\n") {
+		f := strings.Fields(line)
+		if len(f) > 0 && f[0] == "GROUP" {
+			inTable = true
+			continue
+		}
+		if !inTable || len(f) < 6 {
+			continue
+		}
+		g, ok := byGroup[f[0]]
+		if !ok {
+			g = &acc{members: map[string]bool{}}
+			byGroup[f[0]] = g
+			order = append(order, f[0])
+		}
+		if !slices.Contains(g.topics, f[1]) {
+			g.topics = append(g.topics, f[1])
+		}
+		if lag, err := strconv.ParseInt(f[5], 10, 64); err == nil {
+			g.lag += lag
+		}
+		if len(f) > 6 && f[6] != "-" {
+			g.members[f[6]] = true
+		}
+	}
+	for _, name := range order {
+		g := byGroup[name]
+		res.Groups = append(res.Groups, KafkaGroup{Name: name, Topics: g.topics, Members: len(g.members), Lag: g.lag})
+	}
+	slices.SortStableFunc(res.Topics, func(a, b KafkaTopic) int {
+		if a.Internal != b.Internal {
+			if a.Internal {
+				return 1
+			}
+			return -1
+		}
+		return strings.Compare(a.Name, b.Name)
+	})
+	return res, nil
+}
+
+// tabFields parses "Key: value<TAB>Key: value" lines.
+func tabFields(line string) map[string]string {
+	out := map[string]string{}
+	for _, part := range strings.Split(line, "\t") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(part), ": "); ok {
+			out[k] = strings.TrimSpace(v)
+		}
+	}
+	return out
+}
+
+// --- S3 Compatible ----------------------------------------------------------
+
+// S3ObjectLimit caps how many objects are counted per bucket.
+const S3ObjectLimit = 1000
+
+// S3Buckets lists buckets with what they hold.
+type S3Buckets struct {
+	Buckets []S3Bucket
+}
+
+// S3Bucket is one bucket's object count and total size.
+type S3Bucket struct {
+	Name      string
+	Objects   int
+	Bytes     int64
+	Truncated bool // more than S3ObjectLimit objects; counts cover the first ones
+}
+
+// S3Buckets lists buckets with signed requests from inside the container.
+func (e *Engine) S3Buckets(ctx context.Context, req ExploreRequest) (*S3Buckets, error) {
+	svc, run, err := e.explore(ctx, req, "s3-compatible")
+	if err != nil {
+		return nil, err
+	}
+	endpoint := fmt.Sprintf("https://%s:%d", svc.FQDN, svc.Entry.Listeners[0].Port)
+	get := func(path string) ([]byte, error) {
+		return run("sh", "-c", `curl -sf --cacert "$0" --aws-sigv4 aws:amz:us-east-1:s3 --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" "$1"`, catalog.CAFile, endpoint+path)
+	}
+	out, err := get("/")
+	if err != nil {
+		return nil, err
+	}
+	names, err := parseS3Buckets(out)
+	if err != nil {
+		return nil, err
+	}
+	res := &S3Buckets{}
+	for _, name := range names {
+		out, err := get(fmt.Sprintf("/%s?list-type=2&max-keys=%d", name, S3ObjectLimit))
+		if err != nil {
+			return nil, err
+		}
+		b, err := parseS3Objects(out)
+		if err != nil {
+			return nil, err
+		}
+		b.Name = name
+		res.Buckets = append(res.Buckets, b)
+	}
+	return res, nil
+}
+
+func parseS3Buckets(data []byte) ([]string, error) {
+	var doc struct {
+		Buckets []struct {
+			Name string `xml:"Name"`
+		} `xml:"Buckets>Bucket"`
+	}
+	if err := xml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("ListBuckets: %w", err)
+	}
+	var names []string
+	for _, b := range doc.Buckets {
+		names = append(names, b.Name)
+	}
+	return names, nil
+}
+
+func parseS3Objects(data []byte) (S3Bucket, error) {
+	var doc struct {
+		Truncated bool `xml:"IsTruncated"`
+		Contents  []struct {
+			Size int64 `xml:"Size"`
+		} `xml:"Contents"`
+	}
+	if err := xml.Unmarshal(data, &doc); err != nil {
+		return S3Bucket{}, fmt.Errorf("ListObjectsV2: %w", err)
+	}
+	b := S3Bucket{Objects: len(doc.Contents), Truncated: doc.Truncated}
+	for _, c := range doc.Contents {
+		b.Bytes += c.Size
+	}
+	return b, nil
 }

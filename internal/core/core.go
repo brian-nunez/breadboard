@@ -52,6 +52,7 @@ type Runtime interface {
 	Logs(ctx context.Context, p runtime.Project, services []string, follow bool, tail int) iter.Seq2[runtime.LogLine, error]
 	Subnets(ctx context.Context) ([]runtime.Network, error)
 	Owners(ctx context.Context, experiment string) ([]string, error)
+	Exec(ctx context.Context, experiment, service string, cmd []string) ([]byte, error)
 }
 
 // Options configures an Engine. Zero values pick production defaults.

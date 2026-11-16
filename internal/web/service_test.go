@@ -84,3 +84,14 @@ func TestServicePages(t *testing.T) {
 		t.Errorf("unknown service = %d", rec.Code)
 	}
 }
+
+// An explorer on a service that is not running explains itself instead of
+// failing the page.
+func TestExplorerTabWhenTheServiceIsDown(t *testing.T) {
+	s := newProject(t)
+	rec := s.get(t, "/services/postgres?tab=explore", map[string]string{"Cookie": signIn(t, s)})
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || !strings.Contains(body, "Could not read postgres") || !strings.Contains(body, ">Tables<") {
+		t.Errorf("explore tab = %d\n%s", rec.Code, body)
+	}
+}

@@ -194,7 +194,27 @@ func (s *Server) servicePage(ctx context.Context, name, tab string) servicePage 
 	if !slices.ContainsFunc(p.tabs(), func(t [2]string) bool { return t[0] == p.Tab }) {
 		p.Tab = "overview"
 	}
+	if p.Tab == "explore" {
+		p.Explore, err = s.explore(ctx, d.Type, name)
+		if err != nil {
+			p.ExploreErr = err.Error()
+		}
+	}
 	return p
+}
+
+// explore runs the explorer for a catalog type.
+func (s *Server) explore(ctx context.Context, typ, name string) (any, error) {
+	req := core.ExploreRequest{Dir: s.dir, Service: name}
+	switch typ {
+	case "postgres":
+		return s.eng.PostgresTables(ctx, req)
+	case "redis":
+		return s.eng.RedisKeys(ctx, req)
+	case "consul":
+		return s.eng.ConsulCatalog(ctx, req)
+	}
+	return nil, fmt.Errorf("no explorer for %s", typ)
 }
 
 // logs streams a service's log lines as "line" events, starting with the

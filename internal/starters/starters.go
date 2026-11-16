@@ -104,7 +104,7 @@ var all = []Starter{
 	{
 		ID:       "consul/service-discovery",
 		Title:    "Consul service discovery (recommended)",
-		Summary:  "Registration by a Consul sidecar agent, a health-checked catalog, resolving services by name.",
+		Summary:  "Recommended: a Consul sidecar agent registers each service; a health-checked catalog; resolving services by name.",
 		Language: "go",
 		Template: "go/consul/service-discovery",
 		Dir:      "service-discovery",

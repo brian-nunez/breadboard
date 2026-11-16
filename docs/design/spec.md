@@ -22,11 +22,11 @@ services:                    # infra services, from the catalog
 apps:                        # user code; one compose service each
   producer:
     path: ./orders           # directory containing the Dockerfile
-    command: [go, run, ./cmd/producer]
+    command: [producer]      # the binary the dev stage built (D-056)
     uses: [kafka]
   consumer:
     path: ./orders
-    command: [go, run, ./cmd/consumer]
+    command: [consumer]
     uses: [kafka, postgres]
     ports:                   # optional; published on 127.0.0.1 only
       - 8080

@@ -7,8 +7,10 @@ package model
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/brian-nunez/breadboard/internal/catalog"
+	"github.com/brian-nunez/breadboard/internal/catalog/sidecar"
 	"github.com/brian-nunez/breadboard/internal/pki"
 	"github.com/brian-nunez/breadboard/internal/spec"
 )
@@ -19,8 +21,9 @@ type Kind string
 const (
 	Infra Kind = "infra"
 	App   Kind = "app"
-	// Sidecar is an agent that registers an app with a service registry. It
-	// runs in the app's network namespace and uses the app's certificate.
+	// Sidecar runs in an app instance's network namespace and uses its
+	// certificate: a type from the sidecar catalog, or the agent that
+	// registers the app with a service registry (consul-agent).
 	Sidecar Kind = "sidecar"
 )
 
@@ -30,10 +33,8 @@ const (
 	DefaultAppCPUs   = "0.5"
 	// Used when an app opts into an HTTP health check with `health`.
 	DefaultAppHealthPath = "/healthz"
-	DefaultAppHealthPort = 8080
-	// Sidecar agents are small.
-	DefaultSidecarMemory = "128m"
-	DefaultSidecarCPUs   = "0.25"
+	DefaultAppHealthPort = spec.DefaultHealthPort
+	// Sidecars default to their sidecar catalog type's resources.
 )
 
 // Model is a fully resolved experiment.
@@ -53,6 +54,13 @@ type Service struct {
 	FQDN      string
 	Identity  string
 	Resources catalog.Resources
+	// Image is the container image: the exact pin for infra and sidecars;
+	// empty for apps, which are built from their directory.
+	Image string
+	// Aliases are the DNS names on the default network and on the
+	// service's certificate (infra and apps): the FQDN, plus the app's
+	// shared name for a replica.
+	Aliases []string
 
 	// Infra only.
 	Entry  *catalog.Entry
@@ -63,14 +71,44 @@ type Service struct {
 	// Health is the app's HTTP health check, or nil for the default check
 	// that the container's main process is running. Apps need no health code.
 	Health *spec.Health
+	// AppName is the app in experiment.yaml this instance belongs to; it
+	// equals Name for an app with one replica.
+	AppName string
+	// Instance is 1…N for a replica, 0 for an app with one replica.
+	Instance int
+	// SharedFQDN is <app>.<domain>, an alias on every replica.
+	SharedFQDN string
+	// Pod is the service name of the instance's namespace holder, or empty
+	// when the app keeps its own namespace (no sidecars).
+	Pod string
+	// Netinit is the service name of the pod's transparent-mode init
+	// container, or empty.
+	Netinit string
+	// Sidecars are the instance's sidecar service names, in spec order
+	// (the registration agent last).
+	Sidecars []string
 
-	// Sidecar only. Entry is the registry's catalog entry.
-	Parent   string         // the app the sidecar registers
-	Registry string         // the registry service it joins
-	Register *spec.Register // what it registers, defaults applied
+	// Sidecar only. For consul-agent, Entry is the registry's catalog entry.
+	Parent      string           // the app instance whose namespace it shares
+	SidecarType *sidecar.Type    // its sidecar catalog type
+	Sidecar     *spec.Sidecar    // the declared entry, defaults applied; nil for consul-agent
+	Targets     []sidecar.Target // Envoy outbound targets
+	Registry    string           // consul-agent: the registry service it joins
+	Register    *spec.Register   // consul-agent: what it registers, defaults applied
 }
 
-// Edge is a directed connection from an app to an infra listener.
+// Group is the app a service belongs to: AppName for an app instance, the
+// name itself otherwise.
+func (s *Service) Group() string {
+	if s.AppName != "" {
+		return s.AppName
+	}
+	return s.Name
+}
+
+// Edge is a directed connection from an app (by its name in
+// experiment.yaml) to an infra listener, or through an Envoy sidecar to
+// another app or an infra service.
 type Edge struct {
 	From     string
 	To       string
@@ -78,6 +116,11 @@ type Edge struct {
 	Port     int
 	TLS      bool
 	Reason   string // why the edge is plaintext
+	// Via is the name (within the app) of the Envoy sidecar whose outbound
+	// listener carries the edge; empty for an edge from uses.
+	Via string
+	// ToApp marks an app-to-app edge.
+	ToApp bool
 }
 
 // Segment is a private network shared by a plaintext listener and its clients.
@@ -102,7 +145,18 @@ func (m *Model) Service(name string) (*Service, bool) {
 	return m.Services[i], true
 }
 
-// EdgesFrom lists an app's edges in uses order.
+// Instances lists an app's instances in order.
+func (m *Model) Instances(app string) []*Service {
+	var out []*Service
+	for _, s := range m.Services {
+		if s.Kind == App && s.AppName == app {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// EdgesFrom lists an app's edges: uses order, then Envoy outbound targets.
 func (m *Model) EdgesFrom(name string) []Edge {
 	var out []Edge
 	for _, e := range m.Edges {
@@ -152,37 +206,21 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 		if !ok {
 			return nil, fmt.Errorf("resolve %s: unknown type %q", svc.Name, svc.Type)
 		}
+		fqdn := svc.Name + "." + domain
 		m.Services = append(m.Services, &Service{
 			Name:      svc.Name,
 			Kind:      Infra,
-			FQDN:      svc.Name + "." + domain,
+			FQDN:      fqdn,
+			Aliases:   []string{fqdn},
 			Identity:  pki.Identity(domain, s.Name, svc.Name),
 			Resources: resources(svc.Resources, entry.Resources),
+			Image:     entry.Image,
 			Entry:     entry,
 			Config:    entry.ResolveConfig(svc.Config),
 		})
 	}
 	for i := range s.Apps {
 		app := &s.Apps[i]
-		var health *spec.Health
-		if app.Health != nil {
-			health = &spec.Health{Path: DefaultAppHealthPath, Port: DefaultAppHealthPort}
-			if app.Health.Path != "" {
-				health.Path = app.Health.Path
-			}
-			if app.Health.Port != 0 {
-				health.Port = app.Health.Port
-			}
-		}
-		m.Services = append(m.Services, &Service{
-			Name:      app.Name,
-			Kind:      App,
-			FQDN:      app.Name + "." + domain,
-			Identity:  pki.Identity(domain, s.Name, app.Name),
-			Resources: resources(app.Resources, catalog.Resources{Memory: DefaultAppMemory, CPUs: DefaultAppCPUs}),
-			App:       app,
-			Health:    health,
-		})
 		for _, u := range app.Uses {
 			target, ok := m.Service(u.Service)
 			if !ok || target.Kind != Infra {
@@ -198,21 +236,120 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 			}
 			m.Edges = append(m.Edges, e)
 		}
-		if app.Register != nil {
-			sc, err := sidecar(m, app)
-			if err != nil {
-				return nil, err
-			}
-			m.Services = append(m.Services, sc)
+		if err := instances(m, s, app); err != nil {
+			return nil, err
 		}
 	}
+	// Outbound targets may be apps declared later, so they resolve once
+	// every app exists.
+	for i := range s.Apps {
+		if err := outbound(m, s, &s.Apps[i]); err != nil {
+			return nil, err
+		}
+	}
+	logBuckets(m)
 	m.Segments = segments(m)
 	return m, nil
 }
 
-// sidecar resolves the agent that registers app with the first registry it uses.
-func sidecar(m *Model, app *spec.App) (*Service, error) {
-	parent, _ := m.Service(app.Name)
+// logBuckets adds every Fluent Bit sidecar's bucket to its S3 compatible
+// service's buckets, so the service creates it at startup.
+func logBuckets(m *Model) {
+	for _, svc := range m.Services {
+		if svc.Sidecar == nil || svc.Sidecar.FluentBit == nil {
+			continue
+		}
+		fb := svc.Sidecar.FluentBit
+		target, ok := m.Service(fb.To)
+		if !ok || target.Kind != Infra {
+			continue
+		}
+		var buckets []string
+		if b := target.Config["buckets"]; b != "" {
+			buckets = strings.Split(b, ",")
+		}
+		if !slices.Contains(buckets, fb.Bucket) {
+			target.Config["buckets"] = strings.Join(append(buckets, fb.Bucket), ",")
+		}
+	}
+}
+
+// instances adds an app's instances, each followed by its sidecars.
+func instances(m *Model, s *spec.Spec, app *spec.App) error {
+	var health *spec.Health
+	if app.Health != nil {
+		health = &spec.Health{Path: DefaultAppHealthPath, Port: DefaultAppHealthPort}
+		if app.Health.Path != "" {
+			health.Path = app.Health.Path
+		}
+		if app.Health.Port != 0 {
+			health.Port = app.Health.Port
+		}
+	}
+	shared := app.Name + "." + m.Domain
+	for n, name := range app.Instances() {
+		inst := &Service{
+			Name:       name,
+			Kind:       App,
+			FQDN:       name + "." + m.Domain,
+			Aliases:    []string{name + "." + m.Domain},
+			Identity:   pki.Identity(m.Domain, s.Name, app.Name), // replicas share one identity
+			Resources:  resources(app.Resources, catalog.Resources{Memory: DefaultAppMemory, CPUs: DefaultAppCPUs}),
+			App:        app,
+			Health:     health,
+			AppName:    app.Name,
+			SharedFQDN: shared,
+		}
+		if app.ReplicaCount() > 1 {
+			inst.Instance = n + 1
+			inst.Aliases = append(inst.Aliases, shared)
+		}
+		if app.IsPod() {
+			inst.Pod = spec.PodName(name)
+		}
+		m.Services = append(m.Services, inst)
+		for _, declared := range app.Sidecars {
+			sc := declared.WithDefaults()
+			typ, ok := sidecar.Lookup(sc.Type)
+			if !ok || typ.Internal {
+				return fmt.Errorf("resolve %s: unknown sidecar type %q", app.Name, sc.Type)
+			}
+			if sc.Transparent() {
+				inst.Netinit = spec.NetinitName(name)
+			}
+			svc := sidecarService(inst, spec.SidecarServiceName(name, sc.ID()), typ, typ.Image)
+			svc.Sidecar = &sc
+			m.Services = append(m.Services, svc)
+		}
+		if app.Register != nil {
+			agent, err := registrationAgent(m, app, inst)
+			if err != nil {
+				return err
+			}
+			m.Services = append(m.Services, agent)
+		}
+	}
+	return nil
+}
+
+func sidecarService(inst *Service, name string, typ *sidecar.Type, image string) *Service {
+	inst.Sidecars = append(inst.Sidecars, name)
+	return &Service{
+		Name:        name,
+		Kind:        Sidecar,
+		FQDN:        inst.FQDN,
+		Identity:    inst.Identity,
+		Resources:   typ.Resources,
+		Image:       image,
+		Parent:      inst.Name,
+		SidecarType: typ,
+	}
+}
+
+// registrationAgent resolves the consul-agent that registers an instance
+// with the first registry the app uses.
+func registrationAgent(m *Model, app *spec.App, inst *Service) (*Service, error) {
+	typ, _ := sidecar.Lookup(spec.SidecarConsulAgent)
 	for _, u := range app.Uses {
 		target, ok := m.Service(u.Service)
 		if !ok || target.Kind != Infra || target.Entry.Sidecar == nil {
@@ -222,19 +359,47 @@ func sidecar(m *Model, app *spec.App) (*Service, error) {
 		if reg.Name == "" {
 			reg.Name = app.Name
 		}
-		return &Service{
-			Name:      spec.SidecarName(app.Name),
-			Kind:      Sidecar,
-			FQDN:      parent.FQDN,
-			Identity:  parent.Identity,
-			Resources: catalog.Resources{Memory: DefaultSidecarMemory, CPUs: DefaultSidecarCPUs},
-			Entry:     target.Entry,
-			Parent:    app.Name,
-			Registry:  target.Name,
-			Register:  &reg,
-		}, nil
+		svc := sidecarService(inst, spec.SidecarName(inst.Name), typ, target.Entry.Image)
+		svc.Entry, svc.Registry, svc.Register = target.Entry, target.Name, &reg
+		return svc, nil
 	}
 	return nil, fmt.Errorf("resolve %s: register needs a service registry in uses", app.Name)
+}
+
+// outbound resolves an app's Envoy outbound targets into edges and the
+// targets each Envoy sidecar renders.
+func outbound(m *Model, s *spec.Spec, app *spec.App) error {
+	for _, inst := range m.Instances(app.Name) {
+		for _, name := range inst.Sidecars {
+			sc, _ := m.Service(name)
+			if sc.Sidecar == nil || sc.Sidecar.Envoy == nil {
+				continue
+			}
+			for _, o := range sc.Sidecar.Envoy.Outbound {
+				t := sidecar.Target{Service: o.Service, Outbound: o}
+				e := Edge{From: app.Name, To: o.Service, TLS: true, Via: sc.Sidecar.ID()}
+				if target, ok := s.App(o.Service); ok {
+					port, ok := target.TLSPort()
+					if !ok {
+						return fmt.Errorf("resolve %s: outbound target %s serves no TLS port", app.Name, o.Service)
+					}
+					t.App, t.FQDN, t.Port = true, target.Name+"."+m.Domain, port
+					e.ToApp, e.Listener, e.Port = true, "tls", port
+				} else if svc, ok := m.Service(o.Service); ok && svc.Kind == Infra {
+					l := svc.Entry.Listeners[0]
+					t.FQDN, t.Port = svc.FQDN, l.Port
+					e.Listener, e.Port = l.Name, l.Port
+				} else {
+					return fmt.Errorf("resolve %s: outbound target %q is not a service or app", app.Name, o.Service)
+				}
+				sc.Targets = append(sc.Targets, t)
+				if inst.Instance <= 1 {
+					m.Edges = append(m.Edges, e) // one edge per app, not per replica
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // segments groups plaintext edges by target: one private segment per target,

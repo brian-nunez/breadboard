@@ -3,7 +3,9 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -92,7 +94,7 @@ func TestExplorerTabWhenTheServiceIsDown(t *testing.T) {
 	s := newProject(t)
 	cookie := map[string]string{"Cookie": signIn(t, s)}
 	rec := s.get(t, "/services/postgres?tab=explore", cookie)
-	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, `data-load="/fragments/explore/postgres"`) || !strings.Contains(body, ">Tables<") {
+	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, `data-load="/fragments/explore/postgres?tab=explore"`) || !strings.Contains(body, ">Tables<") {
 		t.Errorf("explore tab = %d\n%s", rec.Code, body)
 	}
 	rec = s.get(t, "/fragments/explore/postgres", cookie)
@@ -174,5 +176,112 @@ func TestMobileLayout(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard lacks %q", want)
 		}
+	}
+}
+
+// fixtureRuntime answers exec with captured explorer output, by service.
+type fixtureRuntime struct {
+	nullRuntime
+	out map[string]string
+}
+
+func (f fixtureRuntime) Exec(_ context.Context, _, service string, _ []string) ([]byte, error) {
+	if s, ok := f.out[service]; ok {
+		return []byte(s), nil
+	}
+	return nil, errors.New("not running")
+}
+
+const sidecarSpec = `version: 1
+name: lab
+services:
+  postgres:
+    type: postgres
+apps:
+  web:
+    path: ./web
+    command: [web]
+    replicas: 3
+    sidecars:
+      - type: envoy
+        inbound: {port: 8443, app_port: 8080}
+  caller:
+    path: ./caller
+    command: [caller]
+    uses: [postgres]
+    sidecars:
+      - type: envoy
+        outbound: [{service: web, port: 9001}]
+        transparent: {egress: deny}
+      - type: pgbouncer
+        service: postgres
+`
+
+// Sidecars, replicas and the sidecar explorers render, and no generated
+// secret appears on any page.
+func TestSidecarAndReplicaPages(t *testing.T) {
+	fixture := func(name string) string {
+		data, err := os.ReadFile(filepath.Join("..", "core", "testdata", "explore", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	dir := t.TempDir()
+	rt := fixtureRuntime{out: map[string]string{"caller-envoy": fixture("envoy-outbound.txt"), "caller-pgbouncer": fixture("pgbouncer-show.txt")}}
+	eng, err := core.New(core.Options{Home: filepath.Join(t.TempDir(), "home"), Runtime: rt, Version: "v0.0.0-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := eng.Init(ctx, core.InitRequest{Dir: dir, Name: "lab"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "experiment.yaml"), []byte(sidecarSpec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	creds, err := eng.Creds(ctx, core.CredsRequest{Dir: dir}) // generates the secrets
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(eng, Options{Dir: dir, Refresh: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.ln.Close() })
+	cookie := map[string]string{"Cookie": signIn(t, s)}
+	for path, wants := range map[string][]string{
+		"/architecture?node=caller":               {"envoy · transparent", "×3", "TLS :8443", `href="/architecture?node=web-1-envoy"`, "Sidecars", "caller-pgbouncer"},
+		"/architecture?node=caller-envoy":         {"Listens on", "127.0.0.1:15000", ":15001"},
+		"/services/caller":                        {"caller-envoy", "Envoy sidecar", "WEB_URL", "http://127.0.0.1:9001", "Transparent mode", "refused (egress deny)", "?tab=envoy", "?tab=pgbouncer", "DATABASE_URL", "bb creds postgres", "PGHOST"},
+		"/services/web-2":                         {"Replicas", "web-3", "replica 2 of 3", "BB_LISTEN_ADDR", "127.0.0.1:8080"},
+		"/services/web-2-envoy":                   {"Envoy sidecar of web-2", "s pod: same network namespace", "?tab=envoy"},
+		"/fragments/explore/caller?tab=envoy":     {"outbound_web → web", "web-3", "Healthy, with errors", "172.21.0.5:8443", "bb logs caller-envoy -f"},
+		"/fragments/explore/caller?tab=pgbouncer": {"caller-pgbouncer → postgres", "app / app", "transaction", "-p 6432"},
+	} {
+		rec := s.get(t, path, cookie)
+		body := rec.Body.String()
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s = %d", path, rec.Code)
+			continue
+		}
+		for _, w := range wants {
+			if !strings.Contains(body, w) {
+				t.Errorf("%s lacks %q", path, w)
+			}
+		}
+		for _, c := range creds.Services {
+			for _, sec := range c.Secrets {
+				if len(sec.Value) >= 8 && strings.Contains(body, sec.Value) {
+					t.Errorf("%s shows the secret %s of %s", path, sec.Key, c.Name)
+				}
+			}
+		}
+	}
+	if rec := s.get(t, "/fragments/explore/postgres?tab=envoy", cookie); rec.Code != http.StatusNotFound {
+		t.Errorf("envoy tab on postgres = %d", rec.Code)
+	}
+	if rec := s.get(t, "/services/web-2-envoy?tab=learn", cookie); strings.Contains(rec.Body.String(), "?tab=learn") {
+		t.Error("a sidecar without notes has a Learn tab")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -180,6 +181,12 @@ type prepared struct {
 	state   *state.ProjectState
 	certs   map[string]compose.Cert
 	subnets map[string]netip.Prefix
+	// addresses are the default network's fixed addresses (static
+	// addressing), or nil.
+	addresses map[string]netip.Addr
+	// networkChanged is set when the default network's subnet differs
+	// from the last up (static addressing switched on, off, or moved).
+	networkChanged bool
 }
 
 // prepare reconciles project state with the spec: CA, secrets, leaf
@@ -228,7 +235,11 @@ func (e *Engine) prepare(ctx context.Context, p *project, events EventSink) (*pr
 	if err != nil {
 		return nil, err
 	}
-	subnets, err := e.allocateSubnets(ctx, m, ps)
+	subnets, addrs, err := e.allocateSubnets(ctx, m, ps)
+	if err != nil {
+		return nil, err
+	}
+	stale, err := e.defaultNetworkStale(ctx, m, ps)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +249,7 @@ func (e *Engine) prepare(ctx context.Context, p *project, events EventSink) (*pr
 	for _, edge := range m.PlaintextEdges() {
 		events.warn(fmt.Sprintf("Plaintext edge %s -> %s (tls.mode: off): %s", edge.From, edge.To, edge.Reason))
 	}
-	return &prepared{model: m, ca: ca, secrets: sec, state: ps, certs: certs, subnets: subnets}, nil
+	return &prepared{model: m, ca: ca, secrets: sec, state: ps, certs: certs, subnets: subnets, addresses: addrs, networkChanged: stale}, nil
 }
 
 // reconcileCerts issues a leaf for every service that lacks a valid one and
@@ -250,7 +261,8 @@ func (e *Engine) reconcileCerts(p *project, m *model.Model, ca *pki.CA, ps *stat
 		if svc.Kind == model.Sidecar {
 			continue // a sidecar presents its app's certificate
 		}
-		req := pki.LeafRequest{DNSNames: []string{svc.FQDN}, Identity: svc.Identity}
+		// A replica's certificate names the instance and the app's shared name.
+		req := pki.LeafRequest{DNSNames: svc.Aliases, Identity: svc.Identity}
 		certPEM, keyPEM, ok, err := p.ReadCert(svc.Name)
 		if err != nil {
 			return nil, err
@@ -291,7 +303,7 @@ func (e *Engine) reconcileCerts(p *project, m *model.Model, ca *pki.CA, ps *stat
 // 10.213.0.0/16, skipping any block another docker network already uses.
 var segmentPool = netip.MustParsePrefix("10.213.0.0/16")
 
-func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.ProjectState) (map[string]netip.Prefix, error) {
+func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.ProjectState) (map[string]netip.Prefix, map[string]netip.Addr, error) {
 	out := map[string]netip.Prefix{}
 	keep := map[string]bool{}
 	for _, seg := range m.Segments {
@@ -302,14 +314,21 @@ func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.
 			delete(ps.Segments, name)
 		}
 	}
-	if len(m.Segments) == 0 {
-		return out, nil
+	// Static addressing only for a lab with a transparent pod: its egress
+	// policy allows destinations by address. Other labs keep Docker's
+	// dynamic addresses, and their compose files stay as they were.
+	static := slices.ContainsFunc(m.Services, func(s *model.Service) bool { return s.Netinit != "" })
+	if !static {
+		ps.Network, ps.Addresses = "", nil
+	}
+	if len(m.Segments) == 0 && !static {
+		return out, nil, nil
 	}
 	networks, err := e.rt.Subnets(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	// Networks owned by this experiment do not count: they are the segments
+	// Networks owned by this experiment do not count: they are the ones
 	// being reconciled. Every other network's subnet is off limits.
 	var used []netip.Prefix
 	for _, n := range networks {
@@ -326,35 +345,133 @@ func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.
 			delete(ps.Segments, name)
 		}
 	}
+	if p, err := netip.ParsePrefix(ps.Network); ps.Network != "" && (err != nil || overlapsUsed(p)) {
+		ps.Network, ps.Addresses = "", nil
+	}
 	taken := func(p netip.Prefix) bool {
 		if overlapsUsed(p) {
 			return true
 		}
-		for _, cidr := range ps.Segments {
+		stored := slices.Collect(maps.Values(ps.Segments))
+		if ps.Network != "" {
+			stored = append(stored, ps.Network)
+		}
+		for _, cidr := range stored {
 			if q, err := netip.ParsePrefix(cidr); err == nil && q.Overlaps(p) {
 				return true
 			}
 		}
 		return false
 	}
+	free := func(what string) (netip.Prefix, error) {
+		base := segmentPool.Addr().As4()
+		for i := range 256 {
+			cand := netip.PrefixFrom(netip.AddrFrom4([4]byte{base[0], base[1], byte(i), 0}), 24)
+			if !taken(cand) {
+				return cand, nil
+			}
+		}
+		return netip.Prefix{}, fmt.Errorf("no free subnet in %s for %s", segmentPool, what)
+	}
 	for _, seg := range m.Segments {
 		if cidr, ok := ps.Segments[seg.Name]; ok {
 			out[seg.Name], _ = netip.ParsePrefix(cidr)
 			continue
 		}
-		base := segmentPool.Addr().As4()
-		found := false
-		for i := 0; i < 256 && !found; i++ {
-			cand := netip.PrefixFrom(netip.AddrFrom4([4]byte{base[0], base[1], byte(i), 0}), 24)
-			if !taken(cand) {
-				ps.Segments[seg.Name] = cand.String()
-				out[seg.Name] = cand
-				found = true
-			}
+		cand, err := free("segment " + seg.Name)
+		if err != nil {
+			return nil, nil, err
 		}
-		if !found {
-			return nil, fmt.Errorf("no free subnet in %s for segment %s", segmentPool, seg.Name)
+		ps.Segments[seg.Name] = cand.String()
+		out[seg.Name] = cand
+	}
+	if !static {
+		return out, nil, nil
+	}
+	if ps.Network == "" {
+		cand, err := free("the default network")
+		if err != nil {
+			return nil, nil, err
 		}
+		ps.Network, ps.Addresses = cand.String(), nil
+	}
+	subnet, _ := netip.ParsePrefix(ps.Network)
+	out[compose.DefaultNetwork] = subnet
+	addrs, err := allocateAddresses(m, ps, subnet)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, addrs, nil
+}
+
+// defaultNetworkStale reports whether the experiment's existing default
+// network has a subnet compose cannot keep: static addressing wants another
+// subnet, or it is off and the network still has a fixed one (Docker's own
+// pools never hand out segmentPool's blocks).
+func (e *Engine) defaultNetworkStale(ctx context.Context, m *model.Model, ps *state.ProjectState) (bool, error) {
+	networks, err := e.rt.Subnets(ctx)
+	if err != nil {
+		return false, err
+	}
+	name := m.Project + "_" + compose.DefaultNetwork
+	for _, n := range networks {
+		if n.Name != name || n.ExperimentID != ps.ExperimentID {
+			continue
+		}
+		if ps.Network == "" {
+			return segmentPool.Contains(n.Subnet.Addr()), nil
+		}
+		return n.Subnet.String() != ps.Network, nil
+	}
+	return false, nil
+}
+
+// allocateAddresses gives every container on the default network a fixed
+// address from the lower half of its subnet (Docker hands out the upper
+// half), keeping each address recorded in state.
+func allocateAddresses(m *model.Model, ps *state.ProjectState, subnet netip.Prefix) (map[string]netip.Addr, error) {
+	var owners []string
+	for _, svc := range m.Services {
+		switch {
+		case svc.Kind == model.Infra:
+			owners = append(owners, svc.Name)
+		case svc.Kind == model.App && svc.Pod != "":
+			owners = append(owners, svc.Pod)
+		case svc.Kind == model.App:
+			owners = append(owners, svc.Name)
+		}
+	}
+	dynamic := compose.DynamicRange(subnet)
+	valid := func(a netip.Addr) bool { return subnet.Contains(a) && !dynamic.Contains(a) && a.As4()[3] >= 10 }
+	out := map[string]netip.Addr{}
+	inUse := map[netip.Addr]bool{}
+	for name, s := range ps.Addresses {
+		a, err := netip.ParseAddr(s)
+		if err != nil || !valid(a) || !slices.Contains(owners, name) || inUse[a] {
+			delete(ps.Addresses, name)
+			continue
+		}
+		out[name], inUse[a] = a, true
+	}
+	if ps.Addresses == nil {
+		ps.Addresses = map[string]string{}
+	}
+	next := subnet.Masked().Addr()
+	for range 10 {
+		next = next.Next() // .1 is the gateway; fixed addresses start at .10
+	}
+	for _, name := range owners {
+		if _, ok := out[name]; ok {
+			continue
+		}
+		for inUse[next] {
+			next = next.Next()
+		}
+		if !valid(next) {
+			return nil, fmt.Errorf("no free address in %s for %s: too many services for static addressing", subnet, name)
+		}
+		out[name], inUse[next] = next, true
+		ps.Addresses[name] = next.String()
 	}
 	return out, nil
 }
@@ -402,7 +519,9 @@ func (e *Engine) render(p *project, pr *prepared, dir string, mode secrets.Mode,
 		TrustBundle:  bundle,
 		Certs:        pr.certs,
 		Subnets:      pr.subnets,
+		Addresses:    pr.addresses,
 		AppDir:       func(app string) string { return appDirs[app] },
+		ReadFile:     func(path string) ([]byte, error) { return os.ReadFile(filepath.Join(p.Dir, filepath.FromSlash(path))) },
 		Header:       header,
 	})
 }

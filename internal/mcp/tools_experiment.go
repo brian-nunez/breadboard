@@ -80,6 +80,7 @@ type envGroup struct {
 	Title     string   `json:"title"`
 	Plaintext bool     `json:"plaintext,omitempty"`
 	Reason    string   `json:"reason,omitempty"`
+	Sidecar   bool     `json:"sidecar,omitempty" jsonschema:"variables a sidecar adds; service is the sidecar"`
 	Vars      []envVar `json:"vars"`
 }
 
@@ -105,8 +106,13 @@ type serviceDetailsOut struct {
 	Certificate *certificate `json:"certificate,omitempty" jsonschema:"absent before the first up"`
 	Path        string       `json:"path,omitempty"`
 	Command     []string     `json:"command,omitempty"`
+	App         string       `json:"app,omitempty" jsonschema:"apps: the app in experiment.yaml"`
+	Instance    int          `json:"instance,omitempty" jsonschema:"apps: the instance described (1..N), absent with one replica"`
+	Replicas    []string     `json:"replicas,omitempty" jsonschema:"apps: every instance's service name"`
+	Sidecars    []sidecar    `json:"sidecars,omitempty" jsonschema:"apps: the instance's sidecars"`
 	Parent      string       `json:"parent,omitempty"`
 	Registry    string       `json:"registry,omitempty"`
+	Sidecar     *sidecar     `json:"sidecar,omitempty" jsonschema:"sidecars: what it is"`
 }
 
 type exploreIn struct {
@@ -186,6 +192,79 @@ type s3Bucket struct {
 
 type s3Out struct {
 	Buckets []s3Bucket `json:"buckets"`
+}
+
+type sidecarIn struct {
+	Dir     string `json:"dir,omitempty" jsonschema:"directory of the experiment, inside the one bb mcp was started in; empty means that directory"`
+	Service string `json:"service" jsonschema:"an app (its first instance), an app instance such as api-2, or the sidecar's service name such as api-2-envoy"`
+}
+
+type envoyListener struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
+type envoyHost struct {
+	Address           string   `json:"address"`
+	Hostname          string   `json:"hostname,omitempty" jsonschema:"the DNS name Envoy resolved"`
+	Instance          string   `json:"instance,omitempty" jsonschema:"the app instance or service at this address: which replica got the traffic"`
+	Healthy           bool     `json:"healthy"`
+	Flags             []string `json:"flags" jsonschema:"why the host is not healthy, e.g. failed_outlier_check"`
+	Ejected           bool     `json:"ejected" jsonschema:"ejected by outlier detection"`
+	Requests          int64    `json:"requests"`
+	Successes         int64    `json:"successes"`
+	Errors            int64    `json:"errors" jsonschema:"5xx responses and resets"`
+	Timeouts          int64    `json:"timeouts"`
+	ConnectFailures   int64    `json:"connect_failures"`
+	ActiveConnections int64    `json:"active_connections"`
+	ActiveRequests    int64    `json:"active_requests"`
+}
+
+type envoyCluster struct {
+	Name              string      `json:"name"`
+	Role              string      `json:"role,omitempty" jsonschema:"outbound, inbound, egress (transparent passthrough), or inbound passthrough"`
+	Target            string      `json:"target,omitempty" jsonschema:"the app or service the cluster reaches"`
+	Retries           int64       `json:"retries"`
+	EjectionsActive   int64       `json:"ejections_active"`
+	EjectionsEnforced int64       `json:"ejections_enforced"`
+	EjectionsOverflow int64       `json:"ejections_overflow" jsonschema:"ejections max_ejection_percent prevented"`
+	Hosts             []envoyHost `json:"hosts"`
+}
+
+type envoyOut struct {
+	Sidecar   string          `json:"sidecar"`
+	App       string          `json:"app" jsonschema:"the app instance the sidecar serves"`
+	Listeners []envoyListener `json:"listeners"`
+	Clusters  []envoyCluster  `json:"clusters"`
+}
+
+type pgbouncerPool struct {
+	Database       string `json:"database"`
+	User           string `json:"user"`
+	PoolMode       string `json:"pool_mode"`
+	ClientsActive  int64  `json:"clients_active"`
+	ClientsWaiting int64  `json:"clients_waiting"`
+	ServersActive  int64  `json:"servers_active"`
+	ServersIdle    int64  `json:"servers_idle"`
+	ServersUsed    int64  `json:"servers_used"`
+	ServersLogin   int64  `json:"servers_login"`
+	MaxWaitMicros  int64  `json:"max_wait_us" jsonschema:"how long the oldest waiting client has waited"`
+	Transactions   int64  `json:"transactions"`
+	Queries        int64  `json:"queries"`
+	BytesReceived  int64  `json:"bytes_received"`
+	BytesSent      int64  `json:"bytes_sent"`
+	AvgQueryMicros int64  `json:"avg_query_us"`
+	AvgWaitMicros  int64  `json:"avg_wait_us"`
+}
+
+type pgbouncerOut struct {
+	Sidecar  string          `json:"sidecar"`
+	App      string          `json:"app"`
+	Service  string          `json:"service" jsonschema:"the Postgres service it pools"`
+	PoolMode string          `json:"pool_mode"`
+	PoolSize int             `json:"pool_size"`
+	Port     int             `json:"port" jsonschema:"where the app reaches it, on 127.0.0.1"`
+	Pools    []pgbouncerPool `json:"pools"`
 }
 
 func (s *Server) addExperimentTools() {
@@ -272,9 +351,11 @@ func (s *Server) addExperimentTools() {
 			}),
 			UsedBy: orEmpty(d.UsedBy),
 			Env: mapSlice(d.Env, func(g core.EnvGroup) envGroup {
-				return envGroup{Service: g.Service, Title: g.Title, Plaintext: g.Plaintext, Reason: g.Reason, Vars: mapSlice(g.Vars, envVarView)}
+				return envGroup{Service: g.Service, Title: g.Title, Plaintext: g.Plaintext, Reason: g.Reason, Sidecar: g.Sidecar, Vars: mapSlice(g.Vars, envVarView)}
 			}),
-			Path: d.Path, Command: d.Command, Parent: d.Parent, Registry: d.Registry,
+			Path: d.Path, Command: d.Command,
+			App: d.App, Instance: d.Instance, Replicas: d.Replicas, Sidecars: mapSlice(d.Sidecars, sidecarView),
+			Parent: d.Parent, Registry: d.Registry, Sidecar: sidecarPtr(d.Sidecar),
 		}
 		if c := d.Certificate; c != nil {
 			out.Certificate = &certificate{Issuer: c.Issuer, DNSNames: orEmpty(c.DNSNames), Identity: c.Identity, NotAfter: timeView(c.NotAfter)}
@@ -363,6 +444,68 @@ func (s *Server) addExplorers() {
 			}),
 			Groups: mapSlice(res.Groups, func(g core.KafkaGroup) kafkaGroup {
 				return kafkaGroup{Name: g.Name, Topics: orEmpty(g.Topics), Members: g.Members, Lag: g.Lag}
+			}),
+		}, nil
+	})
+
+	sidecarReq := func(in sidecarIn) (core.ExploreRequest, error) {
+		dir, err := s.dir(in.Dir)
+		return core.ExploreRequest{Dir: dir, Service: in.Service}, err
+	}
+
+	add(s, readTool, true, &sdk.Tool{
+		Name:        "envoy_clusters",
+		Description: "What an app's running Envoy sidecar sees: its listeners, and each upstream cluster with its hosts (address, the replica or service at that address, health flags, outlier ejection, request, error and connection counts). Read from Envoy's admin API inside the sidecar. Use it to see which replica got traffic and why a host is failing.",
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in sidecarIn) (envoyOut, error) {
+		req, err := sidecarReq(in)
+		if err != nil {
+			return envoyOut{}, err
+		}
+		res, err := s.eng.EnvoyClusters(ctx, req)
+		if err != nil {
+			return envoyOut{}, err
+		}
+		return envoyOut{
+			Sidecar: res.Sidecar, App: res.App,
+			Listeners: mapSlice(res.Listeners, func(l core.EnvoyListener) envoyListener { return envoyListener{Name: l.Name, Address: l.Address} }),
+			Clusters: mapSlice(res.Clusters, func(c core.EnvoyCluster) envoyCluster {
+				return envoyCluster{
+					Name: c.Name, Role: c.Role, Target: c.Target, Retries: c.Retries,
+					EjectionsActive: c.EjectionsActive, EjectionsEnforced: c.EjectionsEnforced, EjectionsOverflow: c.EjectionsOverflow,
+					Hosts: mapSlice(c.Hosts, func(h core.EnvoyHost) envoyHost {
+						return envoyHost{
+							Address: h.Address, Hostname: h.Hostname, Instance: h.Instance, Healthy: h.Healthy, Flags: orEmpty(h.Flags), Ejected: h.Ejected,
+							Requests: h.Requests, Successes: h.Successes, Errors: h.Errors, Timeouts: h.Timeouts, ConnectFailures: h.ConnectFailures,
+							ActiveConnections: h.ActiveConnections, ActiveRequests: h.ActiveRequests,
+						}
+					}),
+				}
+			}),
+		}, nil
+	})
+
+	add(s, readTool, true, &sdk.Tool{
+		Name:        "pgbouncer_pools",
+		Description: "Pools of an app's running PgBouncer sidecar (SHOW POOLS and SHOW STATS through psql inside it): client connections active and waiting, server connections to Postgres, transactions, queries and wait times.",
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in sidecarIn) (pgbouncerOut, error) {
+		req, err := sidecarReq(in)
+		if err != nil {
+			return pgbouncerOut{}, err
+		}
+		res, err := s.eng.PgBouncerPools(ctx, req)
+		if err != nil {
+			return pgbouncerOut{}, err
+		}
+		return pgbouncerOut{
+			Sidecar: res.Sidecar, App: res.App, Service: res.Service, PoolMode: res.PoolMode, PoolSize: res.PoolSize, Port: res.Port,
+			Pools: mapSlice(res.Pools, func(p core.PgBouncerPool) pgbouncerPool {
+				return pgbouncerPool{
+					Database: p.Database, User: p.User, PoolMode: p.PoolMode,
+					ClientsActive: p.ClientsActive, ClientsWaiting: p.ClientsWaiting,
+					ServersActive: p.ServersActive, ServersIdle: p.ServersIdle, ServersUsed: p.ServersUsed, ServersLogin: p.ServersLogin,
+					MaxWaitMicros: p.MaxWaitMicros, Transactions: p.Transactions, Queries: p.Queries,
+					BytesReceived: p.BytesReceived, BytesSent: p.BytesSent, AvgQueryMicros: p.AvgQueryMicros, AvgWaitMicros: p.AvgWaitMicros,
+				}
 			}),
 		}, nil
 	})

@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -132,6 +133,62 @@ func (c *Compose) Available(ctx context.Context) error {
 func (c *Compose) Up(ctx context.Context, p Project) error {
 	_, err := c.run(ctx, append(p.args(), "up", "--detach", "--build", "--remove-orphans")...)
 	return err
+}
+
+// Build builds the images of the given services without starting anything.
+func (c *Compose) Build(ctx context.Context, p Project, services []string) error {
+	_, err := c.run(ctx, append(append(p.args(), "build"), services...)...)
+	return err
+}
+
+// ErrUserUnresolved means an image's USER is a name the image cannot map to
+// a numeric uid (it has no passwd entry, or no id command to ask).
+var ErrUserUnresolved = errors.New("cannot resolve the image's user to a uid")
+
+// ImageUser is the user a service's built image starts its process as.
+type ImageUser struct {
+	Image string // the image name compose gave the service
+	User  string // Config.User as written in the image: empty, a uid, or a name, maybe with :group
+	UID   int
+}
+
+// ImageUser resolves the uid a built service image starts as: Config.User
+// from docker image inspect (empty means root), a number as is, and a name
+// through `id -u <name>` run in the image with no network.
+func (c *Compose) ImageUser(ctx context.Context, p Project, service string) (ImageUser, error) {
+	out, err := c.run(ctx, append(p.args(), "config", "--images", service)...)
+	if err != nil {
+		return ImageUser{}, err
+	}
+	// The list includes the images of the services it depends on; compose
+	// names a built service's image <project>-<service>.
+	u := ImageUser{Image: p.Name + "-" + service}
+	if !slices.Contains(strings.Fields(string(out)), u.Image) {
+		return ImageUser{}, fmt.Errorf("runtime: compose builds no image %s for %s (it lists %s)", u.Image, service, strings.Join(strings.Fields(string(out)), ", "))
+	}
+	out, err = c.run(ctx, "image", "inspect", "--format", "{{.Config.User}}", u.Image)
+	if err != nil {
+		return ImageUser{}, err
+	}
+	u.User = strings.TrimSpace(string(out))
+	name, _, _ := strings.Cut(u.User, ":")
+	if name == "" {
+		return u, nil // root
+	}
+	if n, err := strconv.Atoi(name); err == nil {
+		u.UID = n
+		return u, nil
+	}
+	out, err = c.run(ctx, "run", "--rm", "--network", "none", "--entrypoint", "id", u.Image, "-u", name)
+	if err != nil {
+		return u, fmt.Errorf("%w: user %q of %s: %v", ErrUserUnresolved, name, u.Image, err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return u, fmt.Errorf("%w: user %q of %s: id printed %q", ErrUserUnresolved, name, u.Image, strings.TrimSpace(string(out)))
+	}
+	u.UID = n
+	return u, nil
 }
 
 // Down stops and removes the project's containers and networks, and its
@@ -352,6 +409,7 @@ func (c *Compose) Logs(ctx context.Context, p Project, services []string, follow
 // Network is a docker network's subnet and the Breadboard experiment id
 // that owns it, if any.
 type Network struct {
+	Name         string
 	Subnet       netip.Prefix
 	ExperimentID string
 }
@@ -408,6 +466,7 @@ func (c *Compose) Subnets(ctx context.Context) ([]Network, error) {
 		return nil, err
 	}
 	var raw []struct {
+		Name   string            `json:"Name"`
 		Labels map[string]string `json:"Labels"`
 		IPAM   struct {
 			Config []struct {
@@ -422,7 +481,7 @@ func (c *Compose) Subnets(ctx context.Context) ([]Network, error) {
 	for _, n := range raw {
 		for _, cfg := range n.IPAM.Config {
 			if p, err := netip.ParsePrefix(cfg.Subnet); err == nil {
-				list = append(list, Network{Subnet: p, ExperimentID: n.Labels[labelExperimentID]})
+				list = append(list, Network{Name: n.Name, Subnet: p, ExperimentID: n.Labels[labelExperimentID]})
 			}
 		}
 	}

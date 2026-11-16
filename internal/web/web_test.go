@@ -18,12 +18,16 @@ import (
 // nullRuntime is a Docker that is available and runs nothing.
 type nullRuntime struct{}
 
-func (nullRuntime) Available(context.Context) error                    { return nil }
-func (nullRuntime) Up(context.Context, runtime.Project) error          { return nil }
-func (nullRuntime) Down(context.Context, runtime.Project, bool) error  { return nil }
-func (nullRuntime) RemoveOwned(context.Context, string, bool) error    { return nil }
-func (nullRuntime) Subnets(context.Context) ([]runtime.Network, error) { return nil, nil }
-func (nullRuntime) Owners(context.Context, string) ([]string, error)   { return nil, nil }
+func (nullRuntime) Available(context.Context) error                        { return nil }
+func (nullRuntime) Up(context.Context, runtime.Project) error              { return nil }
+func (nullRuntime) Down(context.Context, runtime.Project, bool) error      { return nil }
+func (nullRuntime) RemoveOwned(context.Context, string, bool) error        { return nil }
+func (nullRuntime) Subnets(context.Context) ([]runtime.Network, error)     { return nil, nil }
+func (nullRuntime) Build(context.Context, runtime.Project, []string) error { return nil }
+func (nullRuntime) ImageUser(context.Context, runtime.Project, string) (runtime.ImageUser, error) {
+	return runtime.ImageUser{}, nil
+}
+func (nullRuntime) Owners(context.Context, string) ([]string, error) { return nil, nil }
 func (nullRuntime) Exec(context.Context, string, string, []string) ([]byte, error) {
 	return nil, errors.New("not running")
 }

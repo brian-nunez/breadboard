@@ -31,6 +31,10 @@ var explorerTabs = map[string]string{
 	"s3-compatible": "Buckets",
 }
 
+// sidecarTabs names the explorer tab of each sidecar type that has one; an
+// app's page and the sidecar's own page both show it.
+var sidecarTabs = [][2]string{{"envoy", "Envoy"}, {"pgbouncer", "PgBouncer pools"}}
+
 func (p servicePage) tabs() [][2]string {
 	t := [][2]string{{"overview", "Overview"}}
 	if p.Details != nil && p.Details.Kind == "infra" {
@@ -38,11 +42,33 @@ func (p servicePage) tabs() [][2]string {
 			t = append(t, [2]string{"explore", name})
 		}
 	}
+	for _, st := range sidecarTabs {
+		if p.hasSidecar(st[0]) {
+			t = append(t, st)
+		}
+	}
 	t = append(t, [2]string{"connection", "Connection"}, [2]string{"logs", "Logs"})
-	if p.Details != nil && p.Details.Type != "" {
+	if p.Details != nil && p.Details.Type != "" && len(p.Notes.Sections) > 0 {
 		t = append(t, [2]string{"learn", "Learn"})
 	}
 	return t
+}
+
+// hasSidecar reports whether the page is an app with a sidecar of the type,
+// or that sidecar itself.
+func (p servicePage) hasSidecar(typ string) bool {
+	switch {
+	case p.Details == nil:
+		return false
+	case p.Details.Sidecar != nil:
+		return p.Details.Sidecar.Type == typ
+	}
+	for _, sc := range p.Details.Sidecars {
+		if sc.Type == typ {
+			return true
+		}
+	}
+	return false
 }
 
 templ serviceView(p servicePage) {
@@ -76,7 +102,7 @@ templ serviceView(p servicePage) {
 			</nav>
 			<div class="mt-6">
 				switch p.Tab {
-					case "explore":
+					case "explore", "envoy", "pgbouncer":
 						@exploreTab(p)
 					case "connection":
 						@connectionTab(p)
@@ -97,12 +123,19 @@ func serviceSubtitle(p servicePage) string {
 	parts := []string{}
 	switch d.Kind {
 	case "app":
+		if len(d.Replicas) > 1 {
+			parts = append(parts, fmt.Sprintf("replica %d of %d", d.Instance, len(d.Replicas)))
+		}
 		parts = append(parts, "your code in "+d.Path)
 		if len(d.Command) > 0 {
 			parts = append(parts, "runs "+strings.Join(d.Command, " "))
 		}
 	case "sidecar":
-		parts = append(parts, d.Title+" agent registering "+d.Parent)
+		if d.Registry != "" {
+			parts = append(parts, d.Title+" agent registering "+d.Parent)
+		} else {
+			parts = append(parts, d.Title+" sidecar of "+d.Parent)
+		}
 	default:
 		parts = append(parts, d.Image)
 	}
@@ -133,13 +166,24 @@ templ serviceOverview(p servicePage) {
 									It connects to { usesList(p.Row.Uses) }.
 								}
 							</p>
-						} else if p.Details.Kind == "sidecar" {
+						} else if p.Details.Kind == "sidecar" && p.Details.Registry != "" {
 							<p>A Consul client agent sharing { p.Details.Parent }'s network address and certificate. It joined the Consul server { p.Details.Registry } and registered { p.Details.Parent } there with a health check; when it stops, it leaves and the registration goes with it.</p>
+						} else if p.Details.Kind == "sidecar" {
+							<p>{ p.Details.Summary } It runs in { p.Details.Parent }'s pod: same network namespace (same address, same <code class="font-mono text-sm">localhost</code>), same certificate, and the shared directory <code class="font-mono text-sm">/var/run/bb</code>. The app reaches it on loopback; other containers only see the ports it opens to them.</p>
 						} else {
 							@noteBlocks(p.Notes.section("What you got").Blocks)
 						}
 					</div>
 				</div>
+			}
+			if p.Details.Kind == "app" && len(p.Details.Replicas) > 1 {
+				@replicasCard(p)
+			}
+			for _, sc := range p.Details.Sidecars {
+				@sidecarCard(p, sc)
+			}
+			if p.Details.Sidecar != nil {
+				@sidecarCard(p, *p.Details.Sidecar)
 			}
 			if p.Details.Kind == "infra" {
 				<div class="grid gap-6 md:grid-cols-2">
@@ -160,11 +204,125 @@ func usesList(uses []core.Edge) string {
 	names := make([]string, len(uses))
 	for i, e := range uses {
 		names[i] = e.To
+		if e.Via != "" {
+			names[i] += " (through its " + e.Via + " sidecar)"
+		}
 		if !e.TLS {
 			names[i] += " (plaintext)"
 		}
 	}
 	return strings.Join(names, ", ")
+}
+
+// replicasCard lists an app's instances with their live state.
+templ replicasCard(p servicePage) {
+	@card() {
+		<div class="p-6">
+			<h2 class="text-base font-semibold">Replicas</h2>
+			<p class="mt-1 text-sm text-slate-600">{ itoa(len(p.Details.Replicas)) } instances of { p.Details.App }, each reachable by its own name and all of them as <code class="font-mono text-[13px]">{ p.Details.App }.{ p.Dash.Domain }</code>.</p>
+			<div class="mt-4 grid gap-2 md:grid-cols-3">
+				for _, name := range p.Details.Replicas {
+					if r, ok := find(p.Dash.Services, name); ok {
+						<a href={ templ.SafeURL("/services/" + name) } class={ "rounded-lg border px-3 py-2", templ.KV("border-indigo-600", name == p.Row.Name), templ.KV("border-slate-200 hover:border-slate-400", name != p.Row.Name) }>
+							<div class="flex items-center justify-between">
+								<span class="font-semibold">{ name }</span>
+								@statusWord(r.Status())
+							</div>
+							<div class="mt-1 font-mono text-xs text-slate-500">{ r.Address }</div>
+						</a>
+					}
+				}
+			</div>
+		</div>
+	}
+}
+
+// sidecarCard explains one sidecar: what it does, what it listens on, and
+// the environment it gives the app. Secret values never appear.
+templ sidecarCard(p servicePage, sc core.SidecarInfo) {
+	@card() {
+		<div class="p-6">
+			<div class="flex items-start justify-between gap-4">
+				<div>
+					<h2 class="text-base font-semibold">
+						<a href={ templ.SafeURL("/services/" + sc.Service) } class="hover:text-indigo-700">{ sc.Service }</a>
+						<span class="font-normal text-slate-500">· { sc.Title } sidecar</span>
+					</h2>
+					<p class="mt-1 text-sm text-slate-600">{ sc.Summary }</p>
+				</div>
+				if r, ok := find(p.Dash.Services, sc.Service); ok {
+					@statusWord(r.Status())
+				}
+			</div>
+			if sc.Transparent {
+				<p class="mt-3 rounded-lg bg-slate-800 px-3 py-2 text-sm text-white">Transparent mode: iptables rules in the pod send every TCP connection of the app through Envoy. Undeclared destinations are { egressWord(sc.Egress) }.</p>
+			}
+			if len(sc.Ports) > 0 {
+				<div class="mt-4 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Listens on</div>
+				<div class="mt-2 flex flex-col gap-1.5 text-sm">
+					for _, port := range sc.Ports {
+						<div class="flex gap-4">
+							<span class="w-32 shrink-0 font-mono text-[13px] text-slate-900">{ portAddr(port) }</span>
+							<span class="text-slate-600">
+								{ port.Purpose }
+								if port.Loopback {
+									<span class="text-slate-500">(loopback: only the app and its sidecars)</span>
+								}
+							</span>
+						</div>
+					}
+				</div>
+			}
+			if len(sc.Env) > 0 || len(sc.Rewrites) > 0 {
+				<div class="mt-4 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Gives the app</div>
+				<div class="mt-2 grid gap-3 md:grid-cols-2">
+					for _, v := range sc.Env {
+						@envVar(v, credsService(sc))
+					}
+					for _, v := range sc.Rewrites {
+						@envVar(v, credsService(sc))
+					}
+				</div>
+				if len(sc.Rewrites) > 0 {
+					<p class="mt-2 text-xs text-slate-500">{ rewriteNote(sc) }</p>
+				}
+			}
+			if len(sc.Settings) > 0 {
+				<div class="mt-4 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Settings</div>
+				<div class="mt-1">
+					for _, st := range sc.Settings {
+						@kv(st.Name) {
+							<span class="font-mono text-[13px]">{ st.Value }</span>
+						}
+					}
+				</div>
+			}
+		</div>
+	}
+}
+
+func egressWord(egress string) string {
+	if egress == "deny" {
+		return "refused (egress deny)"
+	}
+	return "passed through untouched (egress allow)"
+}
+
+// credsService is where bb creds finds a sidecar's secret values: the
+// service it connects to.
+func credsService(sc core.SidecarInfo) string {
+	if len(sc.Targets) > 0 {
+		return sc.Targets[0]
+	}
+	return sc.Service
+}
+
+func rewriteNote(sc core.SidecarInfo) string {
+	names := make([]string, len(sc.Rewrites))
+	for i, v := range sc.Rewrites {
+		names[i] = v.Name
+	}
+	return strings.Join(names, ", ") + " replace the values " + strings.Join(sc.Targets, ", ") + " would give, so the app connects through " + sc.Name + " without code changes."
 }
 
 templ exerciseCard(label, color string, items [][]inline) {

@@ -82,33 +82,75 @@ templ graphSVG(g graph, labels bool) {
 			}
 		}
 		for _, n := range g.Nodes {
-			if g.Static {
-				<g>
-				<rect x={ itoa(n.X) } y={ itoa(n.Y) } width="176" height="56" rx="10" stroke-width={ strokeWidth(n.Selected) } class={ templ.KV("fill-white stroke-indigo-600", n.Selected), templ.KV("fill-white stroke-slate-200 hover:stroke-slate-400", !n.Selected) }></rect>
-				if n.Kind == "infra" {
-					<rect x={ itoa(n.X + 14) } y={ itoa(n.Y + 14) } width="28" height="28" rx="6" class="fill-slate-100"></rect>
-				} else {
-					<circle cx={ itoa(n.X + 28) } cy={ itoa(n.Y + 28) } r="14" class="fill-indigo-50"></circle>
-				}
-				<text x={ itoa(n.X + 28) } y={ itoa(n.Y + 32) } text-anchor="middle" class={ "text-[12px] font-semibold", templ.KV("fill-slate-700", n.Kind == "infra"), templ.KV("fill-indigo-700", n.Kind != "infra") }>{ n.Initial() }</text>
-				<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 33) } class="fill-slate-900 text-[14px] font-semibold">{ n.Name }</text>
-				<circle cx={ itoa(n.X + 158) } cy={ itoa(n.Y + 28) } r="4" class={ dotClass(n.Status().Color) }></circle>
-				</g>
+			@graphNode(n, g.Static)
+		}
+	</svg>
+}
+
+// graphNode draws one card: a pod outline around an app with sidecars,
+// the cards behind a replicated app, the card itself, and sidecar chips.
+// Live graphs link the card and each chip to the inspector.
+templ graphNode(n node, static bool) {
+	<g>
+		if n.Pod() {
+			<rect x={ itoa(n.X - podPad) } y={ itoa(n.Y - podPad - stackTop(n)) } width={ itoa(nodeW + 2*podPad + stackTop(n)) } height={ itoa(n.H + 2*podPad + stackTop(n)) } rx="14" fill="none" stroke-dasharray="4 3" class="stroke-slate-300"></rect>
+		}
+		for _, dx := range n.Stack() {
+			<rect x={ itoa(n.X + dx) } y={ itoa(n.Y - dx) } width="176" height="56" rx="10" class="fill-white stroke-slate-300"></rect>
+		}
+		if static {
+			@nodeCard(n)
+		} else {
+			<a href={ templ.SafeURL("/architecture?node=" + n.Name) }>
+				@nodeCard(n)
+			</a>
+		}
+		for _, c := range n.Chips {
+			if static {
+				@chipShape(c)
 			} else {
-				<a href={ templ.SafeURL("/architecture?node=" + n.Name) }>
-				<rect x={ itoa(n.X) } y={ itoa(n.Y) } width="176" height="56" rx="10" stroke-width={ strokeWidth(n.Selected) } class={ templ.KV("fill-white stroke-indigo-600", n.Selected), templ.KV("fill-white stroke-slate-200 hover:stroke-slate-400", !n.Selected) }></rect>
-				if n.Kind == "infra" {
-					<rect x={ itoa(n.X + 14) } y={ itoa(n.Y + 14) } width="28" height="28" rx="6" class="fill-slate-100"></rect>
-				} else {
-					<circle cx={ itoa(n.X + 28) } cy={ itoa(n.Y + 28) } r="14" class="fill-indigo-50"></circle>
-				}
-				<text x={ itoa(n.X + 28) } y={ itoa(n.Y + 32) } text-anchor="middle" class={ "text-[12px] font-semibold", templ.KV("fill-slate-700", n.Kind == "infra"), templ.KV("fill-indigo-700", n.Kind != "infra") }>{ n.Initial() }</text>
-				<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 33) } class="fill-slate-900 text-[14px] font-semibold">{ n.Name }</text>
-				<circle cx={ itoa(n.X + 158) } cy={ itoa(n.Y + 28) } r="4" class={ dotClass(n.Status().Color) }></circle>
+				<a href={ templ.SafeURL("/architecture?node=" + c.Name) }>
+					@chipShape(c)
 				</a>
 			}
 		}
-	</svg>
+	</g>
+}
+
+templ nodeCard(n node) {
+	<rect x={ itoa(n.X) } y={ itoa(n.Y) } width="176" height="56" rx="10" stroke-width={ strokeWidth(n.Selected) } class={ templ.KV("fill-white stroke-indigo-600", n.Selected), templ.KV("fill-white stroke-slate-200 hover:stroke-slate-400", !n.Selected) }></rect>
+	if n.Kind == "infra" {
+		<rect x={ itoa(n.X + 14) } y={ itoa(n.Y + 14) } width="28" height="28" rx="6" class="fill-slate-100"></rect>
+	} else {
+		<circle cx={ itoa(n.X + 28) } cy={ itoa(n.Y + 28) } r="14" class="fill-indigo-50"></circle>
+	}
+	<text x={ itoa(n.X + 28) } y={ itoa(n.Y + 32) } text-anchor="middle" class={ "text-[12px] font-semibold", templ.KV("fill-slate-700", n.Kind == "infra"), templ.KV("fill-indigo-700", n.Kind != "infra") }>{ n.Initial() }</text>
+	if len(n.Instances) > 1 {
+		<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 27) } class="fill-slate-900 text-[14px] font-semibold">{ n.Label() }</text>
+		for i, inst := range n.Instances {
+			<circle cx={ itoa(n.InstanceDot(i)) } cy={ itoa(n.Y + 40) } r="3" class={ dotClass(inst.Status().Color) }><title>{ inst.Name }: { inst.Status().Word }</title></circle>
+		}
+		<text x={ itoa(n.InstanceDot(len(n.Instances)) - 2) } y={ itoa(n.Y + 44) } class="fill-slate-500 text-[11px]">×{ itoa(len(n.Instances)) }</text>
+	} else {
+		<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 33) } class="fill-slate-900 text-[14px] font-semibold">{ n.Label() }</text>
+		<circle cx={ itoa(n.X + 158) } cy={ itoa(n.Y + 28) } r="4" class={ dotClass(n.Status().Color) }></circle>
+	}
+}
+
+// chipShape is a sidecar inside its app's pod: light for an ordinary
+// sidecar, dark for an Envoy that captures all of the app's traffic.
+templ chipShape(c chip) {
+	<rect x={ itoa(c.X) } y={ itoa(c.Y) } width={ itoa(c.W) } height="20" rx="6" stroke-width={ strokeWidth(c.Selected) } class={ templ.KV("fill-slate-800", c.Transparent), templ.KV("fill-slate-50", !c.Transparent), templ.KV("stroke-indigo-600", c.Selected), templ.KV("stroke-slate-300 hover:stroke-slate-400", !c.Selected) }></rect>
+	<circle cx={ itoa(c.X + 9) } cy={ itoa(c.Y + 10) } r="3" class={ dotClass(c.Color) }></circle>
+	<text x={ itoa(c.X + 16) } y={ itoa(c.Y + 14) } class={ "font-mono text-[11px]", templ.KV("fill-white", c.Transparent), templ.KV("fill-slate-700", !c.Transparent) }>{ c.Label }</text>
+}
+
+// stackTop is how far the cards behind a replicated app reach above it.
+func stackTop(n node) int {
+	if s := n.Stack(); len(s) > 0 {
+		return s[0]
+	}
+	return 0
 }
 
 func strokeWidth(selected bool) string {
@@ -124,6 +166,9 @@ templ legend() {
 		<span class="flex items-center gap-2"><svg viewBox="0 0 24 4" class="h-1 w-6"><line x1="0" y1="2" x2="24" y2="2" stroke-width="1.5" stroke-dasharray="6 4" class="stroke-red-600"></line></svg>Plaintext (intentional)</span>
 		<span class="flex items-center gap-2"><span class="flex size-4 items-center justify-center rounded bg-slate-100 text-[9px] font-semibold text-slate-700">K</span>infrastructure</span>
 		<span class="flex items-center gap-2"><span class="flex size-4 items-center justify-center rounded-full bg-indigo-50 text-[9px] font-semibold text-indigo-700">A</span>your code</span>
+		<span class="flex items-center gap-2"><span class="rounded border border-dashed border-slate-300 px-1.5 font-mono text-[10px] text-slate-700">envoy</span>sidecar in the app's pod</span>
+		<span class="flex items-center gap-2"><span class="rounded bg-slate-800 px-1.5 font-mono text-[10px] text-white">transparent</span>captures all the app's traffic</span>
+		<span class="flex items-center gap-2"><span class="font-semibold text-slate-700">×3</span>replicas, one dot each</span>
 	</div>
 }
 
@@ -153,7 +198,43 @@ templ inspector(d dashboardData, r row) {
 				}
 			</div>
 		}
-		if users := inbound(d.Services, r.Name); len(users) > 0 {
+		if r.Replicas > 1 {
+			<div class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Replicas</div>
+			<div class="mt-2 flex flex-wrap gap-2 text-sm">
+				for _, inst := range instancesOf(d.Services, r.App) {
+					<a href={ templ.SafeURL("/architecture?node=" + inst.Name) } class={ "flex items-center gap-2 rounded-lg border px-3 py-1.5", templ.KV("border-indigo-600", inst.Name == r.Name), templ.KV("border-slate-200", inst.Name != r.Name) }>
+						@dot(inst.Status().Color)
+						{ inst.Name }
+					</a>
+				}
+			</div>
+		}
+		if scs := sidecarsOf(d.Services, r.Name); len(scs) > 0 {
+			<div class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Sidecars</div>
+			<div class="mt-2 flex flex-col gap-2">
+				for _, sc := range scs {
+					<a href={ templ.SafeURL("/architecture?node=" + sc.Name) } class="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm">
+						<span class="font-semibold">{ sc.Name }</span>
+						<span class="flex items-center gap-2 text-xs text-slate-600">
+							{ sidecarMode(sc) }
+							@dot(sc.Status().Color)
+						</span>
+					</a>
+				}
+			</div>
+		}
+		if r.Sidecar != nil && len(r.Sidecar.Ports) > 0 {
+			<div class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Listens on</div>
+			<div class="mt-2 flex flex-col gap-1.5 text-sm">
+				for _, p := range r.Sidecar.Ports {
+					<div class="flex gap-3">
+						<span class="w-28 shrink-0 font-mono text-xs text-slate-700">{ portAddr(p) }</span>
+						<span class="text-xs text-slate-600">{ p.Purpose }</span>
+					</div>
+				}
+			</div>
+		}
+		if users := inbound(d.Services, r); len(users) > 0 {
 			<div class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Used by</div>
 			<div class="mt-2 flex flex-wrap gap-2 text-sm">
 				for _, u := range users {
@@ -178,9 +259,9 @@ templ inspector(d dashboardData, r row) {
 templ connectionList(d dashboardData) {
 	<div class="flex flex-col gap-2 md:hidden">
 		for _, r := range d.Services {
-			for _, e := range r.Uses {
+			for _, e := range firstInstanceUses(r) {
 				<a href={ templ.SafeURL("/architecture?node=" + r.Name) } class={ "flex items-center justify-between rounded-xl border px-4 py-3 text-sm", templ.KV("border-red-200 bg-red-50", !e.TLS), templ.KV("border-slate-200 bg-white", e.TLS) }>
-					<span><span class="font-semibold">{ r.Name }</span> → { e.To }</span>
+					<span><span class="font-semibold">{ r.Label() }</span> → { e.To }</span>
 					<span class={ "font-mono text-xs", templ.KV("text-red-700", !e.TLS), templ.KV("text-slate-600", e.TLS) }>{ edgeLabel(e.TLS, e.Port) }</span>
 				</a>
 			}

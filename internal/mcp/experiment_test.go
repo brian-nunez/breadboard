@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -8,7 +10,7 @@ import (
 )
 
 var (
-	readTools  = []string{"ca", "catalog", "config_get", "consul_catalog", "creds", "guide", "kafka_topics", "learn", "logs", "postgres_tables", "redis_keys", "s3_buckets", "service_details", "starter_details", "starters", "status", "version"}
+	readTools  = []string{"ca", "catalog", "config_get", "consul_catalog", "creds", "envoy_clusters", "guide", "kafka_topics", "learn", "logs", "pgbouncer_pools", "postgres_tables", "redis_keys", "s3_buckets", "service_details", "starter_details", "starters", "status", "version"}
 	writeTools = []string{"add_service", "apply_starter", "config_set", "down", "export_compose", "init", "migrate", "remove_service", "up"}
 )
 
@@ -149,5 +151,84 @@ func TestInstructionsNameRealTools(t *testing.T) {
 				t.Errorf("guide workflow names %q", m[1])
 			}
 		}
+	}
+}
+
+// status and service_details describe sidecars and replicas; the sidecar
+// explorers return each upstream host with the replica at its address.
+func TestSidecarsAndReplicasAreVisible(t *testing.T) {
+	h := newHarness(t, false)
+	h.mustCall(t, "init", map[string]any{"name": "lab"})
+	spec := `version: 1
+name: lab
+services:
+  postgres:
+    type: postgres
+apps:
+  web:
+    path: ./web
+    command: [web]
+    replicas: 3
+    sidecars:
+      - type: envoy
+        inbound: {port: 8443, app_port: 8080}
+  caller:
+    path: ./caller
+    command: [caller]
+    uses: [postgres]
+    sidecars:
+      - type: envoy
+        outbound: [{service: web, port: 9001}]
+        transparent: {egress: deny}
+      - type: pgbouncer
+        service: postgres
+`
+	if err := os.WriteFile(filepath.Join(h.root, "experiment.yaml"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := h.mustCall(t, "status", nil)
+	rows := map[string]map[string]any{}
+	for _, s := range st["services"].([]any) {
+		rows[s.(map[string]any)["name"].(string)] = s.(map[string]any)
+	}
+	if w := rows["web-2"]; w["app"] != "web" || w["instance"] != 2.0 || w["replicas"] != 3.0 {
+		t.Errorf("web-2 = %v", w)
+	}
+	ce, _ := rows["caller-envoy"]["sidecar"].(map[string]any)
+	if ce == nil || ce["type"] != "envoy" || ce["transparent"] != true || ce["egress"] != "deny" || len(ce["ports"].([]any)) < 4 {
+		t.Errorf("caller-envoy sidecar = %v", ce)
+	}
+	uses := rows["caller"]["uses"].([]any)
+	if e := uses[1].(map[string]any); e["to"] != "web" || e["via"] != "envoy" || e["to_app"] != true {
+		t.Errorf("caller uses = %v", uses)
+	}
+	d := h.mustCall(t, "service_details", map[string]any{"service": "caller"})
+	if len(d["sidecars"].([]any)) != 2 || len(d["replicas"].([]any)) != 1 {
+		t.Errorf("caller details = %v", d)
+	}
+	pb := d["sidecars"].([]any)[1].(map[string]any)
+	for _, v := range pb["rewrites"].([]any) {
+		if v := v.(map[string]any); v["secret"] == true && v["value"] != "" {
+			t.Errorf("service_details shows %s", v["name"])
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join("..", "core", "testdata", "explore", "envoy-outbound.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.rt.mu.Lock()
+	h.rt.exec = map[string][]byte{"caller-envoy": data}
+	h.rt.mu.Unlock()
+	out := h.mustCall(t, "envoy_clusters", map[string]any{"service": "caller"})
+	c := out["clusters"].([]any)[0].(map[string]any)
+	if out["sidecar"] != "caller-envoy" || c["target"] != "web" || len(c["hosts"].([]any)) != 3 {
+		t.Fatalf("envoy_clusters = %v", out)
+	}
+	if h := c["hosts"].([]any)[2].(map[string]any); h["instance"] != "web-3" || h["errors"] != 15.0 {
+		t.Errorf("web-3 host = %v", h)
+	}
+	if _, errText := h.call(t, "pgbouncer_pools", map[string]any{"service": "web"}); !strings.Contains(errText, "no pgbouncer sidecar") {
+		t.Errorf("pgbouncer_pools on an app without one: %q", errText)
 	}
 }

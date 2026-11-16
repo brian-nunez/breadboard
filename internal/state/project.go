@@ -57,6 +57,14 @@ type ProjectState struct {
 	Certificates map[string]CertRecord `json:"certificates"`
 	// Segments maps each private network segment to its allocated subnet.
 	Segments map[string]string `json:"segments"`
+	// Network is the default network's allocated subnet, set while the
+	// experiment has a transparent pod (whose egress policy allows
+	// destinations by address).
+	Network string `json:"network,omitempty"`
+	// Addresses maps each container on the default network (an infra
+	// service, an app instance, or a pod holder) to its fixed address in
+	// Network, so addresses survive bb up.
+	Addresses map[string]string `json:"addresses,omitempty"`
 }
 
 // CertRecord describes an issued leaf certificate.

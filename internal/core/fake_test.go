@@ -43,6 +43,8 @@ type fakeRuntime struct {
 	// execOut is what Exec prints, by service; execs records each call.
 	execOut map[string]string
 	execs   []string
+	// imageUser is the user each service's image starts as (default root).
+	imageUser map[string]runtime.ImageUser
 }
 
 func newFake() *fakeRuntime {
@@ -125,6 +127,21 @@ func (f *fakeRuntime) Exec(ctx context.Context, experiment, service string, cmd 
 		return []byte(out), nil
 	}
 	return nil, fmt.Errorf("fake: no exec output for %s", service)
+}
+
+func (f *fakeRuntime) Build(ctx context.Context, p runtime.Project, services []string) error {
+	f.record("build " + strings.Join(services, ","))
+	return nil
+}
+
+func (f *fakeRuntime) ImageUser(ctx context.Context, p runtime.Project, service string) (runtime.ImageUser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u := f.imageUser[service]
+	if u.User == "unresolvable" {
+		return u, runtime.ErrUserUnresolved
+	}
+	return u, nil
 }
 
 func (f *fakeRuntime) Containers(ctx context.Context, experiment string) ([]runtime.Container, error) {

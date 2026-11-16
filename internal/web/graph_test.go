@@ -60,7 +60,10 @@ func TestSidecarsRegisterWithTheirRegistry(t *testing.T) {
 	if len(g.Edges) != 1 || !g.Edges[0].Registering || g.Edges[0].Label != "registers" {
 		t.Fatalf("edges = %+v", g.Edges)
 	}
-	if got := inbound([]row{svc("consul", "infra"), agent}, "consul"); len(got) != 1 || got[0] != "greeter-agent" {
+	if len(g.Nodes) != 2 || len(g.Nodes[0].Chips) != 1 || g.Nodes[0].Chips[0].Name != "greeter-agent" {
+		t.Errorf("the agent is not a chip in greeter's pod: %+v", g.Nodes)
+	}
+	if got := inbound([]row{svc("consul", "infra"), agent}, svc("consul", "infra")); len(got) != 1 || got[0] != "greeter-agent" {
 		t.Errorf("inbound = %v", got)
 	}
 }
@@ -71,5 +74,68 @@ func TestSelectedNodeFallsBackToTheFirstApp(t *testing.T) {
 		if s := selectedNode(d, want); s != got {
 			t.Errorf("selectedNode(%q) = %q, want %q", want, s, got)
 		}
+	}
+}
+
+// An app with replicas is one stacked card; its sidecars are chips (a
+// transparent Envoy marked); an app-to-app edge loops through the gutter.
+func TestLayoutDrawsPodsReplicasAndAppEdges(t *testing.T) {
+	inst := func(name string, n int) row {
+		r := svc(name, "app")
+		r.App, r.Instance, r.Replicas = "web", n, 3
+		return r
+	}
+	envoy := func(parent string, transparent bool) row {
+		r := svc(parent+"-envoy", "sidecar")
+		r.Parent, r.Type = parent, "envoy"
+		r.Sidecar = &core.SidecarInfo{Transparent: transparent, Egress: "deny"}
+		r.Health = core.HealthHealthy
+		return r
+	}
+	caller := svc("caller", "app", core.Edge{To: "postgres", Port: 5432, TLS: true}, core.Edge{To: "web", Port: 8443, TLS: true, Via: "envoy", ToApp: true})
+	caller.App, caller.Replicas = "caller", 1
+	broken := envoy("web-3", false)
+	broken.Health = core.HealthUnhealthy
+	rows := []row{
+		svc("postgres", "infra"),
+		inst("web-1", 1), envoy("web-1", false),
+		inst("web-2", 2), envoy("web-2", false),
+		inst("web-3", 3), broken,
+		caller, envoy("caller", true),
+	}
+	g := layout(rows, "web-2")
+	if len(g.Nodes) != 3 {
+		t.Fatalf("nodes = %d, want postgres, web, caller", len(g.Nodes))
+	}
+	web, call := g.Nodes[0], g.Nodes[1]
+	if web.Label() != "web" || web.Replicas() != 3 || len(web.Stack()) != 2 || !web.Selected {
+		t.Errorf("web card = label %q replicas %d stack %v selected %v", web.Label(), web.Replicas(), web.Stack(), web.Selected)
+	}
+	if len(web.Chips) != 1 || web.Chips[0].Label != "envoy" || web.Chips[0].Color != "red" || web.Chips[0].Name != "web-1-envoy" {
+		t.Errorf("web chips = %+v (want one envoy chip, red because web-3's is unhealthy)", web.Chips)
+	}
+	if len(call.Chips) != 1 || !call.Chips[0].Transparent || !strings.Contains(call.Chips[0].Label, "transparent") {
+		t.Errorf("caller chips = %+v", call.Chips)
+	}
+	if call.Y <= web.Y+web.H {
+		t.Errorf("caller (y %d) overlaps web's pod (y %d, h %d)", call.Y, web.Y, web.H)
+	}
+	if g.CodeX != graphPad+appGutter {
+		t.Errorf("no gutter for the app-to-app edge: code column at %d", g.CodeX)
+	}
+	var appEdge *edge
+	for i := range g.Edges {
+		if g.Edges[i].ToApp {
+			appEdge = &g.Edges[i]
+		}
+	}
+	if len(g.Edges) != 2 || appEdge == nil || appEdge.Label != "TLS :8443" || appEdge.LabelX >= g.CodeX {
+		t.Errorf("edges = %+v", g.Edges)
+	}
+	if got := selectedNode(dashboardData{Services: rows}, "web"); got != "web-1" {
+		t.Errorf("selecting an app with replicas = %q, want its first instance", got)
+	}
+	if got := inbound(rows, inst("web-2", 2)); len(got) != 1 || got[0] != "caller" {
+		t.Errorf("web-2 used by = %v", got)
 	}
 }

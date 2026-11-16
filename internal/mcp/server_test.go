@@ -16,20 +16,30 @@ import (
 	"github.com/brian-nunez/breadboard/internal/runtime"
 )
 
-// fakeRuntime is a Docker that is available, runs nothing, and records the
-// log tail it was asked for.
+// fakeRuntime is a Docker that is available, runs nothing, records the
+// log tail it was asked for, and prints exec output set per service.
 type fakeRuntime struct {
 	mu   sync.Mutex
 	tail int
+	exec map[string][]byte
 }
 
-func (*fakeRuntime) Available(context.Context) error                    { return nil }
-func (*fakeRuntime) Up(context.Context, runtime.Project) error          { return nil }
-func (*fakeRuntime) Down(context.Context, runtime.Project, bool) error  { return nil }
-func (*fakeRuntime) RemoveOwned(context.Context, string, bool) error    { return nil }
-func (*fakeRuntime) Subnets(context.Context) ([]runtime.Network, error) { return nil, nil }
-func (*fakeRuntime) Owners(context.Context, string) ([]string, error)   { return nil, nil }
-func (*fakeRuntime) Exec(context.Context, string, string, []string) ([]byte, error) {
+func (*fakeRuntime) Available(context.Context) error                        { return nil }
+func (*fakeRuntime) Up(context.Context, runtime.Project) error              { return nil }
+func (*fakeRuntime) Down(context.Context, runtime.Project, bool) error      { return nil }
+func (*fakeRuntime) RemoveOwned(context.Context, string, bool) error        { return nil }
+func (*fakeRuntime) Subnets(context.Context) ([]runtime.Network, error)     { return nil, nil }
+func (*fakeRuntime) Build(context.Context, runtime.Project, []string) error { return nil }
+func (*fakeRuntime) ImageUser(context.Context, runtime.Project, string) (runtime.ImageUser, error) {
+	return runtime.ImageUser{}, nil
+}
+func (*fakeRuntime) Owners(context.Context, string) ([]string, error) { return nil, nil }
+func (f *fakeRuntime) Exec(_ context.Context, _, service string, _ []string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if out, ok := f.exec[service]; ok {
+		return out, nil
+	}
 	return nil, errors.New("not running")
 }
 func (*fakeRuntime) Containers(context.Context, string) ([]runtime.Container, error) {

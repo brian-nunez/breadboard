@@ -1,6 +1,9 @@
 package web
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 templ overviewPage(d dashboardData) {
 	@dashboardShell(pageTitle(d, "Overview"), d, "overview") {
@@ -25,28 +28,46 @@ templ overviewBody(d dashboardData) {
 		case d.Problem != "":
 			@problem(d.Problem)
 		default:
-			<div class="flex items-end justify-between">
-				<div>
+			<div class="flex items-end justify-between gap-4">
+				<div class="min-w-0 flex-1">
 					<h1 class="text-[28px] font-semibold leading-tight">{ d.Experiment }</h1>
-					<p class="mt-1 max-w-3xl truncate font-mono text-sm text-slate-500" title={ d.Dir }>
+					<p class="mt-1 text-sm text-slate-500 md:hidden">
+						{ itoa(len(d.Services)) } containers
+						if u := d.Uptime(); u != "" {
+							· { u }
+						}
+					</p>
+					<p class="mt-1 hidden max-w-3xl truncate font-mono text-sm text-slate-500 md:block" title={ d.Dir }>
 						{ d.Dir }
 						if u := d.Uptime(); u != "" {
 							<span class="font-sans">· { u }</span>
 						}
 					</p>
 				</div>
-				<span class="flex items-center gap-2 text-sm text-slate-500">
+				<span class="flex shrink-0 items-center gap-2 text-sm text-slate-500">
 					@dot("green")
 					Live
 				</span>
 			</div>
-			<div class="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+			<div class="mt-6 hidden grid-cols-2 gap-4 md:grid lg:grid-cols-4">
 				@stat("Containers", itoa(len(d.Services)))
 				@stat("Healthy", fmt.Sprintf("%d of %d", d.Healthy(), len(d.Services)))
 				@tlsStat(d)
 				@memoryStat(d)
 			</div>
-			<div class="mt-6">
+			<div class="mt-6 flex flex-col gap-3 md:hidden">
+				for _, s := range d.Services {
+					if c := s.Status().Color; c == "amber" || c == "red" {
+						@attention(s)
+					}
+				}
+				<h2 class="mt-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Containers</h2>
+				for _, s := range d.Services {
+					@containerCard(s)
+				}
+				<p class="text-sm text-slate-500">The architecture graph needs a wider screen; on phones it shows as a list of connections.</p>
+			</div>
+			<div class="mt-6 hidden md:block">
 				@card() {
 					<h2 class="px-5 pt-5 pb-4 text-base font-semibold">Containers</h2>
 					<div class="overflow-x-auto">
@@ -71,7 +92,7 @@ templ overviewBody(d dashboardData) {
 				}
 			</div>
 			if len(d.Services) > 0 {
-				<div class="mt-6">
+				<div class="mt-6 hidden md:block">
 					@card() {
 						<div class="flex items-center justify-between px-5 pt-5">
 							<h2 class="text-base font-semibold">Architecture</h2>
@@ -145,5 +166,56 @@ templ problem(msg string) {
 		<h1 class="text-xl font-semibold">Breadboard cannot read this experiment right now</h1>
 		<p class="mt-3 font-mono text-sm text-red-700">{ msg }</p>
 		<p class="mt-3 text-slate-600">If Docker is not running, start it. This page retries on its own.</p>
+	</div>
+}
+
+// containerCard is a container on a phone-width screen.
+templ containerCard(s row) {
+	{{ st := s.Status() }}
+	<a href={ templ.SafeURL("/services/" + s.Name) } class={ "block rounded-xl border p-4", templ.KV("border-amber-200 bg-amber-50", st.Color == "amber"), templ.KV("border-red-200 bg-red-50", st.Color == "red"), templ.KV("border-slate-200 bg-white", st.Color != "amber" && st.Color != "red") }>
+		<div class="flex items-start justify-between gap-3">
+			<div class="flex min-w-0 items-center gap-3">
+				@badge(s)
+				<div class="min-w-0">
+					<div class="font-semibold">{ s.Name }</div>
+					<div class="truncate font-mono text-xs text-slate-500">{ s.Address }</div>
+				</div>
+			</div>
+			@statusWord(st)
+		</div>
+		<div class="mt-3 grid grid-cols-2 gap-4 text-xs text-slate-600">
+			<div>
+				<div class="flex justify-between"><span>CPU</span><span>{ fmt.Sprintf("%.2f/%.2f", s.CPUUsed, s.CPULimit) }</span></div>
+				<div class="mt-1">
+					@bar(s.CPUUsed, s.CPULimit, false)
+				</div>
+			</div>
+			<div>
+				<div class="flex justify-between"><span>Mem</span><span class={ templ.KV("font-medium text-amber-700", st.Color == "amber") }>{ fmt.Sprintf("%.0f/%.0f MiB", s.MemUsed, s.MemLimit) }</span></div>
+				<div class="mt-1">
+					@bar(s.MemUsed, s.MemLimit, st.Color == "amber")
+				</div>
+			</div>
+		</div>
+	</a>
+}
+
+// attention points out a service near its memory limit or unhealthy.
+templ attention(s row) {
+	<div class={ "rounded-xl border p-4", templ.KV("border-amber-300 bg-amber-50", s.Status().Color == "amber"), templ.KV("border-red-300 bg-red-50", s.Status().Color == "red") }>
+		<div class="font-semibold">
+			if s.Status().Color == "amber" {
+				{ s.Name } is close to its memory limit
+			} else {
+				{ s.Name } is { strings.ToLower(s.Status().Word) }
+			}
+		</div>
+		<p class="mt-1 text-sm text-slate-700">
+			{ fmt.Sprintf("%.0f / %.0f MiB (%s%%).", s.MemUsed, s.MemLimit, pct(s.MemUsed, s.MemLimit)) }
+			if s.OOMKilled {
+				It was killed for exceeding its limit.
+			}
+		</p>
+		<a href={ templ.SafeURL("/services/" + s.Name) } class="mt-1 inline-block text-sm text-indigo-600">Open { s.Name } →</a>
 	</div>
 }

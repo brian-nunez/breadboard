@@ -47,3 +47,76 @@ for (const el of document.querySelectorAll("[data-load]")) {
     .then((html) => (el.innerHTML = html))
     .catch(() => (el.textContent = "Could not load. Reload the page to try again."));
 }
+
+// Search: ⌘K / Ctrl+K or any [data-search-open] opens the dialog. The index
+// (title, kind, url for every page) is fetched once; filtering is local.
+(() => {
+  const dialog = document.getElementById("search");
+  if (!dialog) return;
+  const input = dialog.querySelector("[data-search-input]");
+  const list = dialog.querySelector("[data-search-results]");
+  let index = null;
+  let selected = 0;
+  let shown = [];
+
+  const render = () => {
+    const q = input.value.trim().toLowerCase();
+    shown = (index || []).filter((e) => !q || (e.title + " " + e.kind).toLowerCase().includes(q)).slice(0, 30);
+    selected = Math.min(selected, Math.max(shown.length - 1, 0));
+    list.replaceChildren(
+      ...shown.map((e, i) => {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = e.url;
+        a.className = "flex items-center justify-between rounded-lg px-3 py-2 " + (i === selected ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50");
+        const title = document.createElement("span");
+        title.textContent = e.title;
+        const kind = document.createElement("span");
+        kind.className = "text-xs text-slate-400";
+        kind.textContent = e.kind;
+        a.append(title, kind);
+        li.append(a);
+        return li;
+      })
+    );
+    if (!index || shown.length === 0) {
+      const li = document.createElement("li");
+      li.className = "px-3 py-2 text-slate-500";
+      li.textContent = index ? "Nothing matches." : "Loading…";
+      list.append(li);
+    }
+  };
+  const open = () => {
+    dialog.classList.remove("hidden");
+    input.value = "";
+    selected = 0;
+    input.focus();
+    if (!index) {
+      fetch(dialog.dataset.searchIndex, { credentials: "same-origin" })
+        .then((r) => r.json())
+        .then((data) => {
+          index = data;
+          render();
+        });
+    }
+    render();
+  };
+  const close = () => dialog.classList.add("hidden");
+
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-search-open]")) open();
+    else if (e.target === dialog) close();
+  });
+  document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      dialog.classList.contains("hidden") ? open() : close();
+    } else if (!dialog.classList.contains("hidden")) {
+      if (e.key === "Escape") close();
+      else if (e.key === "ArrowDown") { selected = Math.min(selected + 1, shown.length - 1); render(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { selected = Math.max(selected - 1, 0); render(); e.preventDefault(); }
+      else if (e.key === "Enter" && shown[selected]) window.location.href = shown[selected].url;
+    }
+  });
+  input.addEventListener("input", () => { selected = 0; render(); });
+})();

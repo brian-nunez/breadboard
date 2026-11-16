@@ -21,7 +21,7 @@ templ page(title string) {
 			<link rel="stylesheet" href="/static/app.css"/>
 			<script src="/static/app.js" defer></script>
 		</head>
-		<body class="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased">
+		<body class="min-h-screen overflow-x-hidden bg-slate-50 font-sans text-slate-900 antialiased">
 			{ children... }
 		</body>
 	</html>
@@ -42,19 +42,46 @@ templ logo() {
 }
 
 templ topbar(current section) {
-	<header class="sticky top-0 z-10 flex h-14 items-center gap-8 border-b border-slate-200 bg-white px-6">
+	<header class="sticky top-0 z-10 flex h-14 items-center gap-8 border-b border-slate-200 bg-white px-4 md:px-6">
 		@logo()
-		<div class="hidden h-9 w-[360px] items-center justify-between rounded-lg border border-slate-200 px-3 text-sm text-slate-400 md:flex">
-			<span>Search docs, starters, services</span>
-			<kbd class="rounded border border-slate-200 px-1.5 text-[11px] text-slate-500">⌘K</kbd>
-		</div>
-		<nav class="ml-auto flex items-center gap-6 text-sm">
+		@searchBox("hidden w-[360px] md:flex")
+		<nav class="ml-auto hidden items-center gap-6 text-sm md:flex">
 			@topLink("/dashboard", "Dashboard", current == sectionDashboard)
 			@topLink("/docs", "Docs", current == sectionDocs)
 			@topLink("/starters", "Starters", current == sectionStarters)
 			<span class="text-slate-400">Read-only</span>
 		</nav>
+		<details class="relative ml-auto md:hidden">
+			<summary class="cursor-pointer list-none rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium">Menu</summary>
+			<nav class="absolute right-0 mt-2 flex w-56 flex-col rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-lg">
+				<button type="button" data-search-open class="rounded-lg px-3 py-2 text-left text-slate-700 hover:bg-slate-50">Search</button>
+				<a href="/dashboard" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Dashboard</a>
+				<a href="/architecture" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Architecture</a>
+				<a href="/docs" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Docs</a>
+				<a href="/starters" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Starters</a>
+			</nav>
+		</details>
 	</header>
+	@searchDialog()
+}
+
+// searchBox opens the search dialog; ⌘K or Ctrl+K does too.
+templ searchBox(class string) {
+	<button type="button" data-search-open class={ "h-9 items-center justify-between rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-400 hover:border-slate-300", class }>
+		<span>Search docs, starters, services</span>
+		<kbd class="rounded border border-slate-200 px-1.5 text-[11px] text-slate-500">⌘K</kbd>
+	</button>
+}
+
+// searchDialog filters an index of every page, loaded on first open.
+templ searchDialog() {
+	<div id="search" class="fixed inset-0 z-50 hidden bg-slate-900/30 px-4 pt-24" data-search-index="/search-index">
+		<div class="mx-auto max-w-xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+			<input type="search" placeholder="Search docs, starters, services" autocomplete="off" class="w-full border-b border-slate-200 px-4 py-3 text-[15px] outline-none" data-search-input/>
+			<ul class="max-h-80 overflow-y-auto p-2 text-sm" data-search-results></ul>
+			<div class="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">↑ ↓ to move · Enter to open · Esc to close</div>
+		</div>
+	</div>
 }
 
 templ topLink(href, label string, active bool) {

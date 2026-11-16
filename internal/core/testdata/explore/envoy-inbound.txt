@@ -1,0 +1,136 @@
+### clusters
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-cache, max-age=0
+x-content-type-options: nosniff
+date: Mon, 16 Nov 2026 09:38:33 GMT
+server: envoy
+connection: close
+transfer-encoding: chunked
+
+509
+{
+ "cluster_statuses": [
+  {
+   "name": "app",
+   "host_statuses": [
+    {
+     "address": {
+      "socket_address": {
+       "address": "127.0.0.1",
+       "port_value": 8080
+      }
+     },
+     "stats": [
+      {
+       "name": "cx_connect_fail"
+      },
+      {
+       "value": "1",
+       "name": "cx_total"
+      },
+      {
+       "name": "rq_error"
+      },
+      {
+       "value": "25",
+       "name": "rq_success"
+      },
+      {
+       "name": "rq_timeout"
+      },
+      {
+       "value": "25",
+       "name": "rq_total"
+      },
+      {
+       "type": "GAUGE",
+       "value": "1",
+       "name": "cx_active"
+      },
+      {
+       "type": "GAUGE",
+       "name": "rq_active"
+      },
+      {
+       "type": "GAUGE",
+       "name": "rq_pending_active"
+      }
+     ],
+     "health_status": {
+      "eds_health_status": "HEALTHY"
+     },
+     "weight": 1,
+     "locality": {}
+    }
+   ],
+   "circuit_breakers": {
+    "thresholds": [
+     {
+      "max_connections": 1024,
+      "max_pending_requests": 1024,
+      "max_requests": 1024,
+      "max_retries": 3
+     },
+     {
+      "priority": "HIGH",
+      "max_connections": 1024,
+      "max_pending_requests": 1024,
+      "max_requests": 1024,
+      "max_retries": 3
+     }
+    ]
+   },
+   "observability_name": "app"
+  }
+ ]
+}
+
+0
+
+
+### stats
+HTTP/1.1 200 OK
+content-type: text/plain; charset=UTF-8
+cache-control: no-cache, max-age=0
+x-content-type-options: nosniff
+date: Mon, 16 Nov 2026 09:38:33 GMT
+server: envoy
+connection: close
+transfer-encoding: chunked
+
+21
+cluster.app.upstream_rq_retry: 0
+
+0
+
+
+### listeners
+HTTP/1.1 200 OK
+content-type: application/json
+cache-control: no-cache, max-age=0
+x-content-type-options: nosniff
+date: Mon, 16 Nov 2026 09:38:33 GMT
+server: envoy
+connection: close
+transfer-encoding: chunked
+
+a9
+{
+ "listener_statuses": [
+  {
+   "name": "inbound",
+   "local_address": {
+    "socket_address": {
+     "address": "0.0.0.0",
+     "port_value": 8443
+    }
+   }
+  }
+ ]
+}
+
+0
+
+
+### hosts

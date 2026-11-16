@@ -2,15 +2,22 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/brian-nunez/breadboard/internal/catalog/sidecar"
+	"github.com/brian-nunez/breadboard/internal/compose"
+	"github.com/brian-nunez/breadboard/internal/errs"
 	"github.com/brian-nunez/breadboard/internal/model"
 	"github.com/brian-nunez/breadboard/internal/runtime"
 	"github.com/brian-nunez/breadboard/internal/secrets"
+	"github.com/brian-nunez/breadboard/internal/spec"
 )
 
 // Container states and health values reported in ServiceStatus.
@@ -67,6 +74,33 @@ func (e *Engine) Up(ctx context.Context, req UpRequest) (*UpResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Before anything changes: no transparent app may start as a user the
+	// capture rules exempt. The check builds from a candidate copy of the
+	// bundle, so a refusal leaves the active runtime files, and every
+	// container mounting them, exactly as they were.
+	if err := e.checkCaptureUsers(ctx, p, pr, header, ev); err != nil {
+		return nil, err
+	}
+	if pr.networkChanged {
+		// Docker cannot change a network's subnet while containers are
+		// attached: stop them (data volumes stay) so compose can recreate it.
+		running, err := e.rt.Containers(ctx, p.spec.Name)
+		if err != nil {
+			return nil, err
+		}
+		if len(running) > 0 {
+			ev.step("Recreating the experiment's network (transparent mode changes its addressing)")
+			// The project as last written: its files name the old networks.
+			if err := e.rt.Down(ctx, runtimeProject(p.Project, p.spec.Name), false); err != nil {
+				return nil, err
+			}
+		}
+		// Networks the new bundle no longer declares (a retired private
+		// segment) survive compose down and could hold the new subnet.
+		if err := e.rt.RemoveOwned(ctx, pr.state.ExperimentID, false); err != nil {
+			return nil, err
+		}
+	}
 	if err := writeBundle(p.RuntimeDir(), b); err != nil {
 		return nil, err
 	}
@@ -88,6 +122,63 @@ func (e *Engine) Up(ctx context.Context, req UpRequest) (*UpResult, error) {
 		return nil, err
 	}
 	return &UpResult{Experiment: p.spec.Name, Services: statuses, Warnings: warnings}, nil
+}
+
+// checkCaptureUsers builds every transparent app's image and refuses one
+// whose process starts as a reserved user: the capture rules exempt the
+// sidecars' users (Envoy's, a registration agent's), so an app running as
+// one would bypass Envoy entirely. A user name the image cannot resolve is
+// refused too, since its uid cannot be checked.
+func (e *Engine) checkCaptureUsers(ctx context.Context, p *project, pr *prepared, header string, ev EventSink) error {
+	m := pr.model
+	var apps []*model.Service
+	for _, svc := range m.Services {
+		if svc.Kind == model.App && svc.Netinit != "" {
+			apps = append(apps, svc)
+		}
+	}
+	if len(apps) == 0 {
+		return nil
+	}
+	names := make([]string, len(apps))
+	for i, a := range apps {
+		names[i] = a.Name
+	}
+	// A candidate bundle beside the active one: same project name, so the
+	// images it builds are the ones up uses next.
+	dir, err := os.MkdirTemp(p.StateDir(), "candidate-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	b, err := e.render(p, pr, dir, secrets.Inline, header)
+	if err != nil {
+		return err
+	}
+	if err := writeBundle(dir, b); err != nil {
+		return err
+	}
+	rp := runtime.Project{Name: "bb-" + p.spec.Name, Dir: dir, Files: []string{filepath.Join(dir, compose.ComposeFile)}}
+	ev.step("Building transparent apps to check the user they run as")
+	if err := e.rt.Build(ctx, rp, names); err != nil {
+		return err
+	}
+	reserved := map[int]string{sidecar.TransparentEnvoyUID: "Envoy", sidecar.TransparentAgentUID: "the registration agent"}
+	for _, a := range apps {
+		u, err := e.rt.ImageUser(ctx, rp, a.Name)
+		if errors.Is(err, runtime.ErrUserUnresolved) {
+			return fmt.Errorf("%w: app %s runs in transparent mode, and its image starts as user %q, which cannot be resolved to a uid inside the image: set a numeric USER in %s/Dockerfile (any uid but %d and %d)",
+				errs.ErrValidation, a.Group(), u.User, a.App.Path, sidecar.TransparentEnvoyUID, sidecar.TransparentAgentUID)
+		}
+		if err != nil {
+			return err
+		}
+		if who, ok := reserved[u.UID]; ok {
+			return fmt.Errorf("%w: app %s runs in transparent mode, and its image starts as uid %d (USER %q), which is reserved for %s: its traffic would bypass the sidecar; change USER in %s/Dockerfile to any uid but %d and %d",
+				errs.ErrValidation, a.Group(), u.UID, u.User, who, a.App.Path, sidecar.TransparentEnvoyUID, sidecar.TransparentAgentUID)
+		}
+	}
+	return nil
 }
 
 // waitHealthy polls containers until every service is running and healthy.
@@ -116,20 +207,28 @@ func (e *Engine) waitHealthy(ctx context.Context, m *model.Model, timeout time.D
 		}
 		pending := []string{}
 		for _, svc := range m.Services {
-			c, ok := byService[svc.Name]
+			c, ok := podState(svc, byService)
 			h := health(c, ok)
 			if h != last[svc.Name] {
 				last[svc.Name] = h
 				ev.emit(Event{Kind: EventHealth, Service: svc.Name, Health: h, Message: fmt.Sprintf("%s: %s", svc.Name, h)})
 			}
-			if ok {
-				if n, seen := baseline[svc.Name]; !seen {
-					baseline[svc.Name] = c.RestartCount
-				} else if c.RestartCount > n {
-					return fmt.Errorf("%s restarted during startup%s; see bb logs %s for why: %w", svc.Name, oom(c), svc.Name, ErrUnhealthy)
+			for _, name := range containerNames(svc) {
+				rc, ok := byService[name]
+				if !ok {
+					continue
 				}
-				if t, seen := started[svc.Name]; seen && !c.StartedAt.Equal(t) {
-					return fmt.Errorf("%s restarted during startup%s; see bb logs %s for why: %w", svc.Name, oom(c), svc.Name, ErrUnhealthy)
+				what := svc.Name
+				if name != svc.Name {
+					what = fmt.Sprintf("%s's network holder %s", svc.Name, name)
+				}
+				if n, seen := baseline[name]; !seen {
+					baseline[name] = rc.RestartCount
+				} else if rc.RestartCount > n {
+					return fmt.Errorf("%s restarted during startup%s; see bb logs %s for why: %w", what, oom(rc), svc.Name, ErrUnhealthy)
+				}
+				if t, seen := started[name]; seen && !rc.StartedAt.Equal(t) {
+					return fmt.Errorf("%s restarted during startup%s; see bb logs %s for why: %w", what, oom(rc), svc.Name, ErrUnhealthy)
 				}
 			}
 			switch {
@@ -152,7 +251,9 @@ func (e *Engine) waitHealthy(ctx context.Context, m *model.Model, timeout time.D
 		case settling.IsZero():
 			settling = time.Now()
 			for _, svc := range m.Services {
-				started[svc.Name] = byService[svc.Name].StartedAt
+				for _, name := range containerNames(svc) {
+					started[name] = byService[name].StartedAt
+				}
 			}
 			if e.startupSettle < 0 {
 				return nil
@@ -173,6 +274,30 @@ func (e *Engine) waitHealthy(ctx context.Context, m *model.Model, timeout time.D
 		case <-time.After(e.pollInterval):
 		}
 	}
+}
+
+// containerNames lists the containers whose state a service's state
+// includes: its own, and for an app in a pod, the pod's namespace holder.
+func containerNames(svc *model.Service) []string {
+	if svc.Pod != "" {
+		return []string{svc.Name, svc.Pod}
+	}
+	return []string{svc.Name}
+}
+
+// podState is the container that decides a service's state. For an app in
+// a pod, the namespace holder decides while it is missing, not running, or
+// not healthy, since the app has no network without it; the holder is
+// never reported as a service of its own.
+func podState(svc *model.Service, byService map[string]runtime.Container) (runtime.Container, bool) {
+	c, ok := byService[svc.Name]
+	if svc.Pod == "" {
+		return c, ok
+	}
+	if hc, hok := byService[svc.Pod]; health(hc, hok) != HealthHealthy {
+		return hc, hok
+	}
+	return c, ok
 }
 
 func oom(c runtime.Container) string {
@@ -260,17 +385,34 @@ type ServiceStatus struct {
 	// Apps only: the source directory and command from experiment.yaml.
 	Path    string
 	Command []string
-	// Sidecars only: the app they register and the registry they join.
+	// App instances only: the app in experiment.yaml, the instance number
+	// (0 when the app runs one replica), how many replicas the app runs,
+	// and the instance's sidecars by service name. Each instance's row is
+	// followed by its sidecars' rows; the pod's namespace holder is never a
+	// row, but its state counts toward the instance's State and Health.
+	App      string
+	Instance int
+	Replicas int
+	Sidecars []string
+	// Sidecars only: the app instance whose pod they share, the registry an
+	// agent joins, and what the sidecar is (ports, env, mode).
 	Parent   string
 	Registry string
+	Sidecar  *SidecarInfo
 }
 
-// Edge is a connection from an app to a service.
+// Edge is a connection from an app to a service, or through an Envoy
+// sidecar's outbound listener to another app or a service.
 type Edge struct {
 	To     string
 	Port   int
 	TLS    bool
 	Reason string
+	// Via is the Envoy sidecar (its name within the app) that carries the
+	// edge; empty for an edge from uses.
+	Via string
+	// ToApp marks an app-to-app edge; To is then the target app's name.
+	ToApp bool
 }
 
 // StatusRequest asks for the experiment's state.
@@ -328,16 +470,27 @@ func (e *Engine) status(ctx context.Context, m *model.Model) ([]ServiceStatus, [
 	if err != nil {
 		return nil, nil, err
 	}
+	infos := map[string]*SidecarInfo{}
+	for _, svc := range m.Services {
+		list, err := sidecarInfos(m, svc)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i := range list {
+			infos[list[i].Service] = &list[i]
+		}
+	}
 	var out []ServiceStatus
 	var warnings []string
 	for _, svc := range m.Services {
 		c, ok := byService[svc.Name]
+		pc, pok := podState(svc, byService)
 		s := ServiceStatus{
 			Name:        svc.Name,
 			Kind:        string(svc.Kind),
 			Address:     listenerAddress(svc),
 			State:       StateNotCreated,
-			Health:      health(c, ok),
+			Health:      health(pc, pok),
 			CPULimit:    svc.Resources.CPUs,
 			MemoryLimit: svc.Resources.Memory,
 		}
@@ -346,11 +499,21 @@ func (e *Engine) status(ctx context.Context, m *model.Model) ([]ServiceStatus, [
 			s.Type, s.Image = svc.Entry.ID, svc.Entry.Image
 		case model.App:
 			s.Path, s.Command = svc.App.Path, svc.App.Command
+			s.App, s.Instance, s.Replicas, s.Sidecars = svc.Group(), svc.Instance, svc.App.ReplicaCount(), svc.Sidecars
 		case model.Sidecar:
-			s.Image, s.Parent, s.Registry = svc.Entry.Image, svc.Parent, svc.Registry
+			s.Image, s.Parent, s.Registry, s.Sidecar = svc.Image, svc.Parent, svc.Registry, infos[svc.Name]
+			if svc.SidecarType != nil {
+				s.Type = svc.SidecarType.ID
+			}
+		}
+		// State and Health come from the same container: the app's, or its
+		// pod holder's while the holder is missing or unhealthy (then the
+		// app has no network either). Resource figures stay the app's own.
+		if pok {
+			s.State = pc.State
 		}
 		if ok {
-			s.State, s.OOMKilled, s.StartedAt = c.State, c.OOMKilled, c.StartedAt
+			s.OOMKilled, s.StartedAt = c.OOMKilled, c.StartedAt
 			if c.Image != "" {
 				s.Image = c.Image
 			}
@@ -361,8 +524,10 @@ func (e *Engine) status(ctx context.Context, m *model.Model) ([]ServiceStatus, [
 				warnings = append(warnings, fmt.Sprintf("%s was killed for exceeding its %s memory limit", svc.Name, svc.Resources.Memory))
 			}
 		}
-		for _, edge := range m.EdgesFrom(svc.Name) {
-			s.Uses = append(s.Uses, Edge{To: edge.To, Port: edge.Port, TLS: edge.TLS, Reason: edge.Reason})
+		if svc.Kind == model.App {
+			for _, edge := range m.EdgesFrom(svc.Group()) {
+				s.Uses = append(s.Uses, Edge{To: edge.To, Port: edge.Port, TLS: edge.TLS, Reason: edge.Reason, Via: edge.Via, ToApp: edge.ToApp})
+			}
 		}
 		out = append(out, s)
 	}
@@ -405,10 +570,33 @@ func (e *Engine) Logs(ctx context.Context, req LogsRequest) (iter.Seq2[LogLine, 
 		for _, a := range p.spec.Apps {
 			names = append(names, a.Name)
 		}
-		if !slices.Contains(names, req.Service) {
+		// An app's instances and sidecars are containers of their own; an app
+		// with replicas means all of its instances.
+		containers := map[string][]string{}
+		for _, a := range p.spec.Apps {
+			insts := a.Instances()
+			if len(insts) > 1 {
+				containers[a.Name] = insts
+			}
+			for _, inst := range insts {
+				containers[inst] = []string{inst}
+				for _, sc := range a.Sidecars {
+					n := spec.SidecarServiceName(inst, sc.ID())
+					containers[n] = []string{n}
+				}
+				if a.Register != nil {
+					containers[spec.SidecarName(inst)] = []string{spec.SidecarName(inst)}
+				}
+			}
+		}
+		switch {
+		case containers[req.Service] != nil:
+			services = containers[req.Service]
+		case slices.Contains(names, req.Service):
+			services = []string{req.Service}
+		default:
 			return nil, fmt.Errorf("%q is not a service or app (have: %s): %w", req.Service, strings.Join(names, ", "), ErrNotFound)
 		}
-		services = []string{req.Service}
 	}
 	src := e.rt.Logs(ctx, runtimeProject(p.Project, p.spec.Name), services, req.Follow, req.Tail)
 	return func(yield func(LogLine, error) bool) {

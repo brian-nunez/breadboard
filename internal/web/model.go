@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -88,7 +89,7 @@ func (r row) Status() status {
 		return status{"Near limit", "amber"}
 	case r.Health == core.HealthHealthy:
 		return status{"Healthy", "green"}
-	case r.State == core.StateNotCreated:
+	case r.State == core.StateNotCreated || r.Health == "":
 		return status{"Not started", "grey"}
 	default:
 		return status{strings.ToUpper(r.Health[:1]) + r.Health[1:], "grey"}
@@ -99,15 +100,78 @@ func (r row) Status() status {
 // and sidecars, the source directory and command for apps.
 func (r row) Subtitle() string {
 	if r.Kind == "app" && r.Path != "" {
+		s := r.Path
 		if len(r.Command) > 0 {
-			return r.Path + " · " + strings.Join(r.Command, " ")
+			s += " · " + strings.Join(r.Command, " ")
 		}
-		return r.Path
+		if r.Replicas > 1 {
+			s = fmt.Sprintf("replica %d of %d · %s", r.Instance, r.Replicas, s)
+		}
+		return s
 	}
-	if r.Kind == "sidecar" {
+	if r.Kind == "sidecar" && r.Registry != "" {
 		return "registers " + r.Parent + " · " + r.Image
 	}
+	if r.Kind == "sidecar" {
+		return cmp.Or(r.Type, "sidecar") + " sidecar of " + r.Parent + " · " + r.Image
+	}
 	return r.Image
+}
+
+// Label is how a service is named where an app counts once: the app's name
+// for an instance of an app with replicas.
+func (r row) Label() string {
+	if r.Replicas > 1 && r.App != "" {
+		return r.App
+	}
+	return r.Name
+}
+
+// instancesOf lists an app's instances.
+func instancesOf(rows []row, app string) []row {
+	var out []row
+	for _, r := range rows {
+		if r.Kind == "app" && r.App == app {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// sidecarsOf lists the sidecars in an app instance's pod.
+func sidecarsOf(rows []row, instance string) []row {
+	var out []row
+	for _, r := range rows {
+		if r.Kind == "sidecar" && r.Parent == instance {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// sidecarMode is a sidecar's type, marked when it is a transparent Envoy.
+func sidecarMode(r row) string {
+	if r.Sidecar != nil && r.Sidecar.Transparent {
+		return r.Type + " · transparent, egress " + r.Sidecar.Egress
+	}
+	return r.Type
+}
+
+// portAddr is where a sidecar port is bound inside the pod.
+func portAddr(p core.SidecarPort) string {
+	if p.Loopback {
+		return fmt.Sprintf("127.0.0.1:%d", p.Port)
+	}
+	return fmt.Sprintf(":%d", p.Port)
+}
+
+// firstInstanceUses is a row's edges, once per app: replicas after the
+// first share them.
+func firstInstanceUses(r row) []core.Edge {
+	if r.Instance > 1 {
+		return nil
+	}
+	return r.Uses
 }
 
 // homeRelative shortens a path under the home directory to ~/...
@@ -141,7 +205,7 @@ func (d dashboardData) Healthy() int {
 // Edges counts edges and how many use TLS.
 func (d dashboardData) Edges() (tls, total int) {
 	for _, s := range d.Services {
-		for _, e := range s.Uses {
+		for _, e := range firstInstanceUses(s) {
 			total++
 			if e.TLS {
 				tls++
@@ -248,3 +312,81 @@ func tableName(t core.PostgresTable) string {
 // container is a service's container name in compose's naming scheme, for
 // commands the page shows.
 func container(experiment, service string) string { return "bb-" + experiment + "-" + service + "-1" }
+
+func clusterTitle(c core.EnvoyCluster) string {
+	if c.Target != "" {
+		return c.Name + " → " + c.Target
+	}
+	return c.Name
+}
+
+// clusterRole explains what an Envoy cluster carries.
+func clusterRole(c core.EnvoyCluster) string {
+	switch c.Role {
+	case "outbound":
+		return "The app's calls to " + c.Target + ", sent over verified TLS and balanced across its addresses."
+	case "inbound":
+		return "Requests that arrived over TLS, forwarded to the app on loopback."
+	case "egress":
+		return "Transparent mode: connections to undeclared destinations, passed to their original address."
+	case "inbound passthrough":
+		return "Transparent mode: connections into the pod, forwarded to the app on loopback."
+	}
+	return "Defined by your own Envoy configuration."
+}
+
+// hostName is the replica or service at a host's address.
+func hostName(h core.EnvoyHost) string {
+	if h.Instance != "" {
+		return h.Instance
+	}
+	if h.Hostname != "" {
+		return h.Hostname
+	}
+	return h.Address
+}
+
+func hostStatus(h core.EnvoyHost) status {
+	switch {
+	case h.Ejected:
+		return status{"Ejected", "red"}
+	case !h.Healthy:
+		return status{strings.Join(h.Flags, ", "), "red"}
+	case h.ConnectFailures > 0 || h.Errors > 0:
+		return status{"Healthy, with errors", "amber"}
+	}
+	return status{"Healthy", "green"}
+}
+
+// clusterRequests is every request the cluster's hosts served.
+func clusterRequests(c core.EnvoyCluster) int64 {
+	var n int64
+	for _, h := range c.Hosts {
+		n += h.Requests
+	}
+	return n
+}
+
+func emptyClusterText(c core.EnvoyCluster) string {
+	if c.Role == "egress" || c.Role == "inbound passthrough" {
+		return "No connections right now: Envoy forgets original destinations a few seconds after they go idle."
+	}
+	return "No hosts: Envoy has not resolved this cluster's name (yet)."
+}
+
+// micros formats a duration in microseconds.
+func micros(us int64) string {
+	switch {
+	case us >= 1_000_000:
+		return fmt.Sprintf("%.1f s", float64(us)/1e6)
+	case us >= 1000:
+		return fmt.Sprintf("%.1f ms", float64(us)/1e3)
+	}
+	return fmt.Sprintf("%d µs", us)
+}
+
+// pgbouncerConsole is the command that opens PgBouncer's admin console
+// inside the sidecar, with the password it already holds.
+func pgbouncerConsole(experiment string, x *core.PgBouncerPools) string {
+	return fmt.Sprintf(`docker exec -it %s sh -c 'PGPASSWORD="$BB_PG_PASSWORD" psql -h 127.0.0.1 -p %d -U "$BB_PG_USER" pgbouncer'`, container(experiment, x.Sidecar), x.Port)
+}

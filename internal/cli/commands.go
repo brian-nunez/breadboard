@@ -213,26 +213,81 @@ func (c *cli) status(args []string) error {
 func (c *cli) printServices(services []core.ServiceStatus, warnings []string) {
 	tw := c.table()
 	fmt.Fprintln(tw, "SERVICE\tKIND\tHEALTH\tCPU\tMEMORY\tADDRESS\tUSES")
+	for _, r := range serviceRows(services) {
+		fmt.Fprintln(tw, strings.Join(r, "\t"))
+	}
+	tw.Flush()
+	for _, w := range warnings {
+		fmt.Fprintf(c.out, "warning: %s\n", w)
+	}
+}
+
+// serviceRows lays out the status table: an app with replicas gets a line
+// of its own with its instances indented under it, and each instance's
+// sidecars are indented under the instance with their type as the kind.
+func serviceRows(services []core.ServiceStatus) [][]string {
+	var rows [][]string
 	for _, s := range services {
 		cpu, mem := "-", "-"
 		if s.State == "running" {
 			cpu = fmt.Sprintf("%.1f%% / %s", s.CPUPercent, s.CPULimit)
 			mem = fmt.Sprintf("%s / %s", bytesHuman(s.MemoryBytes), s.MemoryLimit)
 		}
+		indent := ""
+		if s.Kind == "app" && s.Instance > 0 {
+			if s.Instance == 1 {
+				rows = append(rows, []string{s.App, fmt.Sprintf("app ×%d", s.Replicas), "-", "-", "-", s.App + "." + domainOf(s), "-"})
+			}
+			indent = "  "
+		}
+		name, kind := indent+s.Name, s.Kind
 		var uses []string
 		for _, e := range s.Uses {
-			if e.TLS {
-				uses = append(uses, e.To)
-			} else {
-				uses = append(uses, e.To+" (PLAINTEXT)")
+			to := e.To
+			if e.Via != "" {
+				to += " (via " + e.Via + ")"
+			}
+			if !e.TLS {
+				to += " (PLAINTEXT)"
+			}
+			uses = append(uses, to)
+		}
+		if s.Kind == "sidecar" {
+			prefix := "  └ "
+			if isInstance(services, s.Parent) {
+				prefix = "    └ "
+			}
+			name, kind = prefix+s.Name, s.Type
+			switch sc := s.Sidecar; {
+			case s.Registry != "":
+				uses = append(uses, "registers in "+s.Registry)
+			case sc != nil:
+				uses = append(uses, sc.Targets...)
+				if sc.Transparent {
+					uses = append(uses, "transparent, egress "+sc.Egress)
+				}
 			}
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.Name, s.Kind, s.Health, cpu, mem, s.Address, join(uses))
+		rows = append(rows, []string{name, kind, s.Health, cpu, mem, s.Address, join(uses)})
 	}
-	tw.Flush()
-	for _, w := range warnings {
-		fmt.Fprintf(c.out, "warning: %s\n", w)
+	return rows
+}
+
+// isInstance reports whether name is an instance of an app with replicas
+// (so its sidecars sit one level deeper).
+func isInstance(services []core.ServiceStatus, name string) bool {
+	for _, s := range services {
+		if s.Name == name {
+			return s.Instance > 0
+		}
 	}
+	return false
+}
+
+// domainOf is the domain part of an app instance's address.
+func domainOf(s core.ServiceStatus) string {
+	_, domain, _ := strings.Cut(s.Address, ".")
+	return domain
 }
 
 func bytesHuman(n uint64) string {

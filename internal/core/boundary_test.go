@@ -35,6 +35,9 @@ func TestCoreHasNoUserIO(t *testing.T) {
 			continue
 		}
 		err := filepath.WalkDir(filepath.Join(root, e.Name()), func(path string, d os.DirEntry, err error) error {
+			if err == nil && d.IsDir() && d.Name() == "testdata" {
+				return filepath.SkipDir // test fixtures (such as test apps) are not part of the core
+			}
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return err
 			}

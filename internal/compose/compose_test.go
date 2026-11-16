@@ -11,9 +11,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/brian-nunez/breadboard/internal/catalog"
+	"github.com/brian-nunez/breadboard/internal/catalog/sidecar"
 	"github.com/brian-nunez/breadboard/internal/model"
 	"github.com/brian-nunez/breadboard/internal/secrets"
 	"github.com/brian-nunez/breadboard/internal/spec"
@@ -46,6 +49,24 @@ func render(t *testing.T, s *spec.Spec, mode secrets.Mode) *Bundle {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return renderModel(t, m, mode)
+}
+
+func renderModel(t *testing.T, m *model.Model, mode secrets.Mode) *Bundle {
+	t.Helper()
+	return renderModelWith(t, m, mode, nil)
+}
+
+func renderModelWith(t *testing.T, m *model.Model, mode secrets.Mode, readFile func(string) ([]byte, error)) *Bundle {
+	t.Helper()
+	b, err := renderModelErr(m, mode, readFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func renderModelErr(m *model.Model, mode secrets.Mode, readFile func(string) ([]byte, error)) (*Bundle, error) {
 	// Fixed secrets and certificates keep the output stable.
 	store := &state.Secrets{}
 	for _, svc := range m.Services {
@@ -64,7 +85,22 @@ func render(t *testing.T, s *spec.Spec, mode secrets.Mode) *Bundle {
 	for i, seg := range m.Segments {
 		subnets[seg.Name] = netip.MustParsePrefix(fmt.Sprintf("10.213.%d.0/24", i))
 	}
-	b, err := Render(Input{
+	// A lab with a transparent pod gets static addressing (core allocates
+	// it from state; here it follows the model's order).
+	var addrs map[string]netip.Addr
+	if slices.ContainsFunc(m.Services, func(s *model.Service) bool { return s.Netinit != "" }) {
+		subnets[DefaultNetwork] = netip.MustParsePrefix("10.213.200.0/24")
+		addrs = map[string]netip.Addr{}
+		next := netip.MustParseAddr("10.213.200.10")
+		for _, svc := range m.Services {
+			if svc.Kind == model.Sidecar {
+				continue
+			}
+			addrs[networkOwner(svc)] = next
+			next = next.Next()
+		}
+	}
+	return Render(Input{
 		Model:        m,
 		ExperimentID: "0123456789abcdef",
 		Secrets:      secrets.NewMaterializer(mode, store),
@@ -72,13 +108,11 @@ func render(t *testing.T, s *spec.Spec, mode secrets.Mode) *Bundle {
 		TrustBundle:  []byte("CA\nROOTS\n"),
 		Certs:        certs,
 		Subnets:      subnets,
+		Addresses:    addrs,
 		AppDir:       func(app string) string { return "../../" + app },
+		ReadFile:     readFile,
 		Header:       "Generated for a golden test.",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
 }
 
 func golden(t *testing.T, name string, b *Bundle) {
@@ -130,6 +164,27 @@ func checkCompose(t *testing.T, b *Bundle) {
 		t.Fatal(err)
 	}
 	for name, svc := range doc.Services {
+		if svc["restart"] == "no" {
+			// A one-shot init container: no health check, but something
+			// must wait for it to complete successfully.
+			waited := false
+			for _, other := range doc.Services {
+				if deps, ok := other["depends_on"].(map[string]any); ok {
+					if d, ok := deps[name].(map[string]any); ok && d["condition"] == "service_completed_successfully" {
+						waited = true
+					}
+				}
+			}
+			for _, key := range []string{"mem_limit", "cpus", "labels"} {
+				if _, ok := svc[key]; !ok {
+					t.Errorf("init container %s has no %s", name, key)
+				}
+			}
+			if !waited {
+				t.Errorf("nothing waits for init container %s to complete", name)
+			}
+			continue
+		}
 		for _, key := range []string{"healthcheck", "mem_limit", "cpus", "restart", "labels"} {
 			if _, ok := svc[key]; !ok {
 				t.Errorf("service %s has no %s", name, key)
@@ -354,4 +409,225 @@ func TestRegisterRendersASidecar(t *testing.T) {
 		}
 	}
 	golden(t, "consul-sidecar", b)
+}
+
+// Replicas render as named instances, each answering to its own name and
+// to the app's shared name, each with its own registration agent.
+func TestReplicasRenderNamedInstances(t *testing.T) {
+	s := &spec.Spec{Version: 1, Name: "lab",
+		Services: []spec.Service{{Name: "postgres", Type: "postgres"}, {Name: "consul", Type: "consul"}},
+		Apps: []spec.App{{Name: "api", Path: "./api", Command: []string{"api"}, Replicas: 3,
+			Uses: uses("postgres", "consul"), Register: &spec.Register{Port: 8443}}},
+	}
+	b := render(t, s, secrets.Inline)
+	checkCompose(t, b)
+	f, _ := b.File(ComposeFile)
+	var doc struct {
+		Services map[string]struct {
+			Build    map[string]string `yaml:"build"`
+			Networks map[string]struct {
+				Aliases []string `yaml:"aliases"`
+			} `yaml:"networks"`
+			NetworkMode string            `yaml:"network_mode"`
+			Environment map[string]string `yaml:"environment"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(f.Data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := doc.Services["api"]; ok {
+		t.Error("an app with replicas still has a service under its own name")
+	}
+	for _, n := range []string{"1", "2", "3"} {
+		inst, ok := doc.Services["api-"+n]
+		if !ok {
+			t.Fatalf("no api-%s", n)
+		}
+		want := []string{"api-" + n + ".bb.internal", "api.bb.internal"}
+		if got := inst.Networks["default"].Aliases; !slices.Equal(got, want) {
+			t.Errorf("api-%s aliases = %v, want %v", n, got, want)
+		}
+		if inst.Build["context"] != "../../api" || inst.Environment["BB_SERVICE"] != "api-"+n || inst.Environment["BB_FQDN"] != "api-"+n+".bb.internal" {
+			t.Errorf("api-%s = %+v", n, inst)
+		}
+		if agent := doc.Services["api-"+n+"-agent"]; agent.NetworkMode != "service:api-"+n {
+			t.Errorf("api-%s-agent network_mode = %q", n, agent.NetworkMode)
+		}
+	}
+	golden(t, "replicas", b)
+}
+
+// fakeSidecar stands in for a sidecar type in pod rendering tests: it
+// exercises every part of the rendering hook.
+func fakeSidecar() *sidecar.Type {
+	return &sidecar.Type{
+		ID: "fake", Title: "Fake", Image: "example/fake:1.0.0",
+		Resources: catalog.Resources{Memory: "32m", CPUs: "0.1"},
+		Render: func(in sidecar.Input) (sidecar.Output, error) {
+			var pg sidecar.Use
+			for _, u := range in.Uses {
+				if u.Type == "postgres" {
+					pg = u
+				}
+			}
+			out := sidecar.Output{
+				Container: catalog.Container{
+					Command:     []string{"fake", "--config", catalog.ConfigDir + "/fake.conf"},
+					Environment: []catalog.EnvVar{{Name: "FAKE_APP", Value: in.App.FQDN}},
+					Files:       []catalog.File{{Name: "fake.conf", Data: []byte("app " + in.App.Service + " shared " + in.App.SharedFQDN + "\n")}},
+					Health:      catalog.Health{Test: []string{"CMD", "fake", "check"}, Interval: 10 * time.Second, Timeout: 2 * time.Second, Retries: 3, StartPeriod: 5 * time.Second},
+				},
+				AppEnv: []catalog.EnvVar{
+					{Name: "BB_LISTEN_ADDR", Value: "127.0.0.1:8080"},
+					{Name: "DATABASE_URL", Value: "postgres://pooled@127.0.0.1:6432/" + pg.Config["database"] + "?sslmode=disable", Secret: true},
+				},
+				Needs:    []string{pg.Service},
+				Rewrites: pg.Service,
+			}
+			if in.Spec.Transparent() {
+				out.Init = &sidecar.Init{
+					Dockerfile: []byte("FROM " + sidecar.PodImage + "\nRUN apk add --no-cache iptables\n"),
+					Command:    []string{"sh", "-c", "iptables -t nat -S"},
+					CapAdd:     []string{"NET_ADMIN"},
+				}
+			}
+			return out, nil
+		},
+	}
+}
+
+// podModel resolves a spec and swaps every declared sidecar's type for the fake.
+func podModel(t *testing.T, s *spec.Spec) *model.Model {
+	t.Helper()
+	m, err := model.Resolve(s, "bb.internal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := fakeSidecar()
+	for _, svc := range m.Services {
+		if svc.Sidecar != nil {
+			svc.SidecarType, svc.Image, svc.Resources = fake, fake.Image, fake.Resources
+		}
+	}
+	return m
+}
+
+// An app with sidecars becomes a pod: the holder owns the network, the
+// app and its sidecars join its namespace, and start in order holder →
+// init → sidecars → app.
+func TestPodRendersAHolderAndStartOrder(t *testing.T) {
+	s := &spec.Spec{Version: 1, Name: "lab",
+		Services: []spec.Service{{Name: "postgres", Type: "postgres"}, {Name: "consul", Type: "consul"}, {Name: "kafka", Type: "kafka"}},
+		Apps: []spec.App{{Name: "web", Path: "./web", Command: []string{"web"}, Ports: []int{8443},
+			Uses:     []spec.Use{{Service: "postgres"}, {Service: "consul"}, {Service: "kafka", TLS: spec.TLS{Mode: spec.TLSOff, Reason: "compare throughput"}}},
+			Register: &spec.Register{Port: 8443},
+			Sidecars: []spec.Sidecar{{Type: "envoy", Envoy: &spec.EnvoySidecar{Transparent: &spec.Transparent{}}}},
+		}},
+	}
+	b := renderModel(t, podModel(t, s), secrets.Inline)
+	checkCompose(t, b)
+	f, _ := b.File(ComposeFile)
+	type dep struct {
+		Condition string `yaml:"condition"`
+	}
+	var doc struct {
+		Services map[string]struct {
+			Image       string            `yaml:"image"`
+			NetworkMode string            `yaml:"network_mode"`
+			Networks    map[string]any    `yaml:"networks"`
+			Ports       []string          `yaml:"ports"`
+			Volumes     []string          `yaml:"volumes"`
+			CapAdd      []string          `yaml:"cap_add"`
+			Restart     string            `yaml:"restart"`
+			DependsOn   map[string]dep    `yaml:"depends_on"`
+			Environment map[string]string `yaml:"environment"`
+			Labels      map[string]string `yaml:"labels"`
+		} `yaml:"services"`
+		Volumes map[string]any `yaml:"volumes"`
+	}
+	if err := yaml.Unmarshal(f.Data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	holder := doc.Services["web-pod"]
+	if holder.Image != sidecar.PodImage || !slices.Equal(holder.Ports, []string{"127.0.0.1:8443:8443"}) || holder.Networks["plain-kafka"] == nil || holder.Labels["breadboard.kind"] != "pod" {
+		t.Errorf("holder = %+v", holder)
+	}
+	app := doc.Services["web"]
+	if app.NetworkMode != "service:web-pod" || app.Networks != nil || app.Ports != nil {
+		t.Errorf("app networking = %q %v %v", app.NetworkMode, app.Networks, app.Ports)
+	}
+	for name, cond := range map[string]string{"web-pod": "service_healthy", "web-netinit": "service_completed_successfully", "postgres": "service_healthy", "web-envoy": "service_healthy", "web-agent": "service_healthy"} {
+		if app.DependsOn[name].Condition != cond {
+			t.Errorf("app depends_on %s = %q, want %s", name, app.DependsOn[name].Condition, cond)
+		}
+	}
+	if app.Environment["BB_SHARED_DIR"] != sidecar.SharedDir || app.Environment["BB_LISTEN_ADDR"] != "127.0.0.1:8080" || app.Environment["DATABASE_URL"] != "postgres://pooled@127.0.0.1:6432/app?sslmode=disable" {
+		t.Errorf("app env = %v", app.Environment)
+	}
+	for _, name := range []string{"web-envoy", "web-agent"} {
+		sc := doc.Services[name]
+		if sc.NetworkMode != "service:web-pod" || sc.DependsOn["web-pod"].Condition != "service_healthy" || sc.DependsOn["web-netinit"].Condition != "service_completed_successfully" {
+			t.Errorf("%s = %+v", name, sc)
+		}
+		if !slices.Contains(sc.Volumes, "web-shared:/var/run/bb") || !slices.Contains(sc.Volumes, "./tls/web/tls.crt:/etc/bb/tls/tls.crt:ro") {
+			t.Errorf("%s volumes = %v", name, sc.Volumes)
+		}
+		if len(sc.CapAdd) > 0 {
+			t.Errorf("%s holds capabilities %v", name, sc.CapAdd)
+		}
+	}
+	if doc.Services["web-envoy"].DependsOn["postgres"].Condition != "service_healthy" {
+		t.Error("the sidecar does not wait for what it needs")
+	}
+	init := doc.Services["web-netinit"]
+	if init.NetworkMode != "service:web-pod" || init.Restart != "no" || !slices.Equal(init.CapAdd, []string{"NET_ADMIN"}) || init.DependsOn["web-pod"].Condition != "service_healthy" {
+		t.Errorf("netinit = %+v", init)
+	}
+	if !slices.Contains(app.Volumes, "web-shared:/var/run/bb") || doc.Volumes["web-shared"] == nil {
+		t.Errorf("shared volume missing: app %v, volumes %v", app.Volumes, doc.Volumes)
+	}
+	if _, ok := b.File("build/web-netinit/Dockerfile"); !ok {
+		t.Error("no netinit Dockerfile")
+	}
+	if _, ok := b.File("tls/web-pod/tls.crt"); ok {
+		t.Error("the pod holder got a certificate")
+	}
+	golden(t, "pod", b)
+}
+
+// With replicas, each instance is its own pod.
+func TestReplicasOfAPodAreEachAPod(t *testing.T) {
+	s := &spec.Spec{Version: 1, Name: "lab",
+		Services: []spec.Service{{Name: "postgres", Type: "postgres"}},
+		Apps: []spec.App{{Name: "api", Path: "./api", Replicas: 2, Uses: uses("postgres"),
+			Sidecars: []spec.Sidecar{{Type: "pgbouncer", PgBouncer: &spec.PgBouncerSidecar{Service: "postgres"}}}}},
+	}
+	b := renderModel(t, podModel(t, s), secrets.Inline)
+	checkCompose(t, b)
+	f, _ := b.File(ComposeFile)
+	var doc struct {
+		Services map[string]struct {
+			NetworkMode string `yaml:"network_mode"`
+			Networks    map[string]struct {
+				Aliases []string `yaml:"aliases"`
+			} `yaml:"networks"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(f.Data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"1", "2"} {
+		inst := "api-" + n
+		if got := doc.Services[inst+"-pod"].Networks["default"].Aliases; !slices.Equal(got, []string{inst + ".bb.internal", "api.bb.internal"}) {
+			t.Errorf("%s-pod aliases = %v", inst, got)
+		}
+		if _, ok := doc.Services[inst+"-netinit"]; ok {
+			t.Errorf("%s has an init container without transparent mode", inst)
+		}
+		for _, c := range []string{inst, inst + "-pgbouncer"} {
+			if doc.Services[c].NetworkMode != "service:"+inst+"-pod" {
+				t.Errorf("%s network_mode = %q", c, doc.Services[c].NetworkMode)
+			}
+		}
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -103,5 +104,39 @@ func TestUsageErrors(t *testing.T) {
 	code, _, errOut := run(t, eng, "-C", t.TempDir(), "status")
 	if code != 1 || !strings.Contains(errOut, "bb init") {
 		t.Errorf("status outside an experiment = %d %q", code, errOut)
+	}
+}
+
+func TestStatusRowsNestSidecarsAndReplicas(t *testing.T) {
+	services := []core.ServiceStatus{
+		{Name: "postgres", Kind: "infra", Health: "healthy", Address: "postgres.bb.internal:5432"},
+		{Name: "web-1", Kind: "app", Health: "healthy", Address: "web-1.bb.internal", App: "web", Instance: 1, Replicas: 2},
+		{Name: "web-1-envoy", Kind: "sidecar", Type: "envoy", Health: "healthy", Parent: "web-1", Sidecar: &core.SidecarInfo{}},
+		{Name: "web-2", Kind: "app", Health: "starting", Address: "web-2.bb.internal", App: "web", Instance: 2, Replicas: 2},
+		{Name: "web-2-envoy", Kind: "sidecar", Type: "envoy", Health: "healthy", Parent: "web-2", Sidecar: &core.SidecarInfo{}},
+		{Name: "caller", Kind: "app", Health: "healthy", App: "caller", Replicas: 1,
+			Uses: []core.Edge{{To: "postgres", TLS: true}, {To: "web", TLS: true, Via: "envoy", ToApp: true}}},
+		{Name: "caller-envoy", Kind: "sidecar", Type: "envoy", Health: "healthy", Parent: "caller",
+			Sidecar: &core.SidecarInfo{Targets: []string{"web"}, Transparent: true, Egress: "deny"}},
+		{Name: "caller-agent", Kind: "sidecar", Type: "consul-agent", Health: "healthy", Parent: "caller", Registry: "consul",
+			Sidecar: &core.SidecarInfo{Targets: []string{"consul"}}},
+	}
+	var got []string
+	for _, r := range serviceRows(services) {
+		got = append(got, r[0]+"|"+r[1]+"|"+r[2]+"|"+r[6])
+	}
+	want := []string{
+		"postgres|infra|healthy|-",
+		"web|app ×2|-|-",
+		"  web-1|app|healthy|-",
+		"    └ web-1-envoy|envoy|healthy|-",
+		"  web-2|app|starting|-",
+		"    └ web-2-envoy|envoy|healthy|-",
+		"caller|app|healthy|postgres, web (via envoy)",
+		"  └ caller-envoy|envoy|healthy|web, transparent, egress deny",
+		"  └ caller-agent|consul-agent|healthy|registers in consul",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

@@ -53,6 +53,8 @@ type Runtime interface {
 	Subnets(ctx context.Context) ([]runtime.Network, error)
 	Owners(ctx context.Context, experiment string) ([]string, error)
 	Exec(ctx context.Context, experiment, service string, cmd []string) ([]byte, error)
+	Build(ctx context.Context, p runtime.Project, services []string) error
+	ImageUser(ctx context.Context, p runtime.Project, service string) (runtime.ImageUser, error)
 }
 
 // Options configures an Engine. Zero values pick production defaults.

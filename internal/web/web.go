@@ -220,23 +220,33 @@ func (s *Server) servicePage(ctx context.Context, name, tab string) servicePage 
 // exploreFragment runs a service's explorer and returns just its content.
 // The explorer tab fetches it once after the page renders, because some
 // tools (Kafka's JVM-based CLIs) take seconds.
+// ?tab= picks the explorer: explore (an infra service's own), envoy, or
+// pgbouncer (an app's sidecar, or the sidecar itself).
 func (s *Server) exploreFragment(w http.ResponseWriter, r *http.Request) {
-	p := s.servicePage(r.Context(), r.PathValue("name"), "explore")
-	if p.Tab != "explore" {
+	tab := cmp.Or(r.URL.Query().Get("tab"), "explore")
+	p := s.servicePage(r.Context(), r.PathValue("name"), tab)
+	if p.Tab != tab || !slices.Contains([]string{"explore", "envoy", "pgbouncer"}, tab) {
 		http.NotFound(w, r)
 		return
 	}
 	var err error
-	p.Explore, err = s.explore(r.Context(), p.Details.Type, p.Row.Name)
+	p.Explore, err = s.explore(r.Context(), tab, p.Details.Type, p.Row.Name)
 	if err != nil {
 		p.ExploreErr = err.Error()
 	}
 	render(w, r, exploreResult(p))
 }
 
-// explore runs the explorer for a catalog type.
-func (s *Server) explore(ctx context.Context, typ, name string) (any, error) {
+// explore runs the explorer of a tab: a sidecar's, or the one for an infra
+// service's catalog type.
+func (s *Server) explore(ctx context.Context, tab, typ, name string) (any, error) {
 	req := core.ExploreRequest{Dir: s.dir, Service: name}
+	switch tab {
+	case "envoy":
+		return s.eng.EnvoyClusters(ctx, req)
+	case "pgbouncer":
+		return s.eng.PgBouncerPools(ctx, req)
+	}
 	switch typ {
 	case "postgres":
 		return s.eng.PostgresTables(ctx, req)
@@ -280,12 +290,13 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// selectedNode is the requested service if it exists, else the first app,
-// else the first service.
+// selectedNode is the requested service if it exists (an app with
+// replicas means its first instance), else the first app, else the first
+// service.
 func selectedNode(d dashboardData, want string) string {
 	for _, r := range d.Services {
-		if r.Name == want {
-			return want
+		if r.Name == want || (r.Kind == "app" && r.App == want && want != "") {
+			return r.Name
 		}
 	}
 	for _, r := range d.Services {

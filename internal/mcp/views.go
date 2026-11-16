@@ -60,8 +60,13 @@ type serviceStatus struct {
 	Uses        []edge   `json:"uses"`
 	Path        string   `json:"path,omitempty" jsonschema:"apps: source directory"`
 	Command     []string `json:"command,omitempty" jsonschema:"apps: command from experiment.yaml"`
-	Parent      string   `json:"parent,omitempty" jsonschema:"sidecars: the app they register"`
-	Registry    string   `json:"registry,omitempty" jsonschema:"sidecars: the registry they join"`
+	App         string   `json:"app,omitempty" jsonschema:"app instances: the app in experiment.yaml"`
+	Instance    int      `json:"instance,omitempty" jsonschema:"app instances: 1..N for a replica, absent when the app runs one"`
+	Replicas    int      `json:"replicas,omitempty" jsonschema:"app instances: how many replicas the app runs"`
+	Sidecars    []string `json:"sidecars,omitempty" jsonschema:"app instances: its sidecars' service names; their rows follow it"`
+	Parent      string   `json:"parent,omitempty" jsonschema:"sidecars: the app instance whose network namespace they share"`
+	Registry    string   `json:"registry,omitempty" jsonschema:"registration agents: the registry they join"`
+	Sidecar     *sidecar `json:"sidecar,omitempty" jsonschema:"sidecars: what it is, its ports, and the env it gives the app"`
 }
 
 type edge struct {
@@ -69,6 +74,56 @@ type edge struct {
 	Port   int    `json:"port"`
 	TLS    bool   `json:"tls"`
 	Reason string `json:"reason,omitempty" jsonschema:"why TLS is off, when it is"`
+	Via    string `json:"via,omitempty" jsonschema:"the Envoy sidecar whose outbound listener carries the edge"`
+	ToApp  bool   `json:"to_app,omitempty" jsonschema:"an app-to-app edge"`
+}
+
+type sidecarPort struct {
+	Port     int    `json:"port"`
+	Loopback bool   `json:"loopback" jsonschema:"bound on 127.0.0.1: only the app and its sidecars reach it, in plaintext"`
+	Purpose  string `json:"purpose"`
+}
+
+type sidecarSetting struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+type sidecar struct {
+	Name        string           `json:"name" jsonschema:"name within the app"`
+	Service     string           `json:"service" jsonschema:"the container's service name, for logs"`
+	Type        string           `json:"type" jsonschema:"envoy, pgbouncer, fluent-bit, or consul-agent"`
+	Title       string           `json:"title"`
+	Summary     string           `json:"summary"`
+	Image       string           `json:"image,omitempty"`
+	Ports       []sidecarPort    `json:"ports"`
+	Env         []envVar         `json:"env" jsonschema:"variables it adds to the app's environment; secret values are empty"`
+	Rewrites    []envVar         `json:"rewrites" jsonschema:"app variables it points at itself, with their new values; secret values are empty"`
+	Settings    []sidecarSetting `json:"settings"`
+	Transparent bool             `json:"transparent,omitempty" jsonschema:"Envoy captures all of the app's traffic"`
+	Egress      string           `json:"egress,omitempty" jsonschema:"transparent Envoy: allow or deny undeclared destinations"`
+	Targets     []string         `json:"targets,omitempty"`
+	Registry    string           `json:"registry,omitempty"`
+}
+
+func sidecarView(s core.SidecarInfo) sidecar {
+	return sidecar{
+		Name: s.Name, Service: s.Service, Type: s.Type, Title: s.Title, Summary: s.Summary, Image: s.Image,
+		Ports: mapSlice(s.Ports, func(p core.SidecarPort) sidecarPort {
+			return sidecarPort{Port: p.Port, Loopback: p.Loopback, Purpose: p.Purpose}
+		}),
+		Env: mapSlice(s.Env, envVarView), Rewrites: mapSlice(s.Rewrites, envVarView),
+		Settings:    mapSlice(s.Settings, func(v core.SidecarSetting) sidecarSetting { return sidecarSetting{Name: v.Name, Value: v.Value} }),
+		Transparent: s.Transparent, Egress: s.Egress, Targets: s.Targets, Registry: s.Registry,
+	}
+}
+
+func sidecarPtr(s *core.SidecarInfo) *sidecar {
+	if s == nil {
+		return nil
+	}
+	v := sidecarView(*s)
+	return &v
 }
 
 func statusView(s core.ServiceStatus) serviceStatus {
@@ -77,12 +132,14 @@ func statusView(s core.ServiceStatus) serviceStatus {
 		State: s.State, Health: s.Health, CPUPercent: s.CPUPercent, CPULimit: s.CPULimit,
 		MemoryBytes: s.MemoryBytes, MemoryLimit: s.MemoryLimit, OOMKilled: s.OOMKilled,
 		StartedAt: timeView(s.StartedAt), Uses: mapSlice(s.Uses, edgeView),
-		Path: s.Path, Command: s.Command, Parent: s.Parent, Registry: s.Registry,
+		Path: s.Path, Command: s.Command,
+		App: s.App, Instance: s.Instance, Replicas: s.Replicas, Sidecars: s.Sidecars,
+		Parent: s.Parent, Registry: s.Registry, Sidecar: sidecarPtr(s.Sidecar),
 	}
 }
 
 func edgeView(e core.Edge) edge {
-	return edge{To: e.To, Port: e.Port, TLS: e.TLS, Reason: e.Reason}
+	return edge{To: e.To, Port: e.Port, TLS: e.TLS, Reason: e.Reason, Via: e.Via, ToApp: e.ToApp}
 }
 
 type envVar struct {

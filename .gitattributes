@@ -6,6 +6,11 @@
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 
+# Explorer fixtures are raw captures of what a service's tool printed,
+# including HTTP responses framed with CRLF and sized chunks; normalising
+# their line endings would change the bytes the parsers are tested on.
+internal/core/testdata/explore/** -text
+
 # Binary assets: no diff, no merge, no normalization.
 *.png binary
 *.jpg binary

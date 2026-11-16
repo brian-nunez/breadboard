@@ -250,9 +250,24 @@ func Types(id string) (spec.TypeInfo, bool) {
 	if !ok {
 		return spec.TypeInfo{}, false
 	}
-	info := spec.TypeInfo{Plaintext: e.SupportsPlaintext(), Registry: e.Sidecar != nil}
+	info := spec.TypeInfo{
+		Plaintext: e.SupportsPlaintext(),
+		Registry:  e.Sidecar != nil,
+		HTTPS:     len(e.Listeners) > 0 && e.Listeners[0].Protocol == "https",
+	}
 	if len(e.Config) > 0 {
 		info.Config = e.CheckConfig
+	}
+	info.Env = func(plain bool) []string {
+		cl := Client{Service: id, FQDN: id, Config: e.ResolveConfig(nil), Secret: func(string) string { return "" }}
+		if plain {
+			cl.Plain = &Plain{FQDN: id}
+		}
+		var names []string
+		for _, v := range e.Client(cl) {
+			names = append(names, v.Name)
+		}
+		return names
 	}
 	return info, true
 }

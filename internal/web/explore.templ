@@ -10,7 +10,7 @@ import (
 // exploreTab is a placeholder the page script replaces with the explorer's
 // result, fetched once from /fragments/explore/<name>.
 templ exploreTab(p servicePage) {
-	<div data-load={ "/fragments/explore/" + p.Row.Name }>
+	<div data-load={ "/fragments/explore/" + p.Row.Name + "?tab=" + p.Tab }>
 		@card() {
 			<div class="flex items-center gap-3 p-6 text-sm text-slate-600">
 				<svg viewBox="0 0 24 24" class="size-4 animate-spin" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke-width="3" class="stroke-slate-200"></circle><path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke-width="3" class="stroke-slate-500"></path></svg>
@@ -44,6 +44,10 @@ templ exploreResult(p servicePage) {
 				@kafkaOverview(p.Dash.Experiment, p.Dash.Domain, p.Row.Name, x)
 			case *core.S3Buckets:
 				@s3Buckets(x)
+			case *core.EnvoyClusters:
+				@envoyClusters(p.Dash.Experiment, x)
+			case *core.PgBouncerPools:
+				@pgbouncerPools(p.Dash.Experiment, x)
 		}
 	}
 }
@@ -51,13 +55,20 @@ templ exploreResult(p servicePage) {
 // explorerCard is a card with a title, a note on where the data came from,
 // and a reload link.
 templ explorerCard(title, source string) {
+	@explorerCardTab(title, source, "explore") {
+		{ children... }
+	}
+}
+
+// explorerCardTab is explorerCard for a page tab other than explore.
+templ explorerCardTab(title, source, tab string) {
 	@card() {
 		<div class="flex items-start justify-between gap-4 px-5 pt-5 pb-4">
 			<div>
 				<h2 class="text-base font-semibold">{ title }</h2>
 				<p class="mt-1 text-xs text-slate-500">Read with <code class="font-mono">{ source }</code> inside the container.</p>
 			</div>
-			<a href="?tab=explore" class="text-sm text-indigo-600 hover:text-indigo-800">Refresh</a>
+			<a href={ templ.SafeURL("?tab=" + tab) } class="text-sm text-indigo-600 hover:text-indigo-800">Refresh</a>
 		</div>
 		{ children... }
 	}
@@ -297,5 +308,142 @@ templ s3Buckets(x *core.S3Buckets) {
 				}
 			</tbody>
 		</table>
+	}
+}
+
+// envoyClusters shows where an Envoy sidecar sends traffic: each upstream
+// cluster with its hosts, the replica at each address, and their health.
+templ envoyClusters(experiment string, x *core.EnvoyClusters) {
+	<div class="flex flex-col gap-6">
+		for _, c := range x.Clusters {
+			@explorerCardTab(clusterTitle(c), "GET /clusters on Envoy's admin API", "envoy") {
+				<div class="flex flex-wrap gap-x-6 gap-y-1 px-5 pb-4 text-sm text-slate-600">
+					<span>{ clusterRole(c) }</span>
+					<span>Retries <span class="font-medium text-slate-900">{ commas(c.Retries) }</span></span>
+					<span>Ejected now <span class={ "font-medium", templ.KV("text-red-700", c.EjectionsActive > 0), templ.KV("text-slate-900", c.EjectionsActive == 0) }>{ commas(c.EjectionsActive) }</span></span>
+					if c.EjectionsEnforced > 0 {
+						<span>Ejections so far <span class="font-medium text-slate-900">{ commas(c.EjectionsEnforced) }</span></span>
+					}
+					if c.EjectionsOverflow > 0 {
+						<span>Ejections held back by max_ejection_percent <span class="font-medium text-slate-900">{ commas(c.EjectionsOverflow) }</span></span>
+					}
+				</div>
+				<table class="w-full text-left text-sm">
+					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+						<tr>
+							@th("Host")
+							@th("Health")
+							@th("Requests")
+							@th("Share")
+							@th("Errors")
+							@th("Connect failures")
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-200">
+						for _, h := range c.Hosts {
+							<tr>
+								<td class="px-5 py-2.5">
+									<div class="font-semibold">{ hostName(h) }</div>
+									<div class="font-mono text-xs text-slate-500">{ h.Address }</div>
+								</td>
+								<td class="px-5 py-2.5">
+									@statusWord(hostStatus(h))
+								</td>
+								<td class="px-5 py-2.5">{ commas(h.Requests) }</td>
+								<td class="px-5 py-2.5">
+									@bar(float64(h.Requests), float64(clusterRequests(c)), false)
+									<div class="mt-1 text-xs text-slate-500">{ pct(float64(h.Requests), float64(clusterRequests(c))) }%</div>
+								</td>
+								<td class={ "px-5 py-2.5", templ.KV("font-medium text-red-700", h.Errors > 0) }>{ commas(h.Errors) }</td>
+								<td class={ "px-5 py-2.5", templ.KV("font-medium text-red-700", h.ConnectFailures > 0) }>{ commas(h.ConnectFailures) }</td>
+							</tr>
+						}
+						if len(c.Hosts) == 0 {
+							@emptyRow(6, emptyClusterText(c))
+						}
+					</tbody>
+				</table>
+				<p class="px-5 pt-3 text-xs text-slate-500">Counts are since the sidecar started. Errors are 5xx responses and resets; with retries on, a request a replica failed may still have succeeded on another. Envoy's access log shows each request:</p>
+				<div class="p-5">
+					@terminal("bb logs " + x.Sidecar + " -f")
+				</div>
+			}
+		}
+		if len(x.Listeners) > 0 {
+			@explorerCardTab("Listeners of "+x.Sidecar, "GET /listeners", "envoy") {
+				<table class="w-full text-left text-sm">
+					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+						<tr>
+							@th("Listener")
+							@th("Address")
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-200">
+						for _, l := range x.Listeners {
+							<tr>
+								<td class="px-5 py-2.5 font-mono text-[13px]">{ l.Name }</td>
+								<td class="px-5 py-2.5 font-mono text-[13px] text-slate-600">{ l.Address }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		}
+		if len(x.Clusters) == 0 {
+			@card() {
+				<p class="p-6 text-sm text-slate-600">{ x.Sidecar } has no upstream clusters.</p>
+			}
+		}
+	</div>
+}
+
+// pgbouncerPools shows a PgBouncer sidecar's pools.
+templ pgbouncerPools(experiment string, x *core.PgBouncerPools) {
+	@explorerCardTab(fmt.Sprintf("Pools of %s → %s", x.Sidecar, x.Service), "psql -c 'SHOW POOLS' -c 'SHOW STATS'", "pgbouncer") {
+		<div class="flex flex-wrap gap-x-6 gap-y-1 px-5 pb-4 text-sm text-slate-600">
+			<span>Pool mode <span class="font-medium text-slate-900">{ x.PoolMode }</span></span>
+			<span>Pool size <span class="font-medium text-slate-900">{ itoa(x.PoolSize) }</span> server connections per database and user</span>
+		</div>
+		<table class="w-full text-left text-sm">
+			<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+				<tr>
+					@th("Database / user")
+					@th("Clients")
+					@th("Servers")
+					@th("Server use")
+					@th("Queries")
+					@th("Avg query")
+					@th("Avg wait")
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-slate-200">
+				for _, pl := range x.Pools {
+					<tr>
+						<td class="px-5 py-2.5 font-mono text-[13px]">{ pl.Database } / { pl.User }</td>
+						<td class="px-5 py-2.5">
+							{ commas(pl.ClientsActive) } active
+							if pl.ClientsWaiting > 0 {
+								<div class="font-medium text-amber-700">{ commas(pl.ClientsWaiting) } waiting</div>
+							}
+						</td>
+						<td class="px-5 py-2.5">{ commas(pl.ServersActive) } active · { commas(pl.ServersIdle+pl.ServersUsed) } idle</td>
+						<td class="px-5 py-2.5">
+							@bar(float64(pl.ServersActive+pl.ServersIdle+pl.ServersUsed+pl.ServersLogin), float64(x.PoolSize), pl.ClientsWaiting > 0)
+							<div class="mt-1 text-xs text-slate-500">{ itoa(int(pl.ServersActive+pl.ServersIdle+pl.ServersUsed+pl.ServersLogin)) } of { itoa(x.PoolSize) }</div>
+						</td>
+						<td class="px-5 py-2.5">{ commas(pl.Queries) }</td>
+						<td class="px-5 py-2.5 text-slate-600">{ micros(pl.AvgQueryMicros) }</td>
+						<td class="px-5 py-2.5 text-slate-600">{ micros(pl.AvgWaitMicros) }</td>
+					</tr>
+				}
+				if len(x.Pools) == 0 {
+					@emptyRow(7, "No pools yet: PgBouncer opens one on the app's first connection.")
+				}
+			</tbody>
+		</table>
+		<p class="px-5 pt-3 text-xs text-slate-500">Clients are the app's connections to 127.0.0.1; servers are PgBouncer's TLS connections to Postgres. Averages cover the last stats period (a minute).</p>
+		<div class="p-5">
+			@terminal(pgbouncerConsole(experiment, x))
+		</div>
 	}
 }

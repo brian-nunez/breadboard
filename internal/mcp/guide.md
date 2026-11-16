@@ -22,12 +22,18 @@ An app lists the services it needs in `uses`. For each one it receives that serv
 
 Registering an app in Consul: add `register: {port: <tls port>}` to the app and Consul to its `uses`; bb adds a sidecar agent (`<app>-agent`) that registers it, so the app code does not register itself.
 
+Several instances of an app: `replicas: N` (1 to 10) runs `<app>-1` … `<app>-N`, each reachable as `<app>-<n>.<domain>` and all of them as `<app>.<domain>`; `status` lists each instance (`app`, `instance`, `replicas`), `logs` with the app's name streams all of them, and `service_details` for the app describes its first instance and lists every instance in `replicas`. An app with replicas cannot publish `ports`.
+
+Sidecars: `sidecars` on an app adds containers that share its network namespace and `/var/run/bb` (edit `experiment.yaml`). `envoy` terminates TLS in front of the app (`inbound: {port, app_port}`; the app binds `BB_LISTEN_ADDR`), proxies its loopback calls to other apps or HTTPS services over TLS (`outbound: [{service, port}]`; the app gets `<TARGET>_URL`), and with `transparent` captures all its traffic. `pgbouncer` pools a Postgres service in `uses` (the app's `DATABASE_URL` points at `127.0.0.1:6432`). `fluent-bit` ships files the app writes to `BB_LOG_DIR` to a bucket on an S3 compatible service in `uses`.
+
+Seeing sidecars: in `status` each app instance lists its `sidecars`, and each sidecar's row follows it with its own state and health and a `sidecar` object: its type, the `ports` it binds in the pod (`loopback` ones only the app reaches), the `env` it adds to the app, the app variables it `rewrites` (PgBouncer's `DATABASE_URL`), its settings, and for Envoy whether it is `transparent` with which `egress`. An Envoy outbound target shows as an edge in the app's `uses` with `via` (the sidecar) and `to_app`. The pod's namespace holder (`<instance>-pod`) is never listed; when it is down, the app reports its state. `envoy_clusters` reads a sidecar's live view from Envoy's admin API: every upstream host with the replica at that address, health flags, outlier ejection, and request, error and connection counts, so you can see which replica got traffic and why one fails. `pgbouncer_pools` shows a PgBouncer sidecar's client and server connections, queries and wait times. Both take an app, an instance (`api-2`), or the sidecar's service name (`api-2-envoy`).
+
 ## Usual workflow
 
 1. `init` creates the experiment (or restores `.bb/` in a fresh clone).
 2. `add_service` adds infra, or `apply_starter` adds a working example with its infra.
 3. `up` builds apps, starts everything and waits until every service is healthy and stays healthy. It fails if a service is unhealthy or restarts while starting.
-4. Inspect: `status` (state, health, CPU, memory), `logs`, `creds`, `service_details`, and the explorers: `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets`.
+4. Inspect: `status` (state, health, CPU, memory, sidecars, replicas), `logs`, `creds`, `service_details`, and the explorers: `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets`, and for sidecars `envoy_clusters` and `pgbouncer_pools`.
 5. `down` stops it; `down` with `volumes` also deletes the data.
 
 Editing `experiment.yaml` or app code takes effect on the next `up`.
@@ -37,6 +43,7 @@ Editing `experiment.yaml` or app code takes effect on the next `up`.
 - `up` failed: read its error (it lists the progress so far), then `logs` for the failing service, and `status` for restarts or `oom_killed`.
 - An app cannot connect: compare its environment (`service_details` for the app, `creds` for values) with what the code reads; check the edge in `status` (`tls` and port).
 - Data questions: the explorers read live data with each service's own CLI inside its container.
+- Traffic through sidecars: `envoy_clusters` on the calling app shows each target replica's request and error counts and whether outlier detection ejected it; on the target app it shows whether requests reached the app on loopback. `logs` for `<instance>-envoy` prints Envoy's access log.
 - `experiment.yaml is invalid`: every violation is listed with its YAML path.
 - Another bb command running on the same experiment makes a tool fail with "busy"; retry once it finishes.
 

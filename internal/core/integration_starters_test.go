@@ -4,6 +4,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -339,4 +340,41 @@ func TestIntegrationConsulSelfRegistration(t *testing.T) {
 	if !slices.ContainsFunc(logsOf(t, eng, dir, "self-greeter"), func(l string) bool { return strings.Contains(l, "deregistered") }) {
 		t.Error("self-greeter did not deregister itself on SIGTERM")
 	}
+}
+
+// TestIntegrationUpCatchesACrashAfterStart: an app that passes its first
+// health check and then crashes must fail bb up, not be reported healthy.
+func TestIntegrationUpCatchesACrashAfterStart(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := fmt.Sprintf("crash-%d", time.Now().Unix()%100000)
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+	})
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(dir, "flaky")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for f, c := range map[string]string{
+		"go.mod":     "module flaky\n\ngo 1.27.4\n",
+		"main.go":    "package main\n\nimport (\n\t\"log\"\n\t\"time\"\n)\n\nfunc main() {\n\tlog.Print(\"started\")\n\ttime.Sleep(3 * time.Second)\n\tlog.Fatal(\"lost the database\")\n}\n",
+		"Dockerfile": "FROM golang:1.27.4-alpine3.24 AS dev\nWORKDIR /src\nCOPY . .\nRUN go build -o /usr/local/bin/flaky .\n",
+	} {
+		if err := os.WriteFile(filepath.Join(app, f), []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "experiment.yaml"), []byte(fmt.Sprintf(
+		"version: 1\nname: %s\napps:\n  flaky:\n    path: ./flaky\n    command: [flaky]\n", name)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := eng.Up(ctx, UpRequest{Dir: dir})
+	if !errors.Is(err, ErrUnhealthy) || !strings.Contains(err.Error(), "flaky restarted during startup") {
+		t.Fatalf("Up = %v, want flaky restarted during startup", err)
+	}
+	t.Logf("Up failed as it should: %v", err)
 }

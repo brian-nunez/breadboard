@@ -143,6 +143,30 @@ func TestUpFailures(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
+	// A container that crashes and comes back between polls still looks
+	// running and healthy; its restart count and start time give it away.
+	for name, healthy := range map[string]bool{"before healthy": false, "while settling": true} {
+		t.Run("restarted "+name, func(t *testing.T) {
+			h := setupStarter(t)
+			if !healthy {
+				h.rt.healthOf["consumer"] = HealthStarting
+			}
+			// Poll 1 records the baseline (and, when all are healthy, starts
+			// the settle window); poll 3 sees the restart.
+			h.rt.restartOnPoll = map[string]int{"consumer": 3}
+			_, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir})
+			if !errors.Is(err, ErrUnhealthy) || !strings.Contains(err.Error(), "consumer restarted during startup") || !strings.Contains(err.Error(), "bb logs consumer") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+	t.Run("restarting", func(t *testing.T) {
+		h := setupStarter(t)
+		h.rt.stateOf["producer"] = "restarting"
+		if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); !errors.Is(err, ErrUnhealthy) || !strings.Contains(err.Error(), "producer is restarting") {
+			t.Fatalf("error = %v", err)
+		}
+	})
 	t.Run("timeout", func(t *testing.T) {
 		h := setupStarter(t)
 		h.rt.healthOf["kafka"] = HealthStarting

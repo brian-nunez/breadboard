@@ -96,7 +96,15 @@ func (e *Engine) waitHealthy(ctx context.Context, m *model.Model, timeout time.D
 	// Wall-clock time: the injectable clock is for certificate validity.
 	deadline := time.Now().Add(timeout)
 	last := map[string]string{}
-	restarting := map[string]int{}
+	// Restart counts when Up first saw each container. Any increase means the
+	// program crashed during startup, even if a later poll shows it healthy.
+	// Docker then reports the new run's exit code, so the error cannot say
+	// how the crashed run ended; its logs can.
+	baseline := map[string]int{}
+	// When every service first reported healthy, and each one's start time
+	// then. Success needs them to stay that way for the settle window.
+	var settling time.Time
+	started := map[string]time.Time{}
 	for {
 		list, err := e.rt.Containers(ctx, m.Name)
 		if err != nil {
@@ -114,6 +122,16 @@ func (e *Engine) waitHealthy(ctx context.Context, m *model.Model, timeout time.D
 				last[svc.Name] = h
 				ev.emit(Event{Kind: EventHealth, Service: svc.Name, Health: h, Message: fmt.Sprintf("%s: %s", svc.Name, h)})
 			}
+			if ok {
+				if n, seen := baseline[svc.Name]; !seen {
+					baseline[svc.Name] = c.RestartCount
+				} else if c.RestartCount > n {
+					return fmt.Errorf("%s restarted during startup%s; see bb logs %s for why: %w", svc.Name, oom(c), svc.Name, ErrUnhealthy)
+				}
+				if t, seen := started[svc.Name]; seen && !c.StartedAt.Equal(t) {
+					return fmt.Errorf("%s restarted during startup%s; see bb logs %s for why: %w", svc.Name, oom(c), svc.Name, ErrUnhealthy)
+				}
+			}
 			switch {
 			case h == HealthHealthy:
 			case h == HealthUnhealthy:
@@ -121,20 +139,33 @@ func (e *Engine) waitHealthy(ctx context.Context, m *model.Model, timeout time.D
 			case ok && (c.State == "exited" || c.State == "dead"):
 				return fmt.Errorf("%s exited with code %d%s; see bb logs %s: %w", svc.Name, c.ExitCode, oom(c), svc.Name, ErrUnhealthy)
 			case ok && c.State == "restarting":
-				restarting[svc.Name]++
-				if restarting[svc.Name] >= 5 {
-					return fmt.Errorf("%s keeps restarting (exit code %d%s); see bb logs %s: %w", svc.Name, c.ExitCode, oom(c), svc.Name, ErrUnhealthy)
-				}
-				pending = append(pending, svc.Name)
+				return fmt.Errorf("%s is restarting (exit code %d%s); see bb logs %s: %w", svc.Name, c.ExitCode, oom(c), svc.Name, ErrUnhealthy)
 			default:
 				pending = append(pending, svc.Name)
 			}
 		}
-		if len(pending) == 0 {
+		switch {
+		case len(pending) > 0:
+			// Not all healthy (yet, or any more): the settle window restarts.
+			settling = time.Time{}
+			clear(started)
+		case settling.IsZero():
+			settling = time.Now()
+			for _, svc := range m.Services {
+				started[svc.Name] = byService[svc.Name].StartedAt
+			}
+			if e.startupSettle < 0 {
+				return nil
+			}
+		case time.Since(settling) >= e.startupSettle:
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out after %s waiting for %s: %w", timeout, strings.Join(pending, ", "), ErrUnhealthy)
+			waiting := strings.Join(pending, ", ")
+			if waiting == "" {
+				waiting = "services to stay healthy"
+			}
+			return fmt.Errorf("timed out after %s waiting for %s: %w", timeout, waiting, ErrUnhealthy)
 		}
 		select {
 		case <-ctx.Done():

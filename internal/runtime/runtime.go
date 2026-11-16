@@ -38,6 +38,8 @@ type Container struct {
 	ExitCode  int
 	OOMKilled bool
 	StartedAt time.Time
+	// RestartCount is how many times the restart policy has restarted it.
+	RestartCount int
 }
 
 // Usage is a container's live resource use.
@@ -186,8 +188,9 @@ func (c *Compose) Containers(ctx context.Context, experiment string) ([]Containe
 		return nil, err
 	}
 	var raw []struct {
-		ID     string `json:"Id"`
-		Config struct {
+		ID           string `json:"Id"`
+		RestartCount int    `json:"RestartCount"`
+		Config       struct {
 			Image  string            `json:"Image"`
 			Labels map[string]string `json:"Labels"`
 		} `json:"Config"`
@@ -207,14 +210,15 @@ func (c *Compose) Containers(ctx context.Context, experiment string) ([]Containe
 	list := make([]Container, 0, len(raw))
 	for _, r := range raw {
 		ct := Container{
-			ID:        r.ID,
-			Service:   r.Config.Labels["breadboard.service"],
-			Kind:      r.Config.Labels["breadboard.kind"],
-			Image:     r.Config.Image,
-			State:     r.State.Status,
-			ExitCode:  r.State.ExitCode,
-			OOMKilled: r.State.OOMKilled,
-			StartedAt: r.State.StartedAt,
+			ID:           r.ID,
+			RestartCount: r.RestartCount,
+			Service:      r.Config.Labels["breadboard.service"],
+			Kind:         r.Config.Labels["breadboard.kind"],
+			Image:        r.Config.Image,
+			State:        r.State.Status,
+			ExitCode:     r.State.ExitCode,
+			OOMKilled:    r.State.OOMKilled,
+			StartedAt:    r.State.StartedAt,
 		}
 		if r.State.Health != nil {
 			ct.Health = r.State.Health.Status

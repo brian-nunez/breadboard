@@ -70,6 +70,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-060 | 2026-11-16 | The web UI is started with `bb serve` (was `bb ui` in the design). (Brian's direction.) |
 | D-061 | 2026-11-16 | Docs pages per technology: an overview linking to the official docs, basic usage, then useful features each explained as what is actually happening. Guides show the exact code that does the thing (for example the `kgo.ConsumerGroup` option that makes a consumer join a group) with diagrams. Content is authored as embedded templ pages, no markdown dependency. (Brian's direction.) |
 | D-062 | 2026-11-16 | Web UI components are written in `internal/web` with templ and Tailwind instead of copied from templUI, whose helpers import `tailwind-merge-go`. Keeps `bb`'s rendering dependencies to templ. → [ADR-0013](../adr/README.md) |
+| D-063 | 2026-11-16 | `bb serve` listens on `127.0.0.1:7777` by default (`--addr` for another loopback address; non-loopback is refused) and opens the browser unless `--no-open`. Live pages refresh over SSE every 2 seconds and send only changed HTML. Status, uptime and resource bars come from `Status`; app rows show their path and command, now part of `ServiceStatus`. |
 
 ## Open questions
 

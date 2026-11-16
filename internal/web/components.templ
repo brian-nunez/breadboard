@@ -1,0 +1,99 @@
+package web
+
+// Colours: status colours always appear with a word next to them.
+func dotClass(color string) string {
+	switch color {
+	case "green":
+		return "fill-green-600"
+	case "amber":
+		return "fill-amber-600"
+	case "red":
+		return "fill-red-600"
+	case "blue":
+		return "fill-blue-600"
+	default:
+		return "fill-slate-400"
+	}
+}
+
+func textClass(color string) string {
+	switch color {
+	case "amber":
+		return "text-amber-700"
+	case "red":
+		return "text-red-700"
+	case "blue":
+		return "text-blue-700"
+	default:
+		return "text-slate-700"
+	}
+}
+
+func experimentColor(d dashboardData) string {
+	worst := "green"
+	for _, s := range d.Services {
+		switch c := s.Status().Color; c {
+		case "red":
+			return "red"
+		case "amber", "blue", "grey":
+			worst = c
+		}
+	}
+	if len(d.Services) == 0 {
+		return "grey"
+	}
+	return worst
+}
+
+templ dot(color string) {
+	<svg viewBox="0 0 8 8" class="size-2 shrink-0" aria-hidden="true"><circle cx="4" cy="4" r="4" class={ dotClass(color) }></circle></svg>
+}
+
+templ statusWord(s status) {
+	<span class={ "flex items-center gap-2 text-sm", textClass(s.Color) }>
+		@dot(s.Color)
+		{ s.Word }
+	</span>
+}
+
+// bar is a resource bar. Widths are SVG attributes, not inline styles, so the
+// page's content security policy can forbid inline styles.
+templ bar(used, limit float64, warn bool) {
+	<svg viewBox="0 0 100 4" preserveAspectRatio="none" class="h-1 w-full max-w-36" aria-hidden="true">
+		<rect width="100" height="4" rx="2" class="fill-slate-200"></rect>
+		<rect width={ pct(used, limit) } height="4" rx="2" class={ templ.KV("fill-amber-600", warn), templ.KV("fill-slate-500", !warn) }></rect>
+	</svg>
+}
+
+// badge marks a service: square for catalog infrastructure, round for apps.
+templ badge(r row) {
+	<span class={ "flex size-8 shrink-0 items-center justify-center text-sm font-semibold", templ.KV("rounded-md bg-slate-100 text-slate-700", r.Kind == "infra"), templ.KV("rounded-full bg-indigo-50 text-indigo-700", r.Kind != "infra") }>{ r.Initial() }</span>
+}
+
+templ card() {
+	<section class="rounded-xl border border-slate-200 bg-white">
+		{ children... }
+	</section>
+}
+
+templ stat(label, value string) {
+	<div class="rounded-xl border border-slate-200 bg-white px-5 py-4">
+		<div class="text-sm text-slate-500">{ label }</div>
+		<div class="mt-1 text-2xl font-semibold">{ value }</div>
+	</div>
+}
+
+// terminal is a command block with a Copy control.
+templ terminal(lines ...string) {
+	<div class="overflow-hidden rounded-lg bg-slate-900 text-sm">
+		<div class="flex items-center justify-between border-b border-slate-700 px-4 py-2 text-slate-400">
+			<span>Terminal</span>
+			<button type="button" data-copy class="rounded border border-slate-600 px-2 py-0.5 text-xs text-slate-200 hover:bg-slate-800">Copy</button>
+		</div>
+		<pre class="px-4 py-3 font-mono leading-6 text-slate-100" data-copy-source>
+			for _, l := range lines {
+				<div><span class="select-none text-slate-500">$ </span>{ l }</div>
+			}
+		</pre>
+	</div>
+}

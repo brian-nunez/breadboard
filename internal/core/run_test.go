@@ -326,6 +326,9 @@ func TestDownStatusLogs(t *testing.T) {
 	if st.Services[2].Name != "consumer" || len(st.Services[2].Uses) != 1 || !st.Services[2].Uses[0].TLS {
 		t.Errorf("consumer = %+v", st.Services[2])
 	}
+	if c := st.Services[2]; c.Path != "./producer-consumer" || !slices.Equal(c.Command, []string{"consumer"}) {
+		t.Errorf("consumer source = %q %v", c.Path, c.Command)
+	}
 
 	h.rt.logs = []runtime.LogLine{{Service: "consumer", Text: "consumed"}, {Service: "consumer", Text: "again"}}
 	lines, err := h.eng.Logs(h.ctx(), LogsRequest{Dir: h.dir, Service: "consumer"})

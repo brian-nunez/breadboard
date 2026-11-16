@@ -141,11 +141,12 @@ Every file Breadboard owns carries a format version, and every format only moves
 
 Not part of Phase 1. Both are wrappers over the core API above.
 
-- `bb serve` serves on `127.0.0.1` from the same process as the engine, and opens the browser.
+- `bb serve` serves on a loopback address (default `127.0.0.1:7777`; other addresses are refused) from the same process as the engine, and opens the browser. Generated files (`*_templ.go`, `static/app.css`) are rebuilt with `scripts/web.sh generate`, which runs templ at the `go.mod` version and Tailwind's standalone CLI pinned by SHA-256; `scripts/web.sh check` fails on drift.
 - Local web endpoints that can drive Docker need protecting even on localhost, because a malicious page can reach them through DNS rebinding or cross-site requests. `bb serve` therefore:
   - binds only to `127.0.0.1`;
-  - generates a random token per launch, puts it in the URL it opens, and exchanges it for a session cookie (sessions held in bkit `stash` with the in-memory driver and a TTL);
-  - rejects requests whose `Host` or `Origin` header is not the UI's own.
+  - generates a random token per launch, puts it in the URL it opens, and exchanges it for an `HttpOnly`, `SameSite=Strict` session cookie (sessions held in bkit `stash` with the in-memory driver and a 12-hour TTL), then redirects so the token leaves the address bar;
+  - rejects requests whose `Host` or `Origin` header is not the UI's own;
+  - sends a strict content security policy (no inline scripts or styles; resource bars are SVG attributes) and forbids framing.
 - `bb mcp` speaks MCP over stdio; MCP clients configure the command `bb mcp`.
 - Explorers read service data through Docker: each runs the service's own command-line tool with `docker exec`, inside the experiment's network ([ADR-0012](../adr/README.md)). Status comes from `docker inspect` and `docker stats`. The UI never changes the system.
 
@@ -171,6 +172,7 @@ Each command is a thin wrapper over one core operation.
 | `bb config [get [key] \| set <key> <value>]` | List, read, or change install settings. |
 | `bb migrate` | Upgrade `experiment.yaml` to the current spec version. |
 | `bb export compose [--out dir] [--secrets inline\|dotenv]` | Write a standalone compose stack (default `export/compose`). |
+| `bb serve [--addr host:port] [--no-open]` | Serve the read-only web UI on a loopback address (default `127.0.0.1:7777`) and open the browser with a one-time sign-in link (Phase 3). |
 | `bb version` | Print the bb version. |
 
 `bb add`, `bb remove`, and `bb starter` edit `experiment.yaml` through a YAML node tree, so the user's comments and ordering survive.
@@ -184,7 +186,8 @@ bb/                     main package: `go install github.com/brian-nunez/breadbo
 internal/
   core/                 core API: one method per operation, request/result types, events, sentinel errors
   cli/                  CLI wrapper: subcommand dispatch, flag parsing, rendering
-  web/                  web UI wrapper: templ components, handlers, embedded assets (Phase 3)
+  web/                  web UI wrapper: templ components, handlers, embedded assets (Phase 3);
+                        styles/input.css is the Tailwind source, static/ is embedded
   mcp/                  MCP wrapper (Phase 4)
   spec/                 experiment.yaml types, parse, validate, version upgrades
   model/                resolved model and resolver

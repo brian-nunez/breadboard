@@ -16,7 +16,7 @@ var bucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 // validateInstances checks replicas and claims every service name the app
 // generates (instances, pods, sidecars, agents, init containers), so none
 // collides with another service or app.
-func validateInstances(app App, p string, add func(error), claim func(name, path string)) {
+func validateInstances(app App, p string, guarded bool, add func(error), claim func(name, path string)) {
 	rp := join(p, "replicas")
 	add(check(func(n int) bool { return n >= 0 && n <= MaxReplicas }, rp, "must be between 1 and %d", MaxReplicas)(app.Replicas))
 	if app.ReplicaCount() > 1 && len(app.Ports) > 0 {
@@ -37,6 +37,13 @@ func validateInstances(app App, p string, add func(error), claim func(name, path
 		}
 		if app.IsPod() {
 			generated(PodName(inst), join(p, "sidecars"))
+		} else if guarded {
+			generated(PodName(inst), p)
+		}
+		if guarded && !slices.ContainsFunc(app.Sidecars, Sidecar.Transparent) {
+			// The plaintext guard's init container. (A transparent app
+			// cannot be a terminate target; that is reported elsewhere.)
+			generated(NetinitName(inst), p)
 		}
 		for i, sc := range app.Sidecars {
 			if sc.Type == "" || sidecarKeys[sc.Type] == nil || sc.Name != "" && !IsDNSLabel(sc.Name) {
@@ -125,7 +132,7 @@ func validateSidecars(s *Spec, types TypeLookup, app App, p string, add func(err
 
 // appBaseEnv are the variables Breadboard gives every app (kept in step
 // with internal/compose).
-var appBaseEnv = []string{"SSL_CERT_FILE", "TLS_CERT_FILE", "TLS_KEY_FILE", "BB_SERVICE", "BB_FQDN", "BB_HEALTH_PORT", "BB_SHARED_DIR"}
+var appBaseEnv = []string{"SSL_CERT_FILE", "TLS_CERT_FILE", "TLS_KEY_FILE", "BB_SERVICE", "BB_FQDN", "BB_HEALTH_PORT", "BB_SHARED_DIR", "BB_PLAIN_LISTEN_ADDR"}
 
 // validateAppEnv refuses a sidecar variable whose name the app already
 // receives from somewhere else: from Breadboard, from a used service's
@@ -145,7 +152,7 @@ func validateAppEnv(s *Spec, types TypeLookup, app App, p string, add func(error
 		if !ok || info.Env == nil {
 			continue
 		}
-		for _, name := range info.Env(u.TLS.Plaintext()) {
+		for _, name := range info.Env(u.Service, u.TLS.Plaintext()) {
 			if _, taken := owner[name]; taken {
 				// A second service of a type: compose prefixes its names.
 				name = envPrefixed(u.Service, name)

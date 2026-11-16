@@ -35,6 +35,9 @@ type ServiceDetails struct {
 	Listeners []Listener
 	// UsedBy lists the services that connect to this one.
 	UsedBy []string
+	// Upstreams are a proxy's backends, in spec order, with the route
+	// that reaches each.
+	Upstreams []UpstreamInfo
 	// Env is, for infra, the variables every app that uses it receives (one
 	// group); for an app, its whole environment. Secret values are empty with
 	// Secret set: bb creds shows them.
@@ -57,6 +60,68 @@ type ServiceDetails struct {
 	Parent   string
 	Registry string
 	Sidecar  *SidecarInfo
+}
+
+// UpstreamInfo is one backend of a proxy and how traffic reaches it.
+type UpstreamInfo struct {
+	Name    string // the route name
+	Service string // the app or service behind it
+	App     bool
+	// Instances is how many replicas of an app the proxy balances across.
+	Instances int
+	// Mode is spec.TLSOn (re-encrypt), spec.TLSOff (terminate, with
+	// Reason) or spec.TLSPassthrough.
+	Mode   string
+	Reason string
+	Port   int // the target port: TLS, or plaintext for terminate
+	// The route: the proxy port it arrives on, and for HTTP proxies the
+	// path prefix (stripped before forwarding; empty when the upstream
+	// gets every request), whether it also takes every other request
+	// (the first upstream), or for passthrough the SNI name.
+	ListenPort int
+	PathPrefix string
+	Default    bool
+	SNI        string
+	// Route says the same in words, e.g. "/api/ (prefix stripped) on :8443".
+	Route string
+}
+
+// upstreamInfos describes a proxy's upstreams and their routes, following
+// the routing every generated proxy config implements (catalog.L7,
+// catalog.Passthroughs).
+func upstreamInfos(m *model.Model, svc *model.Service) []UpstreamInfo {
+	l7 := catalog.L7(svc.Upstreams)
+	var out []UpstreamInfo
+	for _, u := range svc.Upstreams {
+		ui := UpstreamInfo{Name: u.Name, Service: u.Service, App: u.App, Mode: u.Mode, Reason: u.Reason, Port: u.Port, Instances: 1}
+		if u.App {
+			ui.Instances = max(len(m.Instances(u.Service)), 1)
+		}
+		switch {
+		case svc.Entry.Proxy == nil || !svc.Entry.Proxy.HTTP:
+			// A pooler: every client connection on its one listener.
+			if ls := svc.Entry.Listeners; len(ls) > 0 {
+				ui.ListenPort = ls[0].Port
+			}
+			ui.Default = true
+			ui.Route = fmt.Sprintf("every connection on :%d", ui.ListenPort)
+		case u.Passthrough():
+			ui.ListenPort, ui.SNI = catalog.ProxyPassthroughPort, u.ServerName
+			ui.Route = fmt.Sprintf("SNI %s on :%d, still encrypted", u.ServerName, ui.ListenPort)
+		case len(l7) == 1:
+			ui.ListenPort, ui.Default = catalog.ProxyHTTPSPort, true
+			ui.Route = fmt.Sprintf("every request on :%d", ui.ListenPort)
+		default:
+			ui.ListenPort, ui.PathPrefix = catalog.ProxyHTTPSPort, u.Prefix()
+			ui.Default = l7[0].Name == u.Name
+			ui.Route = fmt.Sprintf("%s (prefix stripped) on :%d", u.Prefix(), ui.ListenPort)
+			if ui.Default {
+				ui.Route = fmt.Sprintf("%s (prefix stripped), and every other path, on :%d", u.Prefix(), ui.ListenPort)
+			}
+		}
+		out = append(out, ui)
+	}
+	return out
 }
 
 // Listener is a port a service accepts connections on.
@@ -127,7 +192,8 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 		if other.Kind == model.App && other.Instance > 1 {
 			continue // an app is listed once, by its first instance's group
 		}
-		uses := other.Kind == model.App && slices.ContainsFunc(m.EdgesFrom(other.Group()), func(e model.Edge) bool {
+		// Apps that use it, and proxies with it as an upstream.
+		uses := (other.Kind == model.App || len(other.Upstreams) > 0) && slices.ContainsFunc(m.EdgesFrom(other.Group()), func(e model.Edge) bool {
 			return e.To == svc.Name || e.To == svc.Group()
 		})
 		if uses {
@@ -145,15 +211,18 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 	}
 	switch svc.Kind {
 	case model.Infra:
-		for _, l := range svc.Entry.Listeners {
+		for _, l := range svc.Entry.ListenersFor(svc.Upstreams) { // a proxy's live listeners
 			d.Listeners = append(d.Listeners, Listener{Name: l.Name, Protocol: l.Protocol, Port: l.Port, PlaintextPort: l.PlaintextPort})
 		}
 		// What a TLS client of this service receives.
 		g := EnvGroup{Service: svc.Name, Title: svc.Entry.Title}
-		for _, v := range svc.Entry.Client(catalog.Client{Service: svc.Name, FQDN: svc.FQDN, Config: svc.Config, Secret: masked(svc.Name)}) {
+		cl := catalog.Client{Service: svc.Name, FQDN: svc.FQDN, Config: svc.Config, Secret: masked(svc.Name),
+			Upstreams: catalog.WithSecrets(svc.Upstreams, masked)}
+		for _, v := range svc.Entry.Client(cl) {
 			g.Vars = append(g.Vars, EnvVar{Name: v.Name, Value: v.Value, Secret: v.Secret})
 		}
 		d.Env = []EnvGroup{g}
+		d.Upstreams = upstreamInfos(m, svc)
 	case model.App:
 		d.Path, d.Command = svc.App.Path, svc.App.Command
 		d.App, d.Instance = svc.Group(), svc.Instance

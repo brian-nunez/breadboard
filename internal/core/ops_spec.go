@@ -208,7 +208,8 @@ type AddServiceResult struct {
 
 // AddService adds an infra service to experiment.yaml, keeping comments.
 func (e *Engine) AddService(ctx context.Context, req AddServiceRequest) (*AddServiceResult, error) {
-	if _, ok := catalog.Lookup(req.Type); !ok {
+	entry, ok := catalog.Lookup(req.Type)
+	if !ok {
 		return nil, unknownType(req.Type)
 	}
 	name := req.Name
@@ -220,7 +221,7 @@ func (e *Engine) AddService(ctx context.Context, req AddServiceRequest) (*AddSer
 		return nil, err
 	}
 	defer unlock()
-	if err := p.doc.AddService(name, req.Type); err != nil {
+	if err := p.doc.AddService(name, req.Type, defaultUpstreams(p.spec, entry)...); err != nil {
 		return nil, fmt.Errorf("%w; choose another name with --name", err)
 	}
 	if _, err := p.save(p.doc); err != nil {
@@ -256,6 +257,16 @@ func (e *Engine) RemoveService(ctx context.Context, req RemoveServiceRequest) (*
 				vs = append(vs, spec.Violation{
 					Path:    fmt.Sprintf("apps.%s.uses[%d]", app.Name, i),
 					Message: fmt.Sprintf("%s uses %s; remove it from %s's uses first", app.Name, req.Name, app.Name),
+				})
+			}
+		}
+	}
+	for _, svc := range p.spec.Services {
+		for i, u := range svc.Upstreams {
+			if u.Service == req.Name {
+				vs = append(vs, spec.Violation{
+					Path:    fmt.Sprintf("services.%s.upstreams[%d]", svc.Name, i),
+					Message: fmt.Sprintf("%s proxies to %s; remove it from %s's upstreams first", svc.Name, req.Name, svc.Name),
 				})
 			}
 		}
@@ -585,4 +596,22 @@ func (e *Engine) StarterDetails(ctx context.Context, req StarterDetailsRequest) 
 		d.Files = append(d.Files, StarterFile{Path: f.Path, Data: f.Data})
 	}
 	return d, nil
+}
+
+// defaultUpstreams wires a proxy that needs an upstream of a fixed type (a
+// PgBouncer pool in front of Postgres) to the experiment's only service of
+// that type, so `bb add pgbouncer` works without editing experiment.yaml.
+// With none or several candidates it adds nothing and validation explains.
+func defaultUpstreams(s *spec.Spec, entry *catalog.Entry) []string {
+	if entry.Proxy == nil || entry.Proxy.MinUpstreams == 0 || len(entry.Proxy.Targets) == 0 {
+		return nil
+	}
+	var candidates []string
+	for _, t := range entry.Proxy.Targets {
+		candidates = append(candidates, s.ServicesOfType(t)...)
+	}
+	if len(candidates) != 1 {
+		return nil
+	}
+	return candidates
 }

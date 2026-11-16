@@ -23,9 +23,32 @@ type TypeInfo struct {
 	// HTTPS reports whether the main listener speaks HTTPS, so an Envoy
 	// sidecar can proxy HTTP to it.
 	HTTPS bool
-	// Env lists the variables an app using the type receives (over a
-	// plaintext edge when plain is set). Nil means unknown.
-	Env func(plain bool) []string
+	// Env lists the variables an app using a service of the type receives
+	// (over a plaintext edge when plain is set). Nil means unknown.
+	Env func(service string, plain bool) []string
+	// Proxy is set for proxy types, which take upstreams and file. Nil
+	// means the type is not a proxy.
+	Proxy *ProxyInfo
+}
+
+// ProxyInfo is what validation needs to know about a proxy type's
+// upstreams. It is data on the catalog entry, so adding a proxy changes
+// no validation code.
+type ProxyInfo struct {
+	// Modes are the TLS modes an upstream may use (on, off, passthrough).
+	Modes []string
+	// HTTP marks an L7 HTTP proxy: an upstream it decrypts (on, off) must
+	// speak HTTP, so it is an app or an infra service with an HTTPS
+	// listener. Passthrough is TLS at L4 and takes any TLS target.
+	HTTP bool
+	// Targets limits upstreams to these catalog types (pgbouncer:
+	// postgres); apps are then not allowed. Nil allows apps and any type.
+	Targets []string
+	// MinUpstreams is the number of upstreams the type requires; zero means
+	// none are (an HTTP proxy without upstreams answers 503).
+	MinUpstreams int
+	// MaxUpstreams caps the number of upstreams; zero means no cap.
+	MaxUpstreams int
 }
 
 // TypeLookup finds a catalog entry by id.
@@ -114,6 +137,7 @@ func Validate(s *Spec, types TypeLookup) error {
 		if !ok {
 			continue
 		}
+		validateProxy(s, types, svc, info, p, add)
 		for k, v := range svc.Config {
 			cp := join(join(p, "config"), k)
 			if info.Config == nil {
@@ -126,6 +150,7 @@ func Validate(s *Spec, types TypeLookup) error {
 		}
 	}
 
+	guarded := TerminateTargets(s)
 	for _, app := range s.Apps {
 		p := join("apps", app.Name)
 		claim(app.Name, p)
@@ -156,7 +181,7 @@ func Validate(s *Spec, types TypeLookup) error {
 				add(check(isPort, join(hp, "port"), "must be between 1 and 65535")(app.Health.Port))
 			}
 		}
-		validateInstances(app, p, add, claim)
+		validateInstances(app, p, guarded[app.Name], add, claim)
 		validateSidecars(s, types, app, p, add)
 		if r := app.Register; r != nil {
 			rp := join(p, "register")
@@ -191,6 +216,7 @@ func Validate(s *Spec, types TypeLookup) error {
 			seenUses[u.Service] = true
 		}
 	}
+	validatePlainPorts(s, add)
 	return collect(errs)
 }
 

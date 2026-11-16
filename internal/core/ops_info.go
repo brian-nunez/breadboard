@@ -99,7 +99,8 @@ func (e *Engine) Creds(ctx context.Context, req CredsRequest) (*CredsResult, err
 			v, _ := store.Get(svc.Name, s.Key)
 			sc.Secrets = append(sc.Secrets, Secret{Key: s.Key, Value: v, Help: s.Help})
 		}
-		env := svc.Entry.Client(catalog.Client{Service: svc.Name, FQDN: svc.FQDN, Config: svc.Config, Secret: mat.Ref(svc.Name)})
+		env := svc.Entry.Client(catalog.Client{Service: svc.Name, FQDN: svc.FQDN, Config: svc.Config, Secret: mat.Ref(svc.Name),
+			Upstreams: catalog.WithSecrets(svc.Upstreams, mat.Ref)})
 		for _, v := range env {
 			sc.Env = append(sc.Env, EnvVar{Name: v.Name, Value: v.Value, Secret: v.Secret})
 		}

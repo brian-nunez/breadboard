@@ -65,6 +65,10 @@ type Service struct {
 	// Infra only.
 	Entry  *catalog.Entry
 	Config map[string]string
+	// Upstreams are a proxy's resolved backends, in spec order.
+	Upstreams []catalog.Upstream
+	// File is a proxy's user-owned config, relative to experiment.yaml.
+	File string
 
 	// App only.
 	App *spec.App
@@ -81,9 +85,17 @@ type Service struct {
 	// Pod is the service name of the instance's namespace holder, or empty
 	// when the app keeps its own namespace (no sidecars).
 	Pod string
-	// Netinit is the service name of the pod's transparent-mode init
-	// container, or empty.
+	// Netinit is the service name of the pod's init container, which
+	// installs its traffic rules (transparent mode, the plaintext guard of
+	// a terminate target), or empty.
 	Netinit string
+	// Transparent is set when an Envoy sidecar captures the instance's
+	// traffic.
+	Transparent bool
+	// PlainGuard is set when the instance is the target of a terminating
+	// proxy: it runs as a pod, and its netinit confines the plaintext port
+	// to the instance's segment address.
+	PlainGuard bool
 	// Sidecars are the instance's sidecar service names, in spec order
 	// (the registration agent last).
 	Sidecars []string
@@ -107,8 +119,8 @@ func (s *Service) Group() string {
 }
 
 // Edge is a directed connection from an app (by its name in
-// experiment.yaml) to an infra listener, or through an Envoy sidecar to
-// another app or an infra service.
+// experiment.yaml) to an infra listener, through an Envoy sidecar to
+// another app or an infra service, or from a proxy to one of its upstreams.
 type Edge struct {
 	From     string
 	To       string
@@ -119,16 +131,23 @@ type Edge struct {
 	// Via is the name (within the app) of the Envoy sidecar whose outbound
 	// listener carries the edge; empty for an edge from uses.
 	Via string
-	// ToApp marks an app-to-app edge.
+	// ToApp marks an edge whose target is an app (all its replicas).
 	ToApp bool
+	// Mode is set on a proxy's upstream edges: spec.TLSOn (re-encrypt),
+	// spec.TLSOff (terminate) or spec.TLSPassthrough. From is the proxy.
+	Mode string
 }
 
 // Segment is a private network shared by a plaintext listener and its clients.
 type Segment struct {
 	Name    string // compose network name, e.g. plain-postgres
-	Target  string
+	Target  string // an infra service, or an app (every replica joins)
 	Clients []string
 	Reasons []string
+	// Port is the plaintext port an app target listens on (it receives
+	// BB_PLAIN_LISTEN_ADDR); zero for an infra target, whose catalog
+	// entry binds its own plaintext listener.
+	Port int
 }
 
 // SegmentFQDN is a service's alias on its private segment.
@@ -217,8 +236,12 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 			Image:     entry.Image,
 			Entry:     entry,
 			Config:    entry.ResolveConfig(svc.Config),
+			File:      svc.File,
 		})
 	}
+	// Apps behind a terminating proxy run as pods whose netinit confines
+	// the plaintext port to the segment (D-121).
+	guarded := spec.TerminateTargets(s)
 	for i := range s.Apps {
 		app := &s.Apps[i]
 		for _, u := range app.Uses {
@@ -236,7 +259,7 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 			}
 			m.Edges = append(m.Edges, e)
 		}
-		if err := instances(m, s, app); err != nil {
+		if err := instances(m, s, app, guarded[app.Name]); err != nil {
 			return nil, err
 		}
 	}
@@ -247,9 +270,81 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 			return nil, err
 		}
 	}
+	// Upstreams may name apps, so they resolve once every app exists.
+	for _, svc := range s.Services {
+		if err := upstreams(m, s, svc); err != nil {
+			return nil, err
+		}
+	}
 	logBuckets(m)
 	m.Segments = segments(m)
 	return m, nil
+}
+
+// upstreams resolves a proxy's upstreams into edges and the backends its
+// catalog entry renders. An app target means every replica; a terminate
+// hop reaches it through its private segment.
+func upstreams(m *Model, s *spec.Spec, declared spec.Service) error {
+	proxy, _ := m.Service(declared.Name)
+	if len(declared.Upstreams) > 0 && proxy.Entry.Proxy == nil {
+		return fmt.Errorf("resolve %s: type %s takes no upstreams", proxy.Name, proxy.Entry.ID)
+	}
+	for _, u := range declared.Upstreams {
+		mode := u.Mode()
+		up := catalog.Upstream{Name: u.Route(), Service: u.Service, Mode: mode}
+		e := Edge{From: proxy.Name, To: u.Service, TLS: mode != spec.TLSOff, Mode: mode}
+		if mode == spec.TLSOff {
+			up.Reason, e.Reason = u.TLS.Reason, u.TLS.Reason
+		}
+		if app, ok := s.App(u.Service); ok {
+			up.App, e.ToApp = true, true
+			up.ServerName = app.Name + "." + m.Domain
+			port := u.Port
+			switch {
+			case mode == spec.TLSOff:
+				if port == 0 {
+					port = spec.DefaultPlainPort
+				}
+				up.Host = SegmentFQDN(app.Name, m.Domain)
+				e.Listener = "plain"
+			default:
+				if port == 0 {
+					p, ok := app.TLSPort()
+					if !ok {
+						return fmt.Errorf("resolve %s: upstream %s serves no TLS port", proxy.Name, u.Service)
+					}
+					port = p
+				}
+				up.Host = up.ServerName
+				e.Listener = "tls"
+			}
+			up.Port, e.Port = port, port
+			for _, inst := range m.Instances(app.Name) {
+				if mode == spec.TLSOff {
+					up.Servers = append(up.Servers, SegmentFQDN(inst.Name, m.Domain))
+				} else {
+					up.Servers = append(up.Servers, inst.FQDN)
+				}
+			}
+		} else if target, ok := m.Service(u.Service); ok && target.Kind == Infra {
+			l := target.Entry.Listeners[0]
+			up.ServerName, up.Host, up.Port = target.FQDN, target.FQDN, l.Port
+			up.Config = target.Config
+			e.Listener, e.Port = l.Name, l.Port
+			if mode == spec.TLSOff {
+				if l.PlaintextPort == 0 {
+					return fmt.Errorf("resolve %s: upstream %s has no plaintext listener", proxy.Name, u.Service)
+				}
+				up.Host, up.Port, e.Port = SegmentFQDN(target.Name, m.Domain), l.PlaintextPort, l.PlaintextPort
+			}
+			up.Servers = []string{up.Host}
+		} else {
+			return fmt.Errorf("resolve %s: upstream %q is not a service or app", proxy.Name, u.Service)
+		}
+		proxy.Upstreams = append(proxy.Upstreams, up)
+		m.Edges = append(m.Edges, e)
+	}
+	return nil
 }
 
 // logBuckets adds every Fluent Bit sidecar's bucket to its S3 compatible
@@ -275,7 +370,7 @@ func logBuckets(m *Model) {
 }
 
 // instances adds an app's instances, each followed by its sidecars.
-func instances(m *Model, s *spec.Spec, app *spec.App) error {
+func instances(m *Model, s *spec.Spec, app *spec.App, guarded bool) error {
 	var health *spec.Health
 	if app.Health != nil {
 		health = &spec.Health{Path: DefaultAppHealthPath, Port: DefaultAppHealthPort}
@@ -304,8 +399,11 @@ func instances(m *Model, s *spec.Spec, app *spec.App) error {
 			inst.Instance = n + 1
 			inst.Aliases = append(inst.Aliases, shared)
 		}
-		if app.IsPod() {
+		if app.IsPod() || guarded {
 			inst.Pod = spec.PodName(name)
+		}
+		if guarded {
+			inst.PlainGuard, inst.Netinit = true, spec.NetinitName(name)
 		}
 		m.Services = append(m.Services, inst)
 		for _, declared := range app.Sidecars {
@@ -315,7 +413,7 @@ func instances(m *Model, s *spec.Spec, app *spec.App) error {
 				return fmt.Errorf("resolve %s: unknown sidecar type %q", app.Name, sc.Type)
 			}
 			if sc.Transparent() {
-				inst.Netinit = spec.NetinitName(name)
+				inst.Netinit, inst.Transparent = spec.NetinitName(name), true
 			}
 			svc := sidecarService(inst, spec.SidecarServiceName(name, sc.ID()), typ, typ.Image)
 			svc.Sidecar = &sc
@@ -403,17 +501,27 @@ func outbound(m *Model, s *spec.Spec, app *spec.App) error {
 }
 
 // segments groups plaintext edges by target: one private segment per target,
-// holding the target and exactly the clients that asked for plaintext.
+// holding the target (every replica of an app) and exactly the clients
+// that asked for plaintext.
 func segments(m *Model) []Segment {
 	var out []Segment
+	seen := map[string]bool{}
 	for _, svc := range m.Services {
+		if svc.Kind == Sidecar || seen[svc.Group()] {
+			continue
+		}
+		target := svc.Group()
+		seen[target] = true
 		var seg *Segment
 		for _, e := range m.Edges {
-			if e.TLS || e.To != svc.Name {
+			if e.TLS || e.To != target {
 				continue
 			}
 			if seg == nil {
-				seg = &Segment{Name: "plain-" + svc.Name, Target: svc.Name}
+				seg = &Segment{Name: "plain-" + target, Target: target}
+			}
+			if svc.Kind == App {
+				seg.Port = e.Port
 			}
 			seg.Clients = append(seg.Clients, e.From)
 			seg.Reasons = append(seg.Reasons, fmt.Sprintf("%s: %s", e.From, e.Reason))

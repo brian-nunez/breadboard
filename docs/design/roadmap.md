@@ -62,6 +62,21 @@ bb logs consumer -f
 
 Catalog entry `s3-compatible` (SeaweedFS) with starter `s3/objects-basics` (buckets, keys, multipart upload, presigned URLs).
 
+**Also built (Brian's direction or found while building):** `consul/self-registration` as a labeled alternative to the sidecar starter (D-055); `register` in `experiment.yaml` for the sidecar (D-053); unique starter app names (D-047); `TLS_CERT_FILE`, `TLS_KEY_FILE` and `BB_FQDN` for apps (D-048, D-054); a `2g` app memory default so `go run` can compile (D-050); `.bb/runtime` synced instead of rewritten, which fixed running containers losing their mounted files on a second `bb up` (D-052).
+
+**Completion criteria:**
+
+- [x] `gofmt -l .` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes, including rendering and building every starter.
+- [x] `kafka/sink-to-postgres`: after the sink is killed mid-stream and restarted, every produced order is stored exactly once.
+- [x] `redis/cache-invalidation`: after the last write, the reader serves every current price within a window shorter than the cache TTL.
+- [x] `consul/service-discovery`: the caller reaches the greeter by name over verified TLS through the sidecar's registration; a stopped greeter drops out of the healthy instances.
+- [x] `consul/self-registration`: the same lookup works; a stopped greeter deregisters itself on SIGTERM.
+- [x] `s3-compatible`: configured buckets exist; S3 is HTTPS only; internal SeaweedFS ports are unreachable from other containers; gRPC rejects clients without a certificate and with another lab service's certificate.
+- [x] `s3/objects-basics`: the delimiter listing shows one level, the multipart upload completes, and a presigned GET returns the exact bytes.
+- [x] A second `bb up` leaves running, unchanged containers with their mounted files intact.
+- [x] The full integration suite (`go test -tags integration ./internal/core/`), Phase 1 tests included, passes on the top of the Phase 2 stack.
+- [x] Docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated (D-047 to D-055).
+
 ## Phase 3: Web UI
 
 Build to the accepted design in [`ui/`](ui/README.md) (D-031).

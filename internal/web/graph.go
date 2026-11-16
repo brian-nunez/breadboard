@@ -25,6 +25,8 @@ type graph struct {
 	Nodes         []node
 	Edges         []edge
 	CodeX, InfraX int // column header positions
+	// Static graphs (starter pages) have no live nodes to select.
+	Static bool
 }
 
 type node struct {

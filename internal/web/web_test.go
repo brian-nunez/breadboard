@@ -153,7 +153,11 @@ func TestOnlyLoopbackAddresses(t *testing.T) {
 
 func TestNoExperimentShowsHowToStart(t *testing.T) {
 	s := newServer(t)
-	rec := s.get(t, "/", map[string]string{"Cookie": signIn(t, s)})
+	cookie := map[string]string{"Cookie": signIn(t, s)}
+	if home := s.get(t, "/", cookie).Body.String(); !strings.Contains(home, "What do you want to build?") || !strings.Contains(home, "Skip to dashboard") {
+		t.Error("without an experiment, / is not the home page")
+	}
+	rec := s.get(t, "/dashboard", cookie)
 	body := rec.Body.String()
 	for _, want := range []string{"No experiment here yet", "bb init kafka-lab", "data-copy"} {
 		if !strings.Contains(body, want) {

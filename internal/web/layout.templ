@@ -49,7 +49,7 @@ templ topbar(current section) {
 			<kbd class="rounded border border-slate-200 px-1.5 text-[11px] text-slate-500">⌘K</kbd>
 		</div>
 		<nav class="ml-auto flex items-center gap-6 text-sm">
-			@topLink("/", "Dashboard", current == sectionDashboard)
+			@topLink("/dashboard", "Dashboard", current == sectionDashboard)
 			@topLink("/docs", "Docs", current == sectionDocs)
 			@topLink("/starters", "Starters", current == sectionStarters)
 			<span class="text-slate-400">Read-only</span>
@@ -97,7 +97,7 @@ templ sidebar(d dashboardData, active string) {
 			</div>
 		}
 		<nav class="mt-5 flex flex-col gap-0.5 text-sm">
-			@sideLink("/", "Overview", active == "overview")
+			@sideLink("/dashboard", "Overview", active == "overview")
 			@sideLink("/architecture", "Architecture", active == "architecture")
 		</nav>
 		if len(d.Services) > 0 {
@@ -115,7 +115,7 @@ templ sidebar(d dashboardData, active string) {
 		<nav class="mt-2 flex flex-col gap-0.5 text-sm">
 			@sideLink("/docs", "Docs", false)
 			@sideLink("/starters", "Starters", false)
-			@sideLink("/docs/catalog", "Catalog", false)
+			@sideLink("/docs/getting-started", "Getting started", false)
 		</nav>
 		<div class="mt-auto px-2.5 text-xs leading-5 text-slate-500">
 			<div class="truncate" title={ d.Version }>bb { d.Version }</div>

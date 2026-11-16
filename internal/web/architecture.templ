@@ -79,7 +79,8 @@ templ graphSVG(g graph, labels bool) {
 			}
 		}
 		for _, n := range g.Nodes {
-			<a href={ templ.SafeURL("/architecture?node=" + n.Name) }>
+			if g.Static {
+				<g>
 				<rect x={ itoa(n.X) } y={ itoa(n.Y) } width="176" height="56" rx="10" stroke-width={ strokeWidth(n.Selected) } class={ templ.KV("fill-white stroke-indigo-600", n.Selected), templ.KV("fill-white stroke-slate-200 hover:stroke-slate-400", !n.Selected) }></rect>
 				if n.Kind == "infra" {
 					<rect x={ itoa(n.X + 14) } y={ itoa(n.Y + 14) } width="28" height="28" rx="6" class="fill-slate-100"></rect>
@@ -89,7 +90,20 @@ templ graphSVG(g graph, labels bool) {
 				<text x={ itoa(n.X + 28) } y={ itoa(n.Y + 32) } text-anchor="middle" class={ "text-[12px] font-semibold", templ.KV("fill-slate-700", n.Kind == "infra"), templ.KV("fill-indigo-700", n.Kind != "infra") }>{ n.Initial() }</text>
 				<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 33) } class="fill-slate-900 text-[14px] font-semibold">{ n.Name }</text>
 				<circle cx={ itoa(n.X + 158) } cy={ itoa(n.Y + 28) } r="4" class={ dotClass(n.Status().Color) }></circle>
-			</a>
+				</g>
+			} else {
+				<a href={ templ.SafeURL("/architecture?node=" + n.Name) }>
+				<rect x={ itoa(n.X) } y={ itoa(n.Y) } width="176" height="56" rx="10" stroke-width={ strokeWidth(n.Selected) } class={ templ.KV("fill-white stroke-indigo-600", n.Selected), templ.KV("fill-white stroke-slate-200 hover:stroke-slate-400", !n.Selected) }></rect>
+				if n.Kind == "infra" {
+					<rect x={ itoa(n.X + 14) } y={ itoa(n.Y + 14) } width="28" height="28" rx="6" class="fill-slate-100"></rect>
+				} else {
+					<circle cx={ itoa(n.X + 28) } cy={ itoa(n.Y + 28) } r="14" class="fill-indigo-50"></circle>
+				}
+				<text x={ itoa(n.X + 28) } y={ itoa(n.Y + 32) } text-anchor="middle" class={ "text-[12px] font-semibold", templ.KV("fill-slate-700", n.Kind == "infra"), templ.KV("fill-indigo-700", n.Kind != "infra") }>{ n.Initial() }</text>
+				<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 33) } class="fill-slate-900 text-[14px] font-semibold">{ n.Name }</text>
+				<circle cx={ itoa(n.X + 158) } cy={ itoa(n.Y + 28) } r="4" class={ dotClass(n.Status().Color) }></circle>
+				</a>
+			}
 		}
 	</svg>
 }

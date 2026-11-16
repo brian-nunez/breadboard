@@ -260,3 +260,29 @@ func TestVersion(t *testing.T) {
 		t.Fatalf("Version = %+v", v)
 	}
 }
+
+func TestStarterDetailsWritesNothing(t *testing.T) {
+	h := newHarness(t)
+	d, err := h.eng.StarterDetails(h.ctx(), StarterDetailsRequest{ID: "consul/service-discovery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Dir != "service-discovery" || len(d.Apps) != 2 || d.Apps[0].Register == nil || d.Apps[0].Register.Port != 8443 {
+		t.Fatalf("details = %+v", d)
+	}
+	paths := map[string]bool{}
+	for _, f := range d.Files {
+		paths[f.Path] = true
+	}
+	for _, want := range []string{"go.mod", "Dockerfile", "README.md", "cmd/greeter/main.go", "cmd/caller/main.go"} {
+		if !paths[want] {
+			t.Errorf("files lack %s", want)
+		}
+	}
+	if _, err := os.Stat(h.dir); !os.IsNotExist(err) {
+		t.Error("StarterDetails created the project directory")
+	}
+	if _, err := h.eng.StarterDetails(h.ctx(), StarterDetailsRequest{ID: "nope/nope"}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown starter error = %v", err)
+	}
+}

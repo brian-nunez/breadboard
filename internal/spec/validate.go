@@ -20,6 +20,12 @@ type TypeInfo struct {
 	Plaintext bool
 	// Registry reports whether apps using this type can set register.
 	Registry bool
+	// HTTPS reports whether the main listener speaks HTTPS, so an Envoy
+	// sidecar can proxy HTTP to it.
+	HTTPS bool
+	// Env lists the variables an app using the type receives (over a
+	// plaintext edge when plain is set). Nil means unknown.
+	Env func(plain bool) []string
 }
 
 // TypeLookup finds a catalog entry by id.
@@ -150,10 +156,10 @@ func Validate(s *Spec, types TypeLookup) error {
 				add(check(isPort, join(hp, "port"), "must be between 1 and 65535")(app.Health.Port))
 			}
 		}
+		validateInstances(app, p, add, claim)
+		validateSidecars(s, types, app, p, add)
 		if r := app.Register; r != nil {
 			rp := join(p, "register")
-			// The sidecar is a service of its own and shares the namespace.
-			claim(SidecarName(app.Name), rp)
 			if r.Port != 0 {
 				add(check(isPort, join(rp, "port"), "must be between 1 and 65535")(r.Port))
 			}

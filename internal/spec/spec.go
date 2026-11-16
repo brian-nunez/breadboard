@@ -58,6 +58,10 @@ type App struct {
 	Health    *Health
 	Register  *Register
 	Resources Resources
+	// Replicas is the number of instances; zero means one.
+	Replicas int
+	// Sidecars share the app's network namespace and a directory with it.
+	Sidecars []Sidecar
 }
 
 // Use is one entry of an app's uses list: an edge to an infra service.
@@ -89,8 +93,13 @@ type Register struct {
 	Check string // path of an HTTPS health check; empty means a TCP check
 }
 
-// SidecarName is the name of the sidecar service that registers an app.
-func SidecarName(app string) string { return app + "-agent" }
+// DefaultHealthPort is the port of an app's HTTP health check when
+// health sets none.
+const DefaultHealthPort = 8080
+
+// SidecarName is the name of the sidecar service that registers an app
+// instance: <instance>-agent.
+func SidecarName(instance string) string { return instance + "-agent" }
 
 // Service returns the infra service with the given name.
 func (s *Spec) Service(name string) (Service, bool) {

@@ -213,7 +213,7 @@ func (e *Engine) Down(ctx context.Context, req DownRequest) (*DownResult, error)
 // ServiceStatus is one service's live state.
 type ServiceStatus struct {
 	Name        string
-	Kind        string // infra or app
+	Kind        string // infra, app, or sidecar
 	Type        string // catalog type for infra; empty for apps
 	Image       string
 	Address     string

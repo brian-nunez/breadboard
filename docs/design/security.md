@@ -31,6 +31,8 @@ Every container receives the trust bundle (Breadboard CA followed by the host's 
 Inside `.bb/runtime/` (and an export's `tls/`), key files are mode `0644` so non-root users in official images can read them through the bind mount; the directories holding them are `0700`, so no other host user can reach them. The canonical keys in `.bb/certs/` stay `0600`.
 
 - `SSL_CERT_FILE` points at the bundle. Go's TLS stack reads it, so `pgx`, `go-redis`, `franz-go`, and `hashicorp/consul/api` verify Breadboard certs with no code changes, and outbound internet TLS keeps working.
+- `BB_FQDN` is the app's own address, the name on its certificate, for apps that tell others where to reach them (for example when registering in Consul).
+- `TLS_CERT_FILE` and `TLS_KEY_FILE` point every app at its own certificate and key, so an app that serves TLS to other apps (for example `http.ListenAndServeTLS`) names no paths in code.
 - Service-specific trust variables (e.g. `CONSUL_CACERT`) come from each catalog entry's env contract.
 - Non-Go starters (later) add their ecosystem's variable (`NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, …) in the starter definition.
 

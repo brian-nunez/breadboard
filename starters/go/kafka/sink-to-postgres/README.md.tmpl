@@ -1,0 +1,25 @@
+# kafka/sink-to-postgres
+
+Copies events from Kafka into Postgres, using [franz-go](https://github.com/twmb/franz-go) and [pgx](https://github.com/jackc/pgx).
+
+- `cmd/sink-producer`: creates the `order-events` topic, then writes one JSON order per second, keyed by its id.
+- `cmd/sink`: creates the `orders` table if it is missing, reads `order-events` as the `orders-sink` group, inserts each order, and commits offsets only after the rows are written.
+
+Breadboard sets `KAFKA_BROKERS`, `DATABASE_URL` and `SSL_CERT_FILE` in each container. The code reads nothing else.
+
+```sh
+bb up
+bb logs sink -f
+```
+
+## Try this
+
+- **Look at the rows.** `docker exec -it bb-{{.Experiment}}-postgres-1 psql -U postgres app -c 'select * from orders order by stored_at desc limit 5'`.
+- **Transform on the way in.** Add a column, say `amount_dollars numeric`, fill it in the insert, and run `bb up`. The table already exists, so `CREATE TABLE IF NOT EXISTS` skips it: add the column with `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. That is why real projects use numbered migrations.
+- **Replay everything.** Change the group name in `cmd/sink` and run `bb up`. The new group reads from offset 0 and logs `duplicate` for every order already stored.
+
+## Break this
+
+- **Crash between write and commit.** `docker kill bb-{{.Experiment}}-sink-1`, then `bb up`. Some orders come back and log `duplicate`: delivery is at-least-once, and the primary key makes it safe.
+- **Lose the database.** `docker stop bb-{{.Experiment}}-postgres-1`. The sink exits without committing; after `bb up`, it picks up where it stopped and nothing is lost.
+- **Remove the idempotency.** Drop `ON CONFLICT (id) DO NOTHING` and repeat the first drill. The insert fails on the duplicate and the sink cannot make progress until you handle it.

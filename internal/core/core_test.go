@@ -79,7 +79,7 @@ func TestCatalogAndLearn(t *testing.T) {
 			t.Errorf("%s image %q is not an exact pin", e.Type, e.Image)
 		}
 	}
-	if !slices.Equal(types, []string{"kafka", "postgres", "redis", "consul"}) {
+	if !slices.Equal(types, []string{"kafka", "postgres", "redis", "consul", "s3-compatible"}) {
 		t.Fatalf("types = %v", types)
 	}
 	l, err := h.eng.Learn(h.ctx(), LearnRequest{Type: "postgres"})
@@ -194,6 +194,37 @@ func TestApplyStarterIsIdempotent(t *testing.T) {
 	st, err := h.eng.Starters(h.ctx())
 	if err != nil || len(st.Starters) == 0 || st.Starters[0].ID != "kafka/producer-consumer" {
 		t.Fatalf("Starters = %+v %v", st, err)
+	}
+}
+
+// A name the starter needs that belongs to something else is a clash: the
+// apply fails before writing anything, instead of skipping the app.
+func TestApplyStarterRefusesAnAppNameClash(t *testing.T) {
+	for name, src := range map[string]string{
+		"app elsewhere": "version: 1\nname: lab\napps:\n  producer:\n    path: ./mine\n",
+		"infra service": "version: 1\nname: lab\nservices:\n  consumer:\n    type: redis\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.init()
+			if name == "app elsewhere" {
+				if err := os.MkdirAll(filepath.Join(h.dir, "mine"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.writeSpec(src)
+			before := h.read("experiment.yaml")
+			_, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: "kafka/producer-consumer"})
+			if !errors.Is(err, ErrExists) {
+				t.Fatalf("error = %v, want ErrExists", err)
+			}
+			if h.read("experiment.yaml") != before {
+				t.Error("experiment.yaml changed despite the clash")
+			}
+			if _, err := os.Stat(filepath.Join(h.dir, "producer-consumer")); !os.IsNotExist(err) {
+				t.Error("starter files were written despite the clash")
+			}
+		})
 	}
 }
 

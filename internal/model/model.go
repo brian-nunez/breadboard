@@ -19,15 +19,21 @@ type Kind string
 const (
 	Infra Kind = "infra"
 	App   Kind = "app"
+	// Sidecar is an agent that registers an app with a service registry. It
+	// runs in the app's network namespace and uses the app's certificate.
+	Sidecar Kind = "sidecar"
 )
 
 // Defaults for app services.
 const (
-	DefaultAppMemory = "512m"
+	DefaultAppMemory = "2g"
 	DefaultAppCPUs   = "0.5"
 	// Used when an app opts into an HTTP health check with `health`.
 	DefaultAppHealthPath = "/healthz"
 	DefaultAppHealthPort = 8080
+	// Sidecar agents are small.
+	DefaultSidecarMemory = "128m"
+	DefaultSidecarCPUs   = "0.25"
 )
 
 // Model is a fully resolved experiment.
@@ -57,6 +63,11 @@ type Service struct {
 	// Health is the app's HTTP health check, or nil for the default check
 	// that the container's main process is running. Apps need no health code.
 	Health *spec.Health
+
+	// Sidecar only. Entry is the registry's catalog entry.
+	Parent   string         // the app the sidecar registers
+	Registry string         // the registry service it joins
+	Register *spec.Register // what it registers, defaults applied
 }
 
 // Edge is a directed connection from an app to an infra listener.
@@ -187,9 +198,43 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 			}
 			m.Edges = append(m.Edges, e)
 		}
+		if app.Register != nil {
+			sc, err := sidecar(m, app)
+			if err != nil {
+				return nil, err
+			}
+			m.Services = append(m.Services, sc)
+		}
 	}
 	m.Segments = segments(m)
 	return m, nil
+}
+
+// sidecar resolves the agent that registers app with the first registry it uses.
+func sidecar(m *Model, app *spec.App) (*Service, error) {
+	parent, _ := m.Service(app.Name)
+	for _, u := range app.Uses {
+		target, ok := m.Service(u.Service)
+		if !ok || target.Kind != Infra || target.Entry.Sidecar == nil {
+			continue
+		}
+		reg := *app.Register
+		if reg.Name == "" {
+			reg.Name = app.Name
+		}
+		return &Service{
+			Name:      spec.SidecarName(app.Name),
+			Kind:      Sidecar,
+			FQDN:      parent.FQDN,
+			Identity:  parent.Identity,
+			Resources: catalog.Resources{Memory: DefaultSidecarMemory, CPUs: DefaultSidecarCPUs},
+			Entry:     target.Entry,
+			Parent:    app.Name,
+			Registry:  target.Name,
+			Register:  &reg,
+		}, nil
+	}
+	return nil, fmt.Errorf("resolve %s: register needs a service registry in uses", app.Name)
 }
 
 // segments groups plaintext edges by target: one private segment per target,

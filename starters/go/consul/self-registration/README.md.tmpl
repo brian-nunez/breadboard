@@ -1,0 +1,32 @@
+# consul/self-registration
+
+**Alternative starter.** The recommended way to register services is `consul/service-discovery`, where a Consul sidecar agent registers each service and the service contains no Consul code. Use this one to see what that sidecar saves you from: here the service registers itself with the [Consul API](https://developer.hashicorp.com/consul/api-docs/agent/service).
+
+- `cmd/self-greeter`: an HTTPS service on port 8443. On start it registers itself, with a TLS health check, under the name `self-greeter`. On SIGTERM it deregisters itself.
+- `cmd/self-caller`: every 2 seconds, asks Consul for healthy `self-greeter` instances and calls one of them.
+
+Breadboard sets `CONSUL_HTTP_ADDR`, `CONSUL_CACERT`, `BB_FQDN`, `TLS_CERT_FILE`, `TLS_KEY_FILE` and `SSL_CERT_FILE`. The code reads nothing else.
+
+```sh
+bb up
+bb logs self-caller -f
+```
+
+What the service now owns, compared with the sidecar:
+
+- **Registration code** in every service, in every language you use.
+- **Cleanup.** Deregistering on shutdown is the service's job. A crash skips it, so the registration sets `DeregisterCriticalServiceAfter` as a safety net.
+- **Signals.** The service must receive SIGTERM to clean up. `go run` does not pass it on, so this app's `command` builds the binary and `exec`s it instead.
+- **Which agent.** With no local agent, the service registers with the Consul server, so its entry lives on the server's node rather than its own.
+
+## Try this
+
+- **Watch the registration.** `bb logs self-greeter` shows `registered`; `docker stop bb-{{.Experiment}}-self-greeter-1` shows `deregistered`.
+- **Scale out.** Copy `self-greeter` to `self-greeter-2` in `experiment.yaml` and run `bb up`. Each registers under its own ID with the same name, and the caller sees 2 healthy instances.
+- **Compare.** Apply `consul/service-discovery` to the same experiment and compare `cmd/greeter` with `cmd/self-greeter`.
+
+## Break this
+
+- **Crash instead of stopping.** `docker kill -s KILL bb-{{.Experiment}}-self-greeter-1`. No deregistration runs: the entry stays, its check fails, and Consul removes it after a minute.
+- **Skip the signal.** Change the `command` back to `go run ./cmd/self-greeter` and stop the container. `deregistered` never prints.
+- **Register a wrong address.** Register `localhost` instead of `BB_FQDN`. The check fails and callers that do get the address cannot verify its certificate.

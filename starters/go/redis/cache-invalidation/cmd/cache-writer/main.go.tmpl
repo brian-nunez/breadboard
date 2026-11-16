@@ -1,0 +1,62 @@
+// Command cache-writer changes product prices in Postgres and announces each
+// change on the "product-updates" topic.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"log"
+	"math/rand/v2"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
+)
+
+var products = []string{"apple", "bread", "coffee"}
+
+func main() {
+	ctx := context.Background()
+	db, err := pgx.Connect(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close(ctx)
+	if _, err := db.Exec(ctx, `CREATE TABLE IF NOT EXISTS products (id text PRIMARY KEY, price_cents integer NOT NULL)`); err != nil {
+		log.Fatal(err)
+	}
+	for _, id := range products {
+		if _, err := db.Exec(ctx, `INSERT INTO products VALUES ($1, 100) ON CONFLICT (id) DO NOTHING`, id); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(strings.Split(os.Getenv("KAFKA_BROKERS"), ",")...),
+		kgo.DialTLSConfig(new(tls.Config)),
+		kgo.DefaultProduceTopic("product-updates"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+	kadm.NewClient(client).CreateTopic(ctx, 1, 1, nil, "product-updates")
+
+	for {
+		id, price := products[rand.IntN(len(products))], 100+rand.IntN(900)
+		// The database is the source of truth: write it first. Announcing the
+		// change before the write commits would let a reader cache the old price
+		// after the cache entry was already removed.
+		if _, err := db.Exec(ctx, `UPDATE products SET price_cents = $2 WHERE id = $1`, id, price); err != nil {
+			log.Fatal(err)
+		}
+		if err := client.ProduceSync(ctx, &kgo.Record{Key: []byte(id), Value: []byte(id)}).FirstErr(); err != nil {
+			log.Print(err) // the cached price stays stale until its TTL runs out
+		}
+		log.Printf("updated id=%s price=%d", id, price)
+		time.Sleep(3 * time.Second)
+	}
+}

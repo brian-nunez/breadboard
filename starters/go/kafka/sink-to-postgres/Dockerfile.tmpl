@@ -1,0 +1,26 @@
+# dev: what bb up runs, with your source mounted for live edits.
+FROM golang:{{.GoImage}} AS dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+FROM golang:{{.GoImage}} AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG APP=sink
+RUN CGO_ENABLED=0 go build -o /out/app ./cmd/${APP}
+
+# prod: a small non-root image for one app.
+#   docker build --target prod --build-arg APP=sink-producer .
+FROM alpine:{{.AlpineVersion}} AS prod
+LABEL maintainer="Your Name <you@example.com>" \
+      version="0.1.0" \
+      description="Kafka to Postgres sink" \
+      platform="linux"
+RUN adduser -D -u 10001 app
+COPY --from=build /out/app /usr/local/bin/app
+USER app
+ENTRYPOINT ["/usr/local/bin/app"]

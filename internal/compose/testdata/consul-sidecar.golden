@@ -1,0 +1,251 @@
+--- ca.pem (644) 3 bytes
+--- trust-bundle.pem (644) 9 bytes
+--- tls/consul/tls.crt (644) 12 bytes
+--- tls/consul/tls.key (644) 11 bytes
+--- tls/consul/keystore.pem (644) 23 bytes
+--- config/consul/consul.json (644)
+{
+  "bind_addr": "{{ GetPrivateIP }}",
+  "bootstrap_expect": 1,
+  "client_addr": "0.0.0.0",
+  "datacenter": "bb",
+  "enable_agent_tls_for_checks": true,
+  "encrypt_verify_incoming": true,
+  "encrypt_verify_outgoing": true,
+  "node_name": "consul",
+  "ports": {
+    "dns": -1,
+    "grpc": -1,
+    "grpc_tls": 8503,
+    "http": -1,
+    "https": 8501,
+    "serf_wan": -1
+  },
+  "server": true,
+  "tls": {
+    "defaults": {
+      "ca_file": "/etc/bb/ca.pem",
+      "cert_file": "/etc/bb/tls/tls.crt",
+      "key_file": "/etc/bb/tls/tls.key",
+      "verify_incoming": false,
+      "verify_outgoing": true
+    },
+    "internal_rpc": {
+      "verify_incoming": true,
+      "verify_server_hostname": false
+    }
+  },
+  "ui_config": {
+    "enabled": true
+  }
+}
+--- tls/greeter/tls.crt (644) 13 bytes
+--- tls/greeter/tls.key (644) 12 bytes
+--- tls/greeter/keystore.pem (644) 25 bytes
+--- config/greeter-agent/consul.json (644)
+{
+  "bind_addr": "{{ GetPrivateIP }}",
+  "client_addr": "127.0.0.1",
+  "data_dir": "/consul/data",
+  "datacenter": "bb",
+  "enable_agent_tls_for_checks": true,
+  "encrypt_verify_incoming": true,
+  "encrypt_verify_outgoing": true,
+  "leave_on_terminate": true,
+  "node_name": "greeter",
+  "ports": {
+    "dns": -1,
+    "grpc": -1,
+    "grpc_tls": -1,
+    "http": -1,
+    "https": 8501,
+    "serf_wan": -1
+  },
+  "retry_join": [
+    "consul.bb.internal"
+  ],
+  "server": false,
+  "services": [
+    {
+      "address": "greeter.bb.internal",
+      "check": {
+        "interval": "5s",
+        "tcp": "greeter.bb.internal:8443",
+        "tcp_use_tls": true,
+        "timeout": "2s",
+        "tls_server_name": "greeter.bb.internal"
+      },
+      "id": "greeter",
+      "name": "greeter",
+      "port": 8443
+    }
+  ],
+  "tls": {
+    "defaults": {
+      "ca_file": "/etc/bb/ca.pem",
+      "cert_file": "/etc/bb/tls/tls.crt",
+      "key_file": "/etc/bb/tls/tls.key",
+      "verify_incoming": false,
+      "verify_outgoing": true
+    },
+    "internal_rpc": {
+      "verify_server_hostname": false
+    }
+  }
+}
+--- docker-compose.yml (644)
+# Generated for a golden test.
+name: bb-lab
+services:
+  consul:
+    image: hashicorp/consul:1.22.7
+    command: [agent, -config-file=/etc/bb/config/consul.json, '-encrypt=${CONSUL__GOSSIP_KEY}']
+    environment:
+      SSL_CERT_FILE: /etc/bb/trust-bundle.pem
+      CONSUL_HTTP_ADDR: https://consul.bb.internal:8501
+      CONSUL_CACERT: /etc/bb/ca.pem
+    healthcheck:
+      test: [CMD, consul, operator, raft, list-peers]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+      start_interval: 2s
+    volumes:
+      - consul-data:/consul/data
+      - ./tls/consul/tls.crt:/etc/bb/tls/tls.crt:ro
+      - ./tls/consul/tls.key:/etc/bb/tls/tls.key:ro
+      - ./tls/consul/keystore.pem:/etc/bb/tls/keystore.pem:ro
+      - ./ca.pem:/etc/bb/ca.pem:ro
+      - ./trust-bundle.pem:/etc/bb/trust-bundle.pem:ro
+      - ./config/consul/consul.json:/etc/bb/config/consul.json:ro
+    networks:
+      default:
+        aliases: [consul.bb.internal]
+    labels:
+      breadboard.experiment: lab
+      breadboard.experiment-id: 0123456789abcdef
+      breadboard.service: consul
+      breadboard.kind: infra
+      breadboard.config-hash: 64e7b3988fbaaa13
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+  greeter:
+    build:
+      context: ../../greeter
+      target: dev
+    command: [go, run, .]
+    environment:
+      SSL_CERT_FILE: /etc/bb/trust-bundle.pem
+      TLS_CERT_FILE: /etc/bb/tls/tls.crt
+      TLS_KEY_FILE: /etc/bb/tls/tls.key
+      BB_SERVICE: greeter
+      BB_FQDN: greeter.bb.internal
+      # consul (Consul)
+      CONSUL_HTTP_ADDR: https://consul.bb.internal:8501
+      CONSUL_CACERT: /etc/bb/trust-bundle.pem
+    healthcheck:
+      test: [CMD-SHELL, kill -0 1]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 1s
+    depends_on:
+      consul:
+        condition: service_healthy
+    volumes:
+      - ./tls/greeter/tls.crt:/etc/bb/tls/tls.crt:ro
+      - ./tls/greeter/tls.key:/etc/bb/tls/tls.key:ro
+      - ./tls/greeter/keystore.pem:/etc/bb/tls/keystore.pem:ro
+      - ./ca.pem:/etc/bb/ca.pem:ro
+      - ./trust-bundle.pem:/etc/bb/trust-bundle.pem:ro
+    networks:
+      default:
+        aliases: [greeter.bb.internal]
+    labels:
+      breadboard.experiment: lab
+      breadboard.experiment-id: 0123456789abcdef
+      breadboard.service: greeter
+      breadboard.kind: app
+      breadboard.config-hash: d00dc9202d936259
+    mem_limit: 2g
+    cpus: 0.5
+    restart: unless-stopped
+  greeter-agent:
+    image: hashicorp/consul:1.22.7
+    command: [agent, -config-file=/etc/bb/config/consul.json, '-encrypt=${CONSUL__GOSSIP_KEY}']
+    environment:
+      SSL_CERT_FILE: /etc/bb/trust-bundle.pem
+      CONSUL_HTTP_ADDR: https://127.0.0.1:8501
+      CONSUL_TLS_SERVER_NAME: greeter.bb.internal
+      CONSUL_CACERT: /etc/bb/ca.pem
+    healthcheck:
+      test: [CMD-SHELL, consul catalog services | grep -qx greeter]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+      start_interval: 2s
+    depends_on:
+      greeter:
+        condition: service_started
+      consul:
+        condition: service_healthy
+    volumes:
+      - ./tls/greeter/tls.crt:/etc/bb/tls/tls.crt:ro
+      - ./tls/greeter/tls.key:/etc/bb/tls/tls.key:ro
+      - ./tls/greeter/keystore.pem:/etc/bb/tls/keystore.pem:ro
+      - ./ca.pem:/etc/bb/ca.pem:ro
+      - ./trust-bundle.pem:/etc/bb/trust-bundle.pem:ro
+      - ./config/greeter-agent/consul.json:/etc/bb/config/consul.json:ro
+    network_mode: service:greeter
+    labels:
+      breadboard.experiment: lab
+      breadboard.experiment-id: 0123456789abcdef
+      breadboard.service: greeter-agent
+      breadboard.kind: sidecar
+      breadboard.config-hash: 362b1123ee50f50e
+    mem_limit: 128m
+    cpus: 0.25
+    restart: unless-stopped
+networks:
+  default:
+    labels:
+      breadboard.experiment: lab
+      breadboard.experiment-id: 0123456789abcdef
+volumes:
+  consul-data:
+    labels:
+      breadboard.experiment: lab
+      breadboard.experiment-id: 0123456789abcdef
+--- docker-compose.dev.yml (644)
+# Generated for a golden test.
+# Development overrides: live source and Go caches for app services.
+services:
+  greeter:
+    volumes:
+      - ../../greeter:/src
+      - type: volume
+        source: go-mod-cache
+        target: /go/pkg/mod
+        volume:
+          nocopy: true
+      - type: volume
+        source: go-build-cache
+        target: /root/.cache/go-build
+        volume:
+          nocopy: true
+volumes:
+  go-mod-cache:
+    labels:
+      breadboard.experiment: lab
+      breadboard.experiment-id: 0123456789abcdef
+  go-build-cache:
+    labels:
+      breadboard.experiment: lab
+      breadboard.experiment-id: 0123456789abcdef
+--- .env (600)
+# Generated by bb. Secrets for docker compose; never commit this file.
+CONSUL__GOSSIP_KEY=consulgossip-keySECRET

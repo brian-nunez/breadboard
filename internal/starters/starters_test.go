@@ -94,3 +94,17 @@ func TestLookup(t *testing.T) {
 		t.Fatal("Lookup found a missing starter")
 	}
 }
+
+// App names are unique across starters, so applying several starters to one
+// experiment never clashes with itself.
+func TestStarterAppNamesAreUnique(t *testing.T) {
+	owner := map[string]string{}
+	for _, s := range All() {
+		for _, a := range s.Apps {
+			if prev, ok := owner[a.Name]; ok {
+				t.Errorf("app %q is in both %s and %s", a.Name, prev, s.ID)
+			}
+			owner[a.Name] = s.ID
+		}
+	}
+}

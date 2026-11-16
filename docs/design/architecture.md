@@ -85,7 +85,7 @@ There is no database. Everything is a file, and each kind of data has one home:
 | Install settings (domain, defaults) | `<BB_HOME>/config.yaml`, overridable by `BB_*` env vars | User, through `bb config` or by editing |
 | Certificate authority | `<BB_HOME>/ca/` | Engine |
 | Per-experiment generated state: secrets, leaf certificates, state metadata | `<project>/.bb/` | Engine |
-| Runtime artifacts: compose files, mounted cert files, trust bundle | `<project>/.bb/runtime/` | Engine (regenerated on every `bb up`; disposable) |
+| Runtime artifacts: compose files, mounted cert files, trust bundle | `<project>/.bb/runtime/` | Engine (synced on every `bb up`: unchanged files are left in place because running containers bind-mount them; disposable) |
 
 ## Install home (`BB_HOME`)
 

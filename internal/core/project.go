@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -246,6 +247,9 @@ func (e *Engine) reconcileCerts(p *project, m *model.Model, ca *pki.CA, ps *stat
 	now := e.now()
 	certs := map[string]compose.Cert{}
 	for _, svc := range m.Services {
+		if svc.Kind == model.Sidecar {
+			continue // a sidecar presents its app's certificate
+		}
 		req := pki.LeafRequest{DNSNames: []string{svc.FQDN}, Identity: svc.Identity}
 		certPEM, keyPEM, ok, err := p.ReadCert(svc.Name)
 		if err != nil {
@@ -404,20 +408,57 @@ func (e *Engine) render(p *project, pr *prepared, dir string, mode secrets.Mode,
 }
 
 // writeBundle replaces dir's contents with the bundle. Directories are 0700.
+// writeBundle makes dir hold exactly the bundle's files. Files whose content
+// and mode are unchanged are left alone: running containers bind-mount single
+// files from here, and replacing one (even atomically, with a new inode)
+// leaves a container that compose does not recreate with a missing file on
+// Docker Desktop. A changed file always changes its service's config hash, so
+// compose recreates that container with fresh mounts.
 func writeBundle(dir string, b *compose.Bundle) error {
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	keep := map[string]bool{}
 	for _, f := range b.Files {
 		path := filepath.Join(dir, filepath.FromSlash(f.Path))
+		keep[path] = true
+		if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, f.Data) {
+			if st, err := os.Stat(path); err == nil && st.Mode().Perm() == f.Mode.Perm() {
+				continue
+			}
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return err
 		}
 		if err := state.WriteFile(path, f.Data, f.Mode); err != nil {
 			return err
+		}
+	}
+	// Remove files no longer in the bundle, then directories left empty,
+	// deepest first.
+	var dirs []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case d.IsDir():
+			if path != dir {
+				dirs = append(dirs, path)
+			}
+			return nil
+		case !keep[path]:
+			return os.Remove(path)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for i := len(dirs) - 1; i >= 0; i-- {
+		if entries, err := os.ReadDir(dirs[i]); err == nil && len(entries) == 0 {
+			if err := os.Remove(dirs[i]); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

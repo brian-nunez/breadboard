@@ -12,6 +12,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/brian-nunez/breadboard/internal/spec"
 	templates "github.com/brian-nunez/breadboard/starters"
 )
 
@@ -43,6 +44,8 @@ type App struct {
 	Command []string
 	// Uses lists catalog types; each resolves to the experiment's service of that type.
 	Uses []string
+	// Register, when set, registers the app in the registry it uses through a sidecar.
+	Register *spec.Register
 }
 
 var all = []Starter{
@@ -57,6 +60,73 @@ var all = []Starter{
 		Apps: []App{
 			{Name: "producer", Command: []string{"go", "run", "./cmd/producer"}, Uses: []string{"kafka"}},
 			{Name: "consumer", Command: []string{"go", "run", "./cmd/consumer"}, Uses: []string{"kafka"}},
+		},
+	},
+	{
+		ID:       "kafka/sink-to-postgres",
+		Title:    "Kafka sink to Postgres",
+		Summary:  "Consume, transform, write; idempotent inserts; at-least-once delivery; migrations.",
+		Language: "go",
+		Template: "go/kafka/sink-to-postgres",
+		Dir:      "sink-to-postgres",
+		Requires: []string{"kafka", "postgres"},
+		Apps: []App{
+			{Name: "sink-producer", Command: []string{"go", "run", "./cmd/sink-producer"}, Uses: []string{"kafka"}},
+			{Name: "sink", Command: []string{"go", "run", "./cmd/sink"}, Uses: []string{"kafka", "postgres"}},
+		},
+	},
+	{
+		ID:       "redis/cache-invalidation",
+		Title:    "Redis cache invalidation",
+		Summary:  "Cache-aside, invalidate-on-write via Kafka events, TTLs, stale reads.",
+		Language: "go",
+		Template: "go/redis/cache-invalidation",
+		Dir:      "cache-invalidation",
+		Requires: []string{"kafka", "postgres", "redis"},
+		Apps: []App{
+			{Name: "cache-writer", Command: []string{"go", "run", "./cmd/cache-writer"}, Uses: []string{"postgres", "kafka"}},
+			{Name: "cache-reader", Command: []string{"go", "run", "./cmd/cache-reader"}, Uses: []string{"postgres", "redis"}},
+			{Name: "cache-invalidator", Command: []string{"go", "run", "./cmd/cache-invalidator"}, Uses: []string{"kafka", "redis"}},
+		},
+	},
+	{
+		ID:       "s3/objects-basics",
+		Title:    "S3 objects basics",
+		Summary:  "Buckets, keys and prefixes, multipart upload, presigned URLs against S3 Compatible storage.",
+		Language: "go",
+		Template: "go/s3/objects-basics",
+		Dir:      "objects-basics",
+		Requires: []string{"s3-compatible"},
+		Apps: []App{
+			{Name: "objects", Command: []string{"go", "run", "./cmd/objects"}, Uses: []string{"s3-compatible"}},
+		},
+	},
+	{
+		ID:       "consul/service-discovery",
+		Title:    "Consul service discovery (recommended)",
+		Summary:  "Recommended: a Consul sidecar agent registers each service; a health-checked catalog; resolving services by name.",
+		Language: "go",
+		Template: "go/consul/service-discovery",
+		Dir:      "service-discovery",
+		Requires: []string{"consul"},
+		Apps: []App{
+			{Name: "greeter", Command: []string{"go", "run", "./cmd/greeter"}, Uses: []string{"consul"}, Register: &spec.Register{Port: 8443}},
+			{Name: "caller", Command: []string{"go", "run", "./cmd/caller"}, Uses: []string{"consul"}},
+		},
+	},
+	{
+		ID:       "consul/self-registration",
+		Title:    "Consul self-registration (alternative)",
+		Summary:  "Alternative to consul/service-discovery: each service registers and deregisters itself through the Consul API.",
+		Language: "go",
+		Template: "go/consul/self-registration",
+		Dir:      "self-registration",
+		Requires: []string{"consul"},
+		Apps: []App{
+			// Built and exec'd rather than go run: go run does not pass SIGTERM on,
+			// and deregistering on SIGTERM is the point of this app.
+			{Name: "self-greeter", Command: []string{"sh", "-c", "go build -o /tmp/self-greeter ./cmd/self-greeter && exec /tmp/self-greeter"}, Uses: []string{"consul"}},
+			{Name: "self-caller", Command: []string{"go", "run", "./cmd/self-caller"}, Uses: []string{"consul"}},
 		},
 	},
 }

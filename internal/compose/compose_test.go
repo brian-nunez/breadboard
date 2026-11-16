@@ -7,6 +7,8 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,6 +28,7 @@ func allServices() []spec.Service {
 		{Name: "postgres", Type: "postgres", Config: map[string]string{"database": "orders"}},
 		{Name: "redis", Type: "redis", Resources: spec.Resources{Memory: "128m"}},
 		{Name: "consul", Type: "consul"},
+		{Name: "s3", Type: "s3-compatible", Config: map[string]string{"buckets": "uploads,reports"}},
 	}
 }
 
@@ -140,7 +143,7 @@ func checkCompose(t *testing.T, b *Bundle) {
 
 func TestEveryEntryInline(t *testing.T) {
 	s := &spec.Spec{Version: 1, Name: "lab", Services: allServices(), Apps: []spec.App{
-		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul"), Ports: []int{8080}, Health: &spec.Health{Path: "/ready"}},
+		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul", "s3"), Ports: []int{8080}, Health: &spec.Health{Path: "/ready"}},
 	}}
 	b := render(t, s, secrets.Inline)
 	checkCompose(t, b)
@@ -152,12 +155,14 @@ func TestEveryEntryInline(t *testing.T) {
 
 func TestEveryEntryDotenv(t *testing.T) {
 	s := &spec.Spec{Version: 1, Name: "lab", Services: allServices(), Apps: []spec.App{
-		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul")},
+		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul", "s3")},
 	}}
 	b := render(t, s, secrets.Dotenv)
 	checkCompose(t, b)
 	f, _ := b.File(ComposeFile)
-	if bytes.Contains(f.Data, []byte("SECRET")) {
+	// Test secret values end in SECRET right after a lowercase letter
+	// (postgrespasswordSECRET); variable names such as AWS_SECRET_ACCESS_KEY do not.
+	if regexp.MustCompile(`[a-z0-9]SECRET`).Match(f.Data) {
 		t.Error("dotenv mode left a secret value in docker-compose.yml")
 	}
 	env, ok := b.File(EnvFile)
@@ -319,4 +324,59 @@ func TestSharedGoCachesAreNotCopiedFromTheImage(t *testing.T) {
 			t.Errorf("%s has %d Go cache mounts, want 2", app, caches)
 		}
 	}
+}
+
+// A registering app gets a sidecar agent that shares its network namespace
+// and certificate, waits for the registry, and registers the app.
+func TestRegisterRendersASidecar(t *testing.T) {
+	s := &spec.Spec{Version: 1, Name: "lab",
+		Services: []spec.Service{{Name: "consul", Type: "consul"}},
+		Apps:     []spec.App{{Name: "greeter", Path: "./greeter", Command: []string{"go", "run", "."}, Uses: uses("consul"), Register: &spec.Register{Port: 8443}}},
+	}
+	b := render(t, s, secrets.Dotenv)
+	checkCompose(t, b)
+	f, _ := b.File(ComposeFile)
+	var doc struct {
+		Services map[string]struct {
+			NetworkMode string         `yaml:"network_mode"`
+			Networks    map[string]any `yaml:"networks"`
+			Volumes     []string       `yaml:"volumes"`
+			DependsOn   map[string]struct {
+				Condition string `yaml:"condition"`
+			} `yaml:"depends_on"`
+			Labels map[string]string `yaml:"labels"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(f.Data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	sc, ok := doc.Services["greeter-agent"]
+	if !ok {
+		t.Fatal("no greeter-agent service")
+	}
+	if sc.NetworkMode != "service:greeter" || sc.Networks != nil {
+		t.Errorf("sidecar networking = %q %v", sc.NetworkMode, sc.Networks)
+	}
+	if sc.DependsOn["greeter"].Condition != "service_started" || sc.DependsOn["consul"].Condition != "service_healthy" {
+		t.Errorf("depends_on = %+v", sc.DependsOn)
+	}
+	if !slices.Contains(sc.Volumes, "./tls/greeter/tls.crt:/etc/bb/tls/tls.crt:ro") {
+		t.Errorf("sidecar does not mount the app's certificate: %v", sc.Volumes)
+	}
+	if sc.Labels["breadboard.kind"] != "sidecar" {
+		t.Errorf("labels = %v", sc.Labels)
+	}
+	if _, ok := b.File("tls/greeter-agent/tls.crt"); ok {
+		t.Error("the sidecar got a certificate of its own")
+	}
+	cfg, ok := b.File("config/greeter-agent/consul.json")
+	if !ok {
+		t.Fatal("no sidecar config")
+	}
+	for _, want := range []string{`"retry_join": [`, `"consul.bb.internal"`, `"name": "greeter"`, `"port": 8443`, `"tcp_use_tls": true`, `"client_addr": "127.0.0.1"`, `"leave_on_terminate": true`} {
+		if !strings.Contains(string(cfg.Data), want) {
+			t.Errorf("sidecar config lacks %s:\n%s", want, cfg.Data)
+		}
+	}
+	golden(t, "consul-sidecar", b)
 }

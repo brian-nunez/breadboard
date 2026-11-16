@@ -1,0 +1,29 @@
+# consul/service-discovery
+
+Find services by name instead of by address, with [Consul](https://developer.hashicorp.com/consul) and its official Go API client.
+
+**This is the recommended way to register services.** A Consul agent runs next to each service and registers it, the way real deployments do. The alternative starter, `consul/self-registration`, has the service register itself instead.
+
+- `cmd/greeter`: an HTTPS service on port 8443. It contains no Consul code at all.
+- `cmd/caller`: every 2 seconds, asks Consul for healthy `greeter` instances and calls one of them.
+
+`register: {port: 8443}` on `greeter` in `experiment.yaml` makes Breadboard add a sidecar, `greeter-agent`. It is a Consul client agent sharing the greeter's network address and certificate. It joins the Consul server, registers `greeter` with a health check (a TCP connection with a verified TLS handshake), and removes it again when it stops.
+
+Breadboard sets `CONSUL_HTTP_ADDR`, `CONSUL_CACERT`, `TLS_CERT_FILE`, `TLS_KEY_FILE` and `SSL_CERT_FILE`. The code reads nothing else.
+
+```sh
+bb up
+bb logs caller -f
+```
+
+## Try this
+
+- **Scale out.** Copy the `greeter` app in `experiment.yaml` to `greeter-2` and give it `register: {name: greeter, port: 8443}`. After `bb up`, the caller reports 2 healthy instances and spreads its calls.
+- **Check real readiness.** Add a `/healthz` handler to the greeter and set `register.check: /healthz`. Consul now runs an HTTPS check against it instead of a TCP connection.
+- **Look at the catalog.** Open a shell in the agent with `docker exec -it bb-{{.Experiment}}-greeter-agent-1 sh` and run `consul catalog services` or `consul members`.
+
+## Break this
+
+- **Stop the service.** `docker stop bb-{{.Experiment}}-greeter-1`. Within seconds its check fails, Consul stops returning it, and the caller logs `no healthy greeter instances`.
+- **Stop only the agent.** `docker stop bb-{{.Experiment}}-greeter-agent-1`. The greeter still runs, but the agent leaves the cluster and deregisters it, so nobody can find it.
+- **Lose the server.** `docker stop bb-{{.Experiment}}-consul-1`. Lookups fail even though the greeter is fine: discovery is now a dependency of every call.

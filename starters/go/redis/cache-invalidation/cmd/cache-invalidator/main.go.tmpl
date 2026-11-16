@@ -1,0 +1,48 @@
+// Command cache-invalidator removes a product's cached price whenever the
+// product changes.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"log"
+	"os"
+	"strings"
+
+	"github.com/redis/go-redis/v9"
+	"github.com/twmb/franz-go/pkg/kgo"
+)
+
+func main() {
+	ctx := context.Background()
+	opts, err := redis.ParseURL(os.Getenv("REDIS_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	cache := redis.NewClient(opts)
+
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(strings.Split(os.Getenv("KAFKA_BROKERS"), ",")...),
+		kgo.DialTLSConfig(new(tls.Config)),
+		kgo.ConsumerGroup("cache-invalidator"),
+		kgo.ConsumeTopics("product-updates"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer client.Close()
+
+	for {
+		fetches := client.PollFetches(ctx)
+		fetches.EachError(func(topic string, partition int32, err error) { log.Print(err) })
+		fetches.EachRecord(func(r *kgo.Record) {
+			// Delete rather than overwrite: the next read loads the fresh price
+			// from the database, so the cache never holds a value we made up.
+			if err := cache.Del(ctx, "product:"+string(r.Value)).Err(); err != nil {
+				log.Print(err)
+				return
+			}
+			log.Printf("invalidated id=%s", r.Value)
+		})
+	}
+}

@@ -1,6 +1,6 @@
 # Breadboard (`bb`)
 
-Local lab for real system design practice: real services in Docker Compose, TLS by default, starters using official client libraries, exporters to other platforms. Open source, for developers learning system design. Stage: Phase 1 (core engine and CLI) implemented; later phases not started.
+Local lab for real system design practice: real services in Docker Compose, TLS by default, starters using official client libraries, exporters to other platforms. Open source, for developers learning system design. Stage: Phases 1 (core engine and CLI) and 2 (starters, S3 Compatible) implemented; later phases not started.
 
 ## Design is the source of truth
 

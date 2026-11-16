@@ -75,3 +75,37 @@ func TestResolveRejectsWhatValidationMissed(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterAddsASidecar(t *testing.T) {
+	s := &spec.Spec{Version: 1, Name: "lab",
+		Services: []spec.Service{{Name: "registry", Type: "consul"}},
+		Apps: []spec.App{
+			{Name: "greeter", Path: "./g", Uses: []spec.Use{{Service: "registry"}}, Register: &spec.Register{Port: 8443}},
+			{Name: "named", Path: "./n", Uses: []spec.Use{{Service: "registry"}}, Register: &spec.Register{Name: "hello", Port: 9000, Check: "/healthz"}},
+		},
+	}
+	m, err := Resolve(s, "bb.internal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, ok := m.Service("greeter-agent")
+	if !ok {
+		t.Fatalf("no sidecar in %v", m.Services)
+	}
+	if sc.Kind != Sidecar || sc.Parent != "greeter" || sc.Registry != "registry" || sc.FQDN != "greeter.bb.internal" || sc.Entry.ID != "consul" {
+		t.Errorf("sidecar = %+v", sc)
+	}
+	if *sc.Register != (spec.Register{Name: "greeter", Port: 8443}) {
+		t.Errorf("register defaults = %+v", sc.Register)
+	}
+	if n, _ := m.Service("named-agent"); *n.Register != (spec.Register{Name: "hello", Port: 9000, Check: "/healthz"}) {
+		t.Errorf("explicit register = %+v", n.Register)
+	}
+	if len(m.EdgesFrom("greeter-agent")) != 0 {
+		t.Error("a sidecar must not have edges of its own")
+	}
+	s.Apps[0].Uses = nil
+	if _, err := Resolve(s, "bb.internal"); err == nil {
+		t.Error("register without a registry in uses resolved")
+	}
+}

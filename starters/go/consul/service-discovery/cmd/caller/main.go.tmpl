@@ -1,0 +1,49 @@
+// Command caller finds healthy greeter instances through Consul and calls one.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"math/rand/v2"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/hashicorp/consul/api"
+)
+
+func main() {
+	// DefaultConfig reads CONSUL_HTTP_ADDR and CONSUL_CACERT.
+	consul, err := api.NewClient(api.DefaultConfig())
+	if err != nil {
+		log.Fatal(err)
+	}
+	for {
+		call(consul)
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func call(consul *api.Client) {
+	// Ask by name, and only for instances whose health checks pass: an
+	// instance that stops answering drops out of this list on its own.
+	entries, _, err := consul.Health().Service("greeter", "", true, nil)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	if len(entries) == 0 {
+		log.Print("no healthy greeter instances")
+		return
+	}
+	svc := entries[rand.IntN(len(entries))].Service
+	resp, err := http.Get(fmt.Sprintf("https://%s:%d/", svc.Address, svc.Port))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("called greeter at %s:%d (%d healthy): %s", svc.Address, svc.Port, len(entries), strings.TrimSpace(string(body)))
+}

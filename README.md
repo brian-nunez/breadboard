@@ -17,7 +17,7 @@
   <img alt="Written in Go" src="https://img.shields.io/badge/written%20in-Go-4F46E5?style=flat-square&logo=go&logoColor=white">
   <img alt="Runs on macOS and Linux" src="https://img.shields.io/badge/runs%20on-macOS%20%C2%B7%20Linux-6366F1?style=flat-square">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-4F46E5?style=flat-square">
-  <img alt="Status: phase 1" src="https://img.shields.io/badge/status-phase%201-6366F1?style=flat-square">
+  <img alt="Status: phase 2" src="https://img.shields.io/badge/status-phase%202-6366F1?style=flat-square">
   <br>
   <a href="https://www.linkedin.com/in/brianjnunez/"><img alt="LinkedIn: Brian Nunez" src="https://img.shields.io/badge/LinkedIn-Brian%20Nunez-0A66C2?style=flat-square&logo=linkedin&logoColor=white"></a>
   <img alt="Discord: .derthon" src="https://img.shields.io/badge/Discord-.derthon-5865F2?style=flat-square&logo=discord&logoColor=white">
@@ -38,7 +38,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Breadboard is early.** Phase 1 (the core engine and CLI, four services, the first starter, Compose export) works; the web UI, MCP server, and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
+> **Breadboard is early.** Phases 1 and 2 work: the core engine and CLI, five services including S3 Compatible, six starters, and Compose export. The web UI, MCP server, and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
 
 <p align="center">
   <a href="#why-breadboard">Why Breadboard</a> ·
@@ -95,9 +95,10 @@ Each catalog entry pins an exact image version, configures TLS, sets resource li
 | Starter | Teaches | Phase |
 | ------- | ------- | ----- |
 | **kafka/producer-consumer** | Topics, partitions, keys, consumer groups, offsets, rebalancing. | 1 |
-| **kafka/sink-to-postgres** | Consume, transform and write; idempotent upserts; at-least-once delivery. | 2 |
+| **kafka/sink-to-postgres** | Consume, transform and write; idempotent inserts; at-least-once delivery. | 2 |
 | **redis/cache-invalidation** | Cache-aside reads with invalidate-on-write driven by Kafka events. | 2 |
-| **consul/service-discovery** | Registration through a Consul sidecar and resolving services by name. | 2 |
+| **consul/service-discovery** (recommended) | Registration through a Consul sidecar and resolving services by name. | 2 |
+| **consul/self-registration** (alternative) | The same lookup, with each service registering and deregistering itself. | 2 |
 | **s3/objects-basics** | Buckets, prefixes, multipart uploads and presigned URLs. | 2 |
 
 Starters are Go 1.27.4 projects with a multi-stage Dockerfile and a README with exercises to try and things to break. See [starters](docs/design/starters.md).

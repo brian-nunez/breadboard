@@ -1,0 +1,26 @@
+# redis/cache-invalidation
+
+Reads through a Redis cache and removes stale entries when the data changes, using [go-redis](https://github.com/redis/go-redis), [pgx](https://github.com/jackc/pgx) and [franz-go](https://github.com/twmb/franz-go).
+
+- `cmd/cache-writer`: creates and seeds a `products` table, then every 3 seconds changes one price and announces it on the `product-updates` topic, after the write.
+- `cmd/cache-reader`: reads a random product twice a second. Cache-aside: Redis first, Postgres on a miss, then caches the price for 30 seconds.
+- `cmd/cache-invalidator`: reads `product-updates` and deletes the changed product's cache entry.
+
+Breadboard sets `DATABASE_URL`, `REDIS_URL`, `KAFKA_BROKERS` and `SSL_CERT_FILE` in each container. The code reads nothing else.
+
+```sh
+bb up
+bb logs cache-reader -f
+```
+
+## Try this
+
+- **Follow one change.** Watch `bb logs -f` for an `updated id=bread`: the invalidator logs `invalidated id=bread`, and the reader's next `bread` read is a `miss` with the new price.
+- **Measure the hit rate.** Count `hit` and `miss` lines in `bb logs cache-reader`. Slow the writer down and the hit rate climbs.
+- **Look inside the cache.** `bb creds redis` prints the connection string; `redis-cli` with it and run `TTL product:apple`.
+
+## Break this
+
+- **Stop invalidating.** `docker stop bb-{{.Experiment}}-cache-invalidator-1`. The reader now serves old prices for up to 30 seconds after each change: the TTL is the only safety net.
+- **Announce before writing.** Move the `ProduceSync` call above the `UPDATE` in `cmd/cache-writer`. Now a reader can miss, read the old price, and cache it right after the invalidation ran. Stale reads return.
+- **Lose the cache.** `docker restart bb-{{.Experiment}}-redis-1`. Every read misses until the cache refills, and Postgres takes the full load.

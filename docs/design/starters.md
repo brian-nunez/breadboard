@@ -17,6 +17,7 @@ A starter takes the user from intent to running code: it writes a small, working
 - **Comments teach the why.** Explain concepts (consumer groups, offsets, at-least-once delivery, why invalidation follows the write), not the syntax.
 - **Every starter README has two sections:** *Try this* (guided experiments) and *Break this* (failure drills: kill the broker, slow the consumer, exhaust memory).
 - **Idempotent apply.** Re-applying a starter never overwrites user-modified files; it reports conflicts instead.
+- **Unique app names.** App names are unique across every starter (a test enforces it), so several starters can share one experiment. Re-applying a starter to the same directory leaves its existing apps alone; if a name it needs belongs to anything else in `experiment.yaml`, `bb starter` fails before writing any file.
 
 ## Language and libraries
 
@@ -39,6 +40,16 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 
 `kafka/producer-consumer` pins `github.com/twmb/franz-go v1.22.3` and its admin client module `github.com/twmb/franz-go/pkg/kadm v1.20.0`.
 
+`kafka/sink-to-postgres` pins the same franz-go modules and `github.com/jackc/pgx/v5 v5.13.0`. Its apps are `sink-producer` (JSON order events on `order-events`) and `sink` (creates the `orders` table, inserts with `ON CONFLICT DO NOTHING`, and commits offsets only after the write).
+
+`redis/cache-invalidation` pins `github.com/redis/go-redis/v9 v9.23.0` with the same pgx and franz-go modules. Its apps are `cache-writer` (updates Postgres, then announces on `product-updates`), `cache-reader` (cache-aside with a 30-second TTL) and `cache-invalidator` (deletes the changed key).
+
+`s3/objects-basics` pins `github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10` and `github.com/aws/aws-sdk-go-v2/config v1.33.18`. Its one app, `objects`, runs the walkthrough once (bucket, prefix listing, multipart upload, presigned GET) and then waits so its logs stay readable. Path-style addressing is the only S3 setting in code.
+
+`consul/service-discovery` pins `github.com/hashicorp/consul/api v1.35.0`. Its `greeter` serves HTTPS on 8443 with no Consul code; `register: {port: 8443}` in its spec entry makes Breadboard add the `greeter-agent` sidecar (see `catalog.md`). `caller` resolves healthy `greeter` instances through the Consul API and calls one. A starter app declares `register` through `starters.App.Register`, which `bb starter` writes into `experiment.yaml`.
+
+`consul/self-registration` is the labeled alternative, with the same Consul API pin. `self-greeter` registers itself (address from `BB_FQDN`, a TLS check, `DeregisterCriticalServiceAfter` as a crash safety net) and deregisters on SIGTERM; its `command` builds and `exec`s the binary because `go run` does not pass SIGTERM on. Its README points to the recommended starter first.
+
 ## Starter list
 
 | Id | Phase | Teaches |
@@ -46,5 +57,6 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 | `kafka/producer-consumer` | 1 | Topics, partitions, keys, consumer groups, offsets, rebalancing. |
 | `kafka/sink-to-postgres` | 2 | Consume → transform → write; idempotent inserts; at-least-once semantics; migrations. |
 | `redis/cache-invalidation` | 2 | Cache-aside, invalidate-on-write via Kafka events, TTLs, stale reads. |
-| `consul/service-discovery` | 2 | Registration via a Consul sidecar, health-checked catalog, resolving services by name. |
+| `consul/service-discovery` (recommended) | 2 | Registration via a Consul sidecar, health-checked catalog, resolving services by name. |
+| `consul/self-registration` (alternative) | 2 | The same lookup, with each service registering and deregistering itself through the Consul API: the plumbing the sidecar removes. |
 | `s3/objects-basics` | 2 | Buckets, keys and prefixes, multipart upload, presigned URLs against S3 Compatible storage. |

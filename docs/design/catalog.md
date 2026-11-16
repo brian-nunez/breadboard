@@ -32,6 +32,7 @@ Hostnames below use the default domain and a service named after its type. Image
 | `postgres` | `postgres:18.7-alpine3.24` | 512m, 0.5 cpu | same port 5432; `hostnossl` limited to the segment subnet |
 | `redis` | `redis:8.10.3-alpine3.23` | 256m, 0.25 cpu | none in v1 |
 | `consul` | `hashicorp/consul:1.22.7` | 256m, 0.5 cpu | 8500, bound to the segment address |
+| `s3-compatible` (Phase 2) | `chrislusf/seaweedfs:4.53` | 512m, 0.5 cpu | none |
 
 Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/etc/bb/tls/tls.key`, both together at `/etc/bb/tls/keystore.pem`, the CA at `/etc/bb/ca.pem`, the trust bundle at `/etc/bb/trust-bundle.pem`, and entry configuration under `/etc/bb/config/`.
 
@@ -71,25 +72,29 @@ Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/et
 
 - Official `hashicorp/consul` image, single server in dev-like topology with persistence, HTTPS on 8501, plain HTTP disabled.
 - Other listeners: server RPC (8300) requires TLS with a client certificate from the CA; LAN gossip (8301) stays on for Phase 2 client agents and is encrypted with a generated gossip key (`-encrypt` on the command line, never in the config file); DNS, gRPC, and WAN gossip are off.
+- `enable_agent_tls_for_checks` is on, so TLS health checks of services registered directly with the server verify against the lab CA.
 - Health check: `consul operator raft list-peers` over HTTPS with CA verification; it succeeds only once a leader exists.
 - Env contract:
   - `CONSUL_HTTP_ADDR=https://consul.bb.internal:8501`
   - `CONSUL_CACERT=/etc/bb/trust-bundle.pem`
   - On a plaintext edge: `CONSUL_HTTP_ADDR=http://consul.plain.bb.internal:8500` only.
-- Service registration for apps follows the sidecar pattern in Phase 2 ([`starters.md`](starters.md)).
+- **Registration sidecar.** An app with `register` in `experiment.yaml` gets a service `<app>-agent`: a Consul client agent in the app's network namespace (`network_mode: service:<app>`), so it has the app's address and presents the app's certificate. It joins the server over encrypted gossip and mutually authenticated RPC, registers the app with a check (a TCP connection with a verified TLS handshake by default, or HTTPS on `register.check`), and leaves the cluster when it stops, which deregisters the app. Its HTTPS API listens on `127.0.0.1` only; it is healthy once the registration reaches the server's catalog. This is the recommended way to register; apps can also call the Consul API themselves (`consul/self-registration`).
 - ACLs are out of scope for v1.
 
 ## Later entries
 
 ### `s3-compatible` (Phase 2)
 
-- Displayed as **S3 Compatible**: an object store speaking the S3 API, deliberately not branded as AWS S3. Implemented with the official SeaweedFS image (`weed server -s3`), single container. It replaces MinIO, whose community edition is archived and no longer publishes images.
-- S3 API over HTTPS with the Breadboard certificate; credentials from generated secrets; buckets declared in `config` are created at startup.
-- Health check: an authenticated S3 request over TLS against the FQDN.
+- Displayed as **S3 Compatible**: an object store speaking the S3 API, deliberately not branded as AWS S3. Implemented with the official SeaweedFS image `chrislusf/seaweedfs:4.53` (`weed server -s3`), single container. It replaces MinIO, whose community edition is archived and no longer publishes images.
+- **One network listener.** The S3 gateway serves HTTPS only on 8333 with the Breadboard certificate (a plain HTTP request is refused). Master, volume and filer bind to `127.0.0.1`; the Iceberg and Lance endpoints are off.
+- **gRPC is mutual TLS.** The S3 gateway's gRPC port (18333) shares its bind address and cannot be disabled, so a generated `/etc/seaweedfs/security.toml` requires a client certificate from the lab CA on every gRPC port and, through `allowed_commonNames`, accepts only the service's own certificate. Other lab certificates are rejected.
+- **Credentials.** A generated access key pair is passed as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, which SeaweedFS uses as its admin identity when no IAM config exists.
+- **Buckets.** `config.buckets` (comma-separated) lists buckets created at startup, once the gateway answers.
+- **No plaintext listener.** The gRPC port would follow any plaintext bind address, so `tls.mode: off` is refused, as for Redis.
+- Health check: an authenticated `ListBuckets` (`curl --aws-sigv4`) over TLS against the FQDN.
 - Env contract (generic names first, plus the variables official AWS SDKs read, so S3 clients work with zero code config):
-  - `S3_ENDPOINT=https://s3.bb.internal:8333`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE=true`
+  - `S3_ENDPOINT=https://s3-compatible.bb.internal:8333`, `S3_REGION=us-east-1`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE=true`
   - `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
-- Verify the image's exact tag and TLS configuration when the entry is built.
 
 ### Proxies and relays (Phase 5)
 

@@ -128,6 +128,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /live/architecture", s.architectureLive)
 	mux.HandleFunc("GET /services/{name}", s.service)
 	mux.HandleFunc("GET /live/logs/{name}", s.logs)
+	mux.HandleFunc("GET /fragments/explore/{name}", s.exploreFragment)
 	return s.guard(mux)
 }
 
@@ -194,13 +195,24 @@ func (s *Server) servicePage(ctx context.Context, name, tab string) servicePage 
 	if !slices.ContainsFunc(p.tabs(), func(t [2]string) bool { return t[0] == p.Tab }) {
 		p.Tab = "overview"
 	}
-	if p.Tab == "explore" {
-		p.Explore, err = s.explore(ctx, d.Type, name)
-		if err != nil {
-			p.ExploreErr = err.Error()
-		}
-	}
 	return p
+}
+
+// exploreFragment runs a service's explorer and returns just its content.
+// The explorer tab fetches it once after the page renders, because some
+// tools (Kafka's JVM-based CLIs) take seconds.
+func (s *Server) exploreFragment(w http.ResponseWriter, r *http.Request) {
+	p := s.servicePage(r.Context(), r.PathValue("name"), "explore")
+	if p.Tab != "explore" {
+		http.NotFound(w, r)
+		return
+	}
+	var err error
+	p.Explore, err = s.explore(r.Context(), p.Details.Type, p.Row.Name)
+	if err != nil {
+		p.ExploreErr = err.Error()
+	}
+	render(w, r, exploreResult(p))
 }
 
 // explore runs the explorer for a catalog type.
@@ -213,6 +225,10 @@ func (s *Server) explore(ctx context.Context, typ, name string) (any, error) {
 		return s.eng.RedisKeys(ctx, req)
 	case "consul":
 		return s.eng.ConsulCatalog(ctx, req)
+	case "kafka":
+		return s.eng.KafkaTopics(ctx, req)
+	case "s3-compatible":
+		return s.eng.S3Buckets(ctx, req)
 	}
 	return nil, fmt.Errorf("no explorer for %s", typ)
 }

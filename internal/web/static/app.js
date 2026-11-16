@@ -39,3 +39,11 @@ for (const pre of document.querySelectorAll("[data-logs]")) {
     if (atEnd) pre.scrollTop = pre.scrollHeight;
   });
 }
+
+// Elements with data-load="/path" are replaced once by that fragment.
+for (const el of document.querySelectorAll("[data-load]")) {
+  fetch(el.dataset.load, { credentials: "same-origin" })
+    .then((r) => r.text())
+    .then((html) => (el.innerHTML = html))
+    .catch(() => (el.textContent = "Could not load. Reload the page to try again."));
+}

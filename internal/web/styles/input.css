@@ -1,0 +1,10 @@
+/* Tailwind source for internal/web/static/app.css. Rebuild with
+   scripts/web.sh generate; the output is committed and embedded. */
+@import "tailwindcss" source(none);
+@source "../*.templ";
+@source "../static/app.js";
+
+@theme {
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: Menlo, ui-monospace, SFMono-Regular, monospace;
+}

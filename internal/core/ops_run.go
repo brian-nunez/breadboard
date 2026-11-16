@@ -257,6 +257,11 @@ type ServiceStatus struct {
 	OOMKilled   bool
 	StartedAt   time.Time
 	Uses        []Edge
+	// Apps only: the source directory and command from experiment.yaml.
+	Path    string
+	Command []string
+	// Sidecars only: the app they register.
+	Parent string
 }
 
 // Edge is a connection from an app to a service.
@@ -335,8 +340,13 @@ func (e *Engine) status(ctx context.Context, m *model.Model) ([]ServiceStatus, [
 			CPULimit:    svc.Resources.CPUs,
 			MemoryLimit: svc.Resources.Memory,
 		}
-		if svc.Kind == model.Infra {
+		switch svc.Kind {
+		case model.Infra:
 			s.Type, s.Image = svc.Entry.ID, svc.Entry.Image
+		case model.App:
+			s.Path, s.Command = svc.App.Path, svc.App.Command
+		case model.Sidecar:
+			s.Image, s.Parent = svc.Entry.Image, svc.Parent
 		}
 		if ok {
 			s.State, s.OOMKilled, s.StartedAt = c.State, c.OOMKilled, c.StartedAt

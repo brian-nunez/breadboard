@@ -32,3 +32,6 @@ go.work.sum
 # Python (design generator scripts)
 __pycache__/
 *.py[cod]
+
+# Downloaded build tools (scripts/web.sh)
+/.tools/

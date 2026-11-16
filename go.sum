@@ -1,8 +1,16 @@
+github.com/a-h/templ v0.3.1100 h1:lQhjVs1IL+M6QWUvojaFBd21+kzwATppSyWkWB9oHoM=
+github.com/a-h/templ v0.3.1100/go.mod h1:j1WAOR7749mlo1AxFLQ7qbDFW5VwyoqszRTlKqEHN9M=
 github.com/brian-nunez/bkit/gate v1.0.0 h1:3pxGgdm+gt+omYgEhF3kFpaMO6sGRolUjhCwBfIMLgc=
 github.com/brian-nunez/bkit/gate v1.0.0/go.mod h1:vo6m/dJwMGIO0jScdbKN6+mKlTkwUKV2ufzEyIQfle0=
 github.com/brian-nunez/bkit/settings v1.0.1 h1:qSUXpYdi0NFar8Mnn1yCM2etpe4Adb3gl9pOX4+tiO8=
 github.com/brian-nunez/bkit/settings v1.0.1/go.mod h1:U7w7YbbXR15mGQQoIPoHxzfrQqzfKR5NvnIJrtbuGGs=
 github.com/brian-nunez/bkit/settings/drivers/yaml v1.0.0 h1:7/rGrKIgxLCAAjPjCl/QTG5VFAvSHUmlzlaJ7nm190M=
 github.com/brian-nunez/bkit/settings/drivers/yaml v1.0.0/go.mod h1:e8dt4ZjiS5zirnS1CO0lTez0/rlYj5y9/oqVYq9NOrg=
+github.com/brian-nunez/bkit/stash v1.1.0 h1:XnZsTu/u0fn/y9ZlMSbNu+pUHHks/H0EBc/LKzo1L5M=
+github.com/brian-nunez/bkit/stash v1.1.0/go.mod h1:FlMDI2MpKJcn0NySzLmeeg7cZbI/PIXzT1zbV2ZPNNU=
+github.com/brian-nunez/bkit/stash/drivers/memory v1.0.0 h1:CKtA7aGjtYFi1A76PI6dYIRL7/BOuVMJgtult8y7+wk=
+github.com/brian-nunez/bkit/stash/drivers/memory v1.0.0/go.mod h1:L0kMc97lG6vCy+OciEXdVFF+zFDgrknmepz4LbKkTSI=
+github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
+github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 go.yaml.in/yaml/v3 v3.0.6 h1:zcDfvjXEqTQmpjniUBLc91xYJMB2c4QOFxEF/LCEckM=
 go.yaml.in/yaml/v3 v3.0.6/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=

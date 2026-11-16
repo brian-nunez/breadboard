@@ -1,0 +1,149 @@
+package web
+
+// section is which top-bar item is current.
+type section string
+
+const (
+	sectionDashboard section = "dashboard"
+	sectionDocs      section = "docs"
+	sectionStarters  section = "starters"
+)
+
+// page is the document shell shared by every page.
+templ page(title string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title } · Breadboard</title>
+			<link rel="icon" href="/static/icon.svg"/>
+			<link rel="stylesheet" href="/static/app.css"/>
+			<script src="/static/app.js" defer></script>
+		</head>
+		<body class="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased">
+			{ children... }
+		</body>
+	</html>
+}
+
+templ logo() {
+	<a href="/" class="flex items-center gap-2.5 text-[17px] font-semibold text-slate-900">
+		<svg viewBox="0 0 24 24" class="size-6" aria-hidden="true">
+			<rect width="24" height="24" rx="6" class="fill-slate-900"></rect>
+			for _, x := range []string{"7", "12", "17"} {
+				for _, y := range []string{"7", "12", "17"} {
+					<circle cx={ x } cy={ y } r="1.6" class="fill-white"></circle>
+				}
+			}
+		</svg>
+		breadboard
+	</a>
+}
+
+templ topbar(current section) {
+	<header class="sticky top-0 z-10 flex h-14 items-center gap-8 border-b border-slate-200 bg-white px-6">
+		@logo()
+		<div class="hidden h-9 w-[360px] items-center justify-between rounded-lg border border-slate-200 px-3 text-sm text-slate-400 md:flex">
+			<span>Search docs, starters, services</span>
+			<kbd class="rounded border border-slate-200 px-1.5 text-[11px] text-slate-500">⌘K</kbd>
+		</div>
+		<nav class="ml-auto flex items-center gap-6 text-sm">
+			@topLink("/", "Dashboard", current == sectionDashboard)
+			@topLink("/docs", "Docs", current == sectionDocs)
+			@topLink("/starters", "Starters", current == sectionStarters)
+			<span class="text-slate-400">Read-only</span>
+		</nav>
+	</header>
+}
+
+templ topLink(href, label string, active bool) {
+	if active {
+		<a href={ templ.SafeURL(href) } class="font-medium text-slate-900">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL(href) } class="text-slate-500 hover:text-slate-900">{ label }</a>
+	}
+}
+
+// dashboardShell is the top bar plus the experiment sidebar.
+templ dashboardShell(title string, d dashboardData, active string) {
+	@page(title) {
+		@topbar(sectionDashboard)
+		<div class="flex">
+			@sidebar(d, active)
+			<main class="min-w-0 flex-1 px-6 py-8 md:px-10">
+				{ children... }
+			</main>
+		</div>
+	}
+}
+
+templ sidebar(d dashboardData, active string) {
+	<aside class="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-62 shrink-0 flex-col border-r border-slate-200 bg-white px-4 py-5 lg:flex">
+		if d.Experiment != "" {
+			<div class="rounded-xl border border-slate-200 p-3">
+				<div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Experiment</div>
+				<div class="mt-1 flex items-center gap-2 font-semibold">
+					@dot(experimentColor(d))
+					{ d.Experiment }
+				</div>
+				<div class="mt-1 truncate font-mono text-xs text-slate-500">{ d.Dir }</div>
+				<div class="mt-1 text-xs text-slate-500">
+					{ itoa(len(d.Services)) } services
+					if u := d.Uptime(); u != "" {
+						· { u }
+					}
+				</div>
+			</div>
+		}
+		<nav class="mt-5 flex flex-col gap-0.5 text-sm">
+			@sideLink("/", "Overview", active == "overview")
+			@sideLink("/architecture", "Architecture", active == "architecture")
+		</nav>
+		if len(d.Services) > 0 {
+			<div class="mt-6 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Services</div>
+			<nav class="mt-2 flex flex-col gap-0.5 text-sm">
+				for _, s := range d.Services {
+					<a href={ templ.SafeURL("/services/" + s.Name) } class={ "flex items-center justify-between rounded-lg px-2.5 py-1.5", templ.KV("bg-indigo-50 font-medium text-indigo-700", active == "service:"+s.Name), templ.KV("text-slate-700 hover:bg-slate-50", active != "service:"+s.Name) }>
+						{ s.Name }
+						@dot(s.Status().Color)
+					</a>
+				}
+			</nav>
+		}
+		<div class="mt-6 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Learn</div>
+		<nav class="mt-2 flex flex-col gap-0.5 text-sm">
+			@sideLink("/docs", "Docs", false)
+			@sideLink("/starters", "Starters", false)
+			@sideLink("/docs/catalog", "Catalog", false)
+		</nav>
+		<div class="mt-auto px-2.5 text-xs leading-5 text-slate-500">
+			<div class="truncate" title={ d.Version }>bb { d.Version }</div>
+			if d.Domain != "" {
+				<div>domain { d.Domain }</div>
+			}
+		</div>
+	</aside>
+}
+
+templ sideLink(href, label string, active bool) {
+	if active {
+		<a href={ templ.SafeURL(href) } class="rounded-lg bg-indigo-50 px-2.5 py-1.5 font-medium text-indigo-700">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL(href) } class="rounded-lg px-2.5 py-1.5 text-slate-700 hover:bg-slate-50">{ label }</a>
+	}
+}
+
+// needLink is shown to a browser without a session: the token in the URL
+// bb serve printed is the only way in.
+templ needLink() {
+	@page("Open the link from bb serve") {
+		<div class="mx-auto max-w-md px-6 py-24 text-center">
+			<div class="flex justify-center">
+				@logo()
+			</div>
+			<h1 class="mt-8 text-xl font-semibold">Open the link that bb serve printed</h1>
+			<p class="mt-3 text-sm leading-6 text-slate-600">This page only answers browsers that arrived through that link, so other websites cannot read your experiment.</p>
+		</div>
+	}
+}

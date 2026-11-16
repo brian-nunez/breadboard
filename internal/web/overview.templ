@@ -1,0 +1,136 @@
+package web
+
+import "fmt"
+
+templ overviewPage(d dashboardData) {
+	@dashboardShell(pageTitle(d, "Overview"), d, "overview") {
+		<div data-live="/live/overview">
+			@overviewBody(d)
+		</div>
+	}
+}
+
+func pageTitle(d dashboardData, name string) string {
+	if d.Experiment == "" {
+		return name
+	}
+	return name + " · " + d.Experiment
+}
+
+// overviewBody is the part of the overview that updates live.
+templ overviewBody(d dashboardData) {
+	switch {
+		case d.NoExperiment:
+			@noExperiment()
+		case d.Problem != "":
+			@problem(d.Problem)
+		default:
+			<div class="flex items-end justify-between">
+				<div>
+					<h1 class="text-[28px] font-semibold leading-tight">{ d.Experiment }</h1>
+					<p class="mt-1 max-w-3xl truncate font-mono text-sm text-slate-500" title={ d.Dir }>
+						{ d.Dir }
+						if u := d.Uptime(); u != "" {
+							<span class="font-sans">· { u }</span>
+						}
+					</p>
+				</div>
+				<span class="flex items-center gap-2 text-sm text-slate-500">
+					@dot("green")
+					Live
+				</span>
+			</div>
+			<div class="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+				@stat("Containers", itoa(len(d.Services)))
+				@stat("Healthy", fmt.Sprintf("%d of %d", d.Healthy(), len(d.Services)))
+				@tlsStat(d)
+				@memoryStat(d)
+			</div>
+			<div class="mt-6">
+				@card() {
+					<h2 class="px-5 pt-5 pb-4 text-base font-semibold">Containers</h2>
+					<div class="overflow-x-auto">
+						<table class="w-full text-left text-sm">
+							<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+								<tr>
+									<th class="px-5 py-2.5 font-normal">Service</th>
+									<th class="px-3 py-2.5 font-normal">Status</th>
+									<th class="px-3 py-2.5 font-normal">CPU</th>
+									<th class="px-3 py-2.5 font-normal">Memory</th>
+									<th class="px-3 py-2.5 font-normal">Address</th>
+									<th class="px-5 py-2.5 font-normal">Edges</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-slate-200">
+								for _, s := range d.Services {
+									@containerRow(s)
+								}
+							</tbody>
+						</table>
+					</div>
+				}
+			</div>
+	}
+}
+
+templ tlsStat(d dashboardData) {
+	{{ tls, total := d.Edges() }}
+	@stat("TLS edges", fmt.Sprintf("%d of %d", tls, total))
+}
+
+templ memoryStat(d dashboardData) {
+	{{ used, limit := d.Memory() }}
+	@stat("Memory", gib(used)+" / "+gib(limit))
+}
+
+templ containerRow(s row) {
+	{{ st := s.Status() }}
+	<tr>
+		<td class="px-5 py-3">
+			<a href={ templ.SafeURL("/services/" + s.Name) } class="flex items-center gap-3">
+				@badge(s)
+				<span>
+					<span class="block font-semibold text-slate-900">{ s.Name }</span>
+					<span class="block text-xs text-slate-500">{ s.Subtitle() }</span>
+				</span>
+			</a>
+		</td>
+		<td class="px-3 py-3">
+			@statusWord(st)
+		</td>
+		<td class="px-3 py-3">
+			@bar(s.CPUUsed, s.CPULimit, false)
+			<div class="mt-1.5 text-slate-600">{ fmt.Sprintf("%.2f / %.2f cores", s.CPUUsed, s.CPULimit) }</div>
+		</td>
+		<td class="px-3 py-3">
+			@bar(s.MemUsed, s.MemLimit, st.Color == "amber")
+			<div class={ "mt-1.5", templ.KV("font-medium text-amber-700", st.Color == "amber"), templ.KV("text-slate-600", st.Color != "amber") }>{ fmt.Sprintf("%.0f / %.0f MiB", s.MemUsed, s.MemLimit) }</div>
+		</td>
+		<td class="px-3 py-3 font-mono text-[13px] text-slate-700">{ s.Address }</td>
+		<td class="px-5 py-3">
+			if s.TLS {
+				<span class="text-slate-700">TLS</span>
+			} else {
+				<span class="text-red-700"><span class="mr-1 tracking-tighter">---</span>Plaintext</span>
+			}
+		</td>
+	</tr>
+}
+
+templ noExperiment() {
+	<div class="mx-auto max-w-xl py-16 text-center">
+		<h1 class="text-2xl font-semibold">No experiment here yet</h1>
+		<p class="mt-3 text-slate-600">Create one in this directory, add a service, and start it. This page updates on its own.</p>
+		<div class="mt-8 text-left">
+			@terminal("bb init kafka-lab", "bb add kafka", "bb starter kafka/producer-consumer", "bb up")
+		</div>
+	</div>
+}
+
+templ problem(msg string) {
+	<div class="mx-auto max-w-xl py-16">
+		<h1 class="text-xl font-semibold">Breadboard cannot read this experiment right now</h1>
+		<p class="mt-3 font-mono text-sm text-red-700">{ msg }</p>
+		<p class="mt-3 text-slate-600">If Docker is not running, start it. This page retries on its own.</p>
+	</div>
+}

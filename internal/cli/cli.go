@@ -57,6 +57,7 @@ func init() {
 		{"config", "[get <key> | set <key> <value>]", "Show or change install settings", (*cli).config},
 		{"migrate", "", "Upgrade experiment.yaml to the current spec version", (*cli).migrate},
 		{"export", "compose [--out dir] [--secrets inline|dotenv]", "Write a standalone compose stack", (*cli).export},
+		{"serve", "[--addr host:port] [--no-open]", "Open the read-only web UI for this experiment", (*cli).serve},
 		{"version", "", "Show the bb version", (*cli).version},
 		{"help", "[command]", "Show help", (*cli).help},
 	}

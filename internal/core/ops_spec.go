@@ -139,6 +139,8 @@ type CatalogEntry struct {
 	Memory    string
 	CPUs      string
 	Plaintext bool // whether an edge may turn TLS off
+	// Env names the variables an app that uses this type receives.
+	Env []string
 }
 
 // CatalogResult lists the catalog.
@@ -153,6 +155,9 @@ func (e *Engine) Catalog(ctx context.Context) (*CatalogResult, error) {
 		ce := CatalogEntry{Type: en.ID, Title: en.Title, Summary: en.Summary, Image: en.Image, Memory: en.Resources.Memory, CPUs: en.Resources.CPUs, Plaintext: en.SupportsPlaintext()}
 		for _, l := range en.Listeners {
 			ce.Ports = append(ce.Ports, l.Port)
+		}
+		for _, v := range en.Client(catalog.Client{Service: en.ID, FQDN: en.ID, Config: en.ResolveConfig(nil), Secret: func(string) string { return "" }}) {
+			ce.Env = append(ce.Env, v.Name)
 		}
 		res.Entries = append(res.Entries, ce)
 	}

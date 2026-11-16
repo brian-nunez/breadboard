@@ -1,0 +1,392 @@
+package web
+
+import (
+	"fmt"
+	"strings"
+)
+
+// --- Layouts -----------------------------------------------------------------
+
+templ docsShell(title string) {
+	@page(title) {
+		@topbar(sectionDocs)
+		{ children... }
+	}
+}
+
+templ docsHomePage(d docsData) {
+	@docsShell("Docs") {
+		<main class="mx-auto max-w-6xl px-6 py-12">
+			<h1 class="text-[32px] font-semibold">Docs</h1>
+			<p class="mt-1 text-slate-500">Concepts, configuration and code for every system in the catalog.</p>
+			<div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				for _, t := range techs {
+					<a href={ templ.SafeURL("/docs/" + t.ID) } class="rounded-xl border border-slate-200 bg-white p-6 hover:border-slate-300">
+						<span class="flex size-10 items-center justify-center rounded-lg bg-slate-100 font-semibold text-slate-700">{ strings.ToUpper(t.Name[:1]) }</span>
+						<div class="mt-5 text-lg font-semibold">{ t.Name }</div>
+						<div class="mt-1 text-sm text-slate-500">{ t.Tagline }</div>
+						<div class="mt-4 text-[13px] text-slate-700">{ counts(t) }</div>
+					</a>
+				}
+			</div>
+		</main>
+	}
+}
+
+func counts(t tech) string {
+	s := fmt.Sprintf("%d guides", len(t.Guides))
+	if len(t.Guides) == 1 {
+		s = "1 guide"
+	}
+	switch len(t.Starters) {
+	case 0:
+	case 1:
+		s += " · 1 starter"
+	default:
+		s += fmt.Sprintf(" · %d starters", len(t.Starters))
+	}
+	return s
+}
+
+// docsLayout is the left navigation plus the page.
+templ docsLayout(current tech, currentGuide string) {
+	<div class="flex">
+		<aside class="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-66 shrink-0 overflow-y-auto border-r border-slate-200 bg-white px-6 py-7 lg:block">
+			for _, t := range techs {
+				if t.ID == current.ID {
+					<a href={ templ.SafeURL("/docs/" + t.ID) } class="block px-2 text-sm font-semibold text-slate-900">{ t.Name }</a>
+					<nav class="mt-2 mb-5 flex flex-col gap-0.5 text-sm">
+						@docNavLink("/docs/"+t.ID, "Overview", currentGuide == "")
+						for _, g := range t.Guides {
+							@docNavLink("/docs/"+t.ID+"/"+g.Slug, g.Title, currentGuide == g.Slug)
+						}
+					</nav>
+				} else {
+					<a href={ templ.SafeURL("/docs/" + t.ID) } class="mb-1 flex items-center justify-between rounded-lg px-2 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+						{ t.Name }
+						<span class="text-slate-400">›</span>
+					</a>
+				}
+			}
+		</aside>
+		<main class="min-w-0 flex-1 px-6 py-10 md:px-16">
+			{ children... }
+		</main>
+	</div>
+}
+
+templ docNavLink(href, label string, active bool) {
+	if active {
+		<a href={ templ.SafeURL(href) } class="rounded-lg bg-indigo-50 px-3 py-1.5 font-medium text-indigo-700">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL(href) } class="rounded-lg px-3 py-1.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900">{ label }</a>
+	}
+}
+
+templ crumbs(t tech) {
+	<nav class="text-sm text-slate-500"><a href="/docs" class="hover:text-slate-900">Docs</a> <span class="mx-1.5">/</span> <a href={ templ.SafeURL("/docs/" + t.ID) } class="hover:text-slate-900">{ t.Name }</a></nav>
+}
+
+templ techPage(d docsData, t tech) {
+	@docsShell(t.Name) {
+		@docsLayout(t, "") {
+			<div class="max-w-6xl">
+				<div class="flex flex-wrap items-start justify-between gap-6 xl:flex-nowrap">
+					<div class="flex min-w-0 items-start gap-5">
+						<span class="mt-7 flex size-14 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-semibold text-slate-700">{ strings.ToUpper(t.Name[:1]) }</span>
+						<div>
+							@crumbs(t)
+							<h1 class="mt-2 text-[34px] font-semibold leading-tight">{ t.Name }</h1>
+							<p class="mt-1 text-[17px] text-slate-600">{ t.Tagline }</p>
+						</div>
+					</div>
+					if _, ok := d.Catalog[t.ID]; ok {
+						<div class="w-80 shrink-0">
+							@labelledTerminal("Add to an experiment", "bb add "+t.ID)
+						</div>
+					}
+				</div>
+				<div class="mt-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_368px]">
+					<div class="docs-prose max-w-2xl">
+						<h2 class="text-xl font-semibold">What is { t.Name }?</h2>
+						@t.Intro
+					</div>
+					if len(t.GoodFit) > 0 {
+						<div class="flex flex-col gap-4">
+							@fitCard("Good fit", t.GoodFit)
+							@fitCard("Poor fit", t.PoorFit)
+						</div>
+					}
+				</div>
+				if t.Diagram != nil {
+					<div class="mt-10 overflow-x-auto rounded-xl border border-slate-200 bg-white p-8">
+						@t.Diagram
+					</div>
+				}
+				if len(t.Guides) > 0 {
+					<h2 class="mt-12 text-xl font-semibold">Go deeper</h2>
+					<div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+						for _, g := range t.Guides {
+							<a href={ templ.SafeURL("/docs/" + t.ID + "/" + g.Slug) } class="group rounded-xl border border-slate-200 bg-white p-5 hover:border-slate-300">
+								<div class="flex items-center justify-between font-semibold">{ g.Title } <span class="text-slate-400 group-hover:text-slate-600">→</span></div>
+								<div class="mt-1.5 text-sm text-slate-500">{ g.Summary }</div>
+							</a>
+						}
+					</div>
+				}
+				<div class="mt-10 grid gap-6 lg:grid-cols-2">
+					if e, ok := d.Catalog[t.ID]; ok {
+						@card() {
+							<div class="p-5">
+								<h2 class="text-base font-semibold">In Breadboard</h2>
+								<div class="mt-3">
+									@kv("Image") {
+										<span class="font-mono text-[13px]">{ e.Image }</span>
+									}
+									@kv("Listener") {
+										<span class="font-mono text-[13px]">{ portsList(e.Ports) }</span>
+									}
+									@kv("Limits") {
+										{ e.Memory }, { e.CPUs } cpu
+									}
+									@kv("Env") {
+										<span class="font-mono text-[13px]">{ strings.Join(e.Env, " ") }</span>
+									}
+								</div>
+							</div>
+						}
+					}
+					@officialCard(t)
+					if len(t.Starters) > 0 {
+						@card() {
+							<div class="p-5">
+								<h2 class="text-base font-semibold">Starters</h2>
+								<div class="mt-3 flex flex-col">
+									for _, id := range t.Starters {
+										<a href={ templ.SafeURL("/starters/" + id) } class="flex items-center justify-between gap-4 py-1.5 text-sm hover:text-indigo-700">
+											<span>{ d.Starters[id].Title }</span>
+											<span class="font-mono text-[13px] text-slate-500">{ id }</span>
+										</a>
+									}
+								</div>
+							</div>
+						}
+					}
+				</div>
+			</div>
+		}
+	}
+}
+
+func portsList(ports []int) string {
+	out := make([]string, len(ports))
+	for i, p := range ports {
+		out[i] = fmt.Sprintf("TLS :%d", p)
+	}
+	return strings.Join(out, ", ")
+}
+
+templ fitCard(title string, items []string) {
+	@card() {
+		<div class="p-5">
+			<h3 class="font-semibold">{ title }</h3>
+			<ul class="mt-2 flex flex-col gap-1 text-sm text-slate-700">
+				for _, it := range items {
+					<li class="flex gap-3"><span class="text-slate-400">—</span>{ it }</li>
+				}
+			</ul>
+		</div>
+	}
+}
+
+templ officialCard(t tech) {
+	if len(t.Official) > 0 {
+		@card() {
+			<div class="p-5">
+				<h2 class="text-base font-semibold">Official documentation</h2>
+				<div class="mt-3 flex flex-col">
+					for _, l := range t.Official {
+						@extLink(l.URL) {
+							<span class="block py-1.5 text-sm">{ l.Title } ↗</span>
+						}
+					}
+				</div>
+			</div>
+		}
+	}
+}
+
+templ guidePage(d docsData, t tech, g guide) {
+	@docsShell(g.Title + " · " + t.Name) {
+		@docsLayout(t, g.Slug) {
+			<div class="flex gap-12">
+				<article class="docs-prose min-w-0 max-w-[720px] flex-1">
+					@crumbs(t)
+					<h1 class="mt-3 text-[34px] font-semibold leading-tight">{ g.Title }</h1>
+					if g.Live != "" {
+						<div data-load={ g.Live }></div>
+					}
+					@g.Body
+					@guideFooter(t, g)
+				</article>
+				<aside class="sticky top-24 hidden h-fit w-56 shrink-0 xl:block">
+					if len(g.Sections) > 0 {
+						<div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">On this page</div>
+						<nav class="mt-2 flex flex-col gap-1.5 text-sm">
+							for _, s := range g.Sections {
+								<a href={ templ.SafeURL("#" + s.ID) } class="text-slate-600 hover:text-slate-900">{ s.Title }</a>
+							}
+						</nav>
+					}
+					if g.Starter != "" {
+						<div class="mt-6 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Starter</div>
+						<a href={ templ.SafeURL("/starters/" + g.Starter) } class="mt-2 inline-block rounded-md border border-slate-200 bg-white px-2 py-1 font-mono text-[13px] text-slate-700 hover:border-slate-300">{ g.Starter }</a>
+					}
+					<div class="mt-6">
+						@officialCard(t)
+					</div>
+				</aside>
+			</div>
+		}
+	}
+}
+
+// guideFooter links to the next guide.
+templ guideFooter(t tech, g guide) {
+	for i, x := range t.Guides {
+		if x.Slug == g.Slug && i+1 < len(t.Guides) {
+			<a href={ templ.SafeURL("/docs/" + t.ID + "/" + t.Guides[i+1].Slug) } class="mt-12 flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 not-prose hover:border-slate-300">
+				<span>
+					<span class="block text-xs text-slate-500">Next</span>
+					<span class="font-semibold">{ t.Guides[i+1].Title }</span>
+				</span>
+				<span class="text-slate-400">→</span>
+			</a>
+		}
+	}
+}
+
+// --- Content components (use these in docs_<id>.templ) ------------------------
+
+// docP is a paragraph.
+templ docP() {
+	<p class="my-4 text-[16px] leading-7 text-slate-700">
+		{ children... }
+	</p>
+}
+
+// docLead is the larger opening paragraph of a guide.
+templ docLead() {
+	<p class="mt-4 text-[18px] leading-8 text-slate-700">
+		{ children... }
+	</p>
+}
+
+// docH2 is a section heading; its id is the anchor "On this page" links to.
+templ docH2(id, title string) {
+	<h2 id={ id } class="mt-10 scroll-mt-20 text-2xl font-semibold">{ title }</h2>
+}
+
+// docH3 is a sub-heading.
+templ docH3(title string) {
+	<h3 class="mt-6 text-lg font-semibold">{ title }</h3>
+}
+
+// docList is a list of short points, one per string.
+templ docList(items ...string) {
+	<ul class="my-4 flex flex-col gap-2.5 text-[16px] leading-7 text-slate-700">
+		for _, it := range items {
+			<li class="flex gap-3"><span class="text-slate-400">—</span><span>{ it }</span></li>
+		}
+	</ul>
+}
+
+// docSteps is a numbered list of short steps.
+templ docSteps(items ...string) {
+	<ol class="my-4 flex list-decimal flex-col gap-2 pl-6 text-[16px] leading-7 text-slate-700">
+		for _, it := range items {
+			<li>{ it }</li>
+		}
+	</ol>
+}
+
+// docCode is a code block with its file name and a Copy button. Lines that
+// start with // (after indentation) are shown as comments.
+templ docCode(filename, code string) {
+	<div class="my-5 overflow-hidden rounded-xl border border-slate-200 bg-white">
+		<div class="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+			<span class="font-mono text-[13px] text-slate-600">{ filename }</span>
+			<button type="button" data-copy class="text-xs text-slate-500 hover:text-slate-900">Copy</button>
+		</div>
+		<pre class="overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-6 text-slate-800" data-copy-source>
+			for _, line := range strings.Split(strings.Trim(code, "\n"), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "//") || strings.HasPrefix(strings.TrimSpace(line), "#") || strings.HasPrefix(strings.TrimSpace(line), "--") {
+					<div class="min-h-6 whitespace-pre text-slate-400">{ line }</div>
+				} else {
+					<div class="min-h-6 whitespace-pre">{ line }</div>
+				}
+			}
+		</pre>
+	</div>
+}
+
+// docTerminal is commands to run, with Copy.
+templ docTerminal(lines ...string) {
+	<div class="my-5">
+		@terminal(lines...)
+	</div>
+}
+
+// labelledTerminal is a terminal block with a custom label.
+templ labelledTerminal(label string, lines ...string) {
+	<div class="overflow-hidden rounded-xl bg-slate-900 text-sm">
+		<div class="flex items-center justify-between border-b border-slate-700 px-4 py-2 text-slate-400">
+			<span>{ label }</span>
+			<button type="button" data-copy class="rounded border border-slate-600 px-2 py-0.5 text-xs text-slate-200 hover:bg-slate-800">Copy</button>
+		</div>
+		<pre class="px-4 py-3 font-mono leading-6 text-slate-100" data-copy-source>
+			for _, l := range lines {
+				<div><span class="select-none text-slate-500">$ </span>{ l }</div>
+			}
+		</pre>
+	</div>
+}
+
+// docCallout is a highlighted note.
+templ docCallout(title string) {
+	<div class="my-6 rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-4">
+		<div class="text-sm font-semibold text-indigo-800">{ title }</div>
+		<div class="mt-1 text-[15px] leading-6 text-slate-700">
+			{ children... }
+		</div>
+	</div>
+}
+
+// docFigure wraps a diagram (inline SVG) with a caption.
+templ docFigure(caption string) {
+	<figure class="my-6">
+		<div class="overflow-x-auto rounded-xl border border-slate-200 bg-white p-6">
+			{ children... }
+		</div>
+		if caption != "" {
+			<figcaption class="mt-2 text-sm text-slate-500">{ caption }</figcaption>
+		}
+	</figure>
+}
+
+// docCodeWord is inline code.
+templ docCodeWord(s string) {
+	<code class="rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.88em] text-slate-800">{ s }</code>
+}
+
+// extLink opens an external page in a new tab.
+templ extLink(href string) {
+	<a href={ templ.SafeURL(href) } target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800">
+		{ children... }
+	</a>
+}
+
+// docLink links within the site.
+templ docLink(href, text string) {
+	<a href={ templ.SafeURL(href) } class="text-indigo-600 hover:text-indigo-800">{ text }</a>
+}

@@ -16,7 +16,7 @@
   "ports": {
     "dns": -1,
     "grpc": -1,
-    "grpc_tls": 8503,
+    "grpc_tls": -1,
     "http": -1,
     "https": 8501,
     "serf_wan": -1
@@ -127,7 +127,7 @@ services:
       breadboard.experiment-id: 0123456789abcdef
       breadboard.service: consul
       breadboard.kind: infra
-      breadboard.config-hash: 64e7b3988fbaaa13
+      breadboard.config-hash: 59d4e2aeb3339c3c
     mem_limit: 256m
     cpus: 0.5
     restart: unless-stopped

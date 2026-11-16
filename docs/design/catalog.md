@@ -51,7 +51,7 @@ Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/et
 
 ### `postgres`
 
-- Official `postgres` image, `ssl=on`, and `pg_hba.conf` accepts only `hostssl` (plus `host` on a private segment when an edge asks for plaintext).
+- Official `postgres` image, `ssl=on`, and `pg_hba.conf` accepts only `hostssl` (plus `hostnossl` limited to the private segment's subnet when an edge asks for plaintext).
 - Gotcha: the key file must be `0600` and owned by the image's postgres uid. The entry's start script copies the mounted key with `install -m 0600 -o postgres` before handing over to the image's entrypoint; the learning notes explain it.
 - The app role and database are created by an init script on first start; changing `config.user` or `config.database` later needs `bb down --volumes`. Data lives in a named volume at `/var/lib/postgresql` (Postgres 18 layout).
 - Secrets: superuser password; default database and app role from `config` (defaults `app`/`app`).

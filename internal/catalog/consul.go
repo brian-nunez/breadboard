@@ -41,6 +41,9 @@ func consul() *Entry {
 				"ports":                   ports,
 				"encrypt_verify_incoming": true,
 				"encrypt_verify_outgoing": true,
+				// Health checks of services registered here (by apps that
+				// register themselves) verify TLS against the lab CA.
+				"enable_agent_tls_for_checks": true,
 				"tls": map[string]any{
 					"defaults": map[string]any{
 						"ca_file":         CAFile,

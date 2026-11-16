@@ -350,6 +350,8 @@ func appService(in Input, svc *model.Service) *yaml.Node {
 		{Name: "TLS_CERT_FILE", Value: catalog.CertFile},
 		{Name: "TLS_KEY_FILE", Value: catalog.KeyFile},
 		{Name: "BB_SERVICE", Value: svc.Name},
+		// The app's own address, matching its certificate.
+		{Name: "BB_FQDN", Value: svc.FQDN},
 	}
 	if svc.Health != nil {
 		env = append(env, catalog.EnvVar{Name: "BB_HEALTH_PORT", Value: strconv.Itoa(svc.Health.Port)})

@@ -75,6 +75,7 @@ SQL
   "bootstrap_expect": 1,
   "client_addr": "0.0.0.0",
   "datacenter": "bb",
+  "enable_agent_tls_for_checks": true,
   "encrypt_verify_incoming": true,
   "encrypt_verify_outgoing": true,
   "node_name": "consul",
@@ -306,7 +307,7 @@ services:
       breadboard.experiment-id: 0123456789abcdef
       breadboard.service: consul
       breadboard.kind: infra
-      breadboard.config-hash: 9468161229a88896
+      breadboard.config-hash: b5bfb0a7d7da5747
     mem_limit: 256m
     cpus: 0.5
     restart: unless-stopped
@@ -364,6 +365,7 @@ services:
       TLS_CERT_FILE: /etc/bb/tls/tls.crt
       TLS_KEY_FILE: /etc/bb/tls/tls.key
       BB_SERVICE: pooler
+      BB_FQDN: pooler.bb.internal
       # postgres (Postgres): PLAINTEXT edge (tls.mode: off). Reason: practice TLS termination at a pooler
       DATABASE_URL: postgres://app:postgrespasswordSECRET@postgres.plain.bb.internal:5432/orders?sslmode=disable
       PGHOST: postgres.plain.bb.internal
@@ -411,6 +413,7 @@ services:
       TLS_CERT_FILE: /etc/bb/tls/tls.crt
       TLS_KEY_FILE: /etc/bb/tls/tls.key
       BB_SERVICE: api
+      BB_FQDN: api.bb.internal
       # postgres (Postgres)
       DATABASE_URL: postgres://app:postgrespasswordSECRET@postgres.bb.internal:5432/orders?sslmode=verify-full
       PGHOST: postgres.bb.internal
@@ -468,6 +471,7 @@ services:
       TLS_CERT_FILE: /etc/bb/tls/tls.crt
       TLS_KEY_FILE: /etc/bb/tls/tls.key
       BB_SERVICE: worker
+      BB_FQDN: worker.bb.internal
       # redis (Redis)
       REDIS_URL: rediss://default:redispasswordSECRET@redis.bb.internal:6379/0
     healthcheck:

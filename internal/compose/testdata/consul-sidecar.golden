@@ -9,6 +9,7 @@
   "bootstrap_expect": 1,
   "client_addr": "0.0.0.0",
   "datacenter": "bb",
+  "enable_agent_tls_for_checks": true,
   "encrypt_verify_incoming": true,
   "encrypt_verify_outgoing": true,
   "node_name": "consul",
@@ -126,7 +127,7 @@ services:
       breadboard.experiment-id: 0123456789abcdef
       breadboard.service: consul
       breadboard.kind: infra
-      breadboard.config-hash: 831398237e7ebce9
+      breadboard.config-hash: 64e7b3988fbaaa13
     mem_limit: 256m
     cpus: 0.5
     restart: unless-stopped
@@ -140,6 +141,7 @@ services:
       TLS_CERT_FILE: /etc/bb/tls/tls.crt
       TLS_KEY_FILE: /etc/bb/tls/tls.key
       BB_SERVICE: greeter
+      BB_FQDN: greeter.bb.internal
       # consul (Consul)
       CONSUL_HTTP_ADDR: https://consul.bb.internal:8501
       CONSUL_CACERT: /etc/bb/trust-bundle.pem

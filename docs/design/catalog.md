@@ -72,6 +72,7 @@ Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/et
 
 - Official `hashicorp/consul` image, single server in dev-like topology with persistence, HTTPS on 8501, plain HTTP disabled.
 - Other listeners: server RPC (8300) requires TLS with a client certificate from the CA; LAN gossip (8301) stays on for Phase 2 client agents and is encrypted with a generated gossip key (`-encrypt` on the command line, never in the config file); DNS, gRPC, and WAN gossip are off.
+- `enable_agent_tls_for_checks` is on, so TLS health checks of services registered directly with the server verify against the lab CA.
 - Health check: `consul operator raft list-peers` over HTTPS with CA verification; it succeeds only once a leader exists.
 - Env contract:
   - `CONSUL_HTTP_ADDR=https://consul.bb.internal:8501`

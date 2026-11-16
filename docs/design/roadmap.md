@@ -83,6 +83,22 @@ Build to the accepted design in [`ui/`](ui/README.md) (D-031), served by `bb ser
 
 templ + Tailwind (standalone CLI, no npm), components written in-repo (ADR-0013), assets embedded. Topology rendered as server-side SVG (plaintext edges dashed red); live status, CPU and memory, and logs over SSE; explorers for Kafka topics, groups and lag, Postgres tables and row counts, Redis keys, the Consul catalog, and S3 buckets, read through Docker (ADR-0012); docs pages per technology (D-061); starter pages. A wrapper over the core: anything the UI needs that the core lacks (explorer queries, the topology) becomes a core operation first. `bb` adds no client libraries (D-059).
 
+**Also built (Brian's direction or found while building):** components written in-repo instead of templUI (ADR-0013); explorers read through Docker instead of management ports (ADR-0012); a read-only `ServiceDetails` that never returns secrets (D-065); explorer results loaded after the page because Kafka's tools take seconds (D-067); a home page and starter pages (D-068); search and a phone layout (D-069); the Consul server's unused TLS gRPC port turned off to match the design.
+
+**Completion criteria:**
+
+- [x] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift in the templ output or the compiled stylesheet.
+- [x] `bb serve` listens only on a loopback address, requires the per-launch sign-in link (session cookie, `HttpOnly`, `SameSite=Strict`), rejects a foreign `Host` (421) or `Origin` (403), refuses open redirects, and sends a CSP with no inline scripts or styles (tested).
+- [x] The overview, architecture, service pages and logs render against a real experiment and update live over SSE (checked in a browser against frames 03, 04, 05).
+- [x] The UI never shows a secret: `ServiceDetails` returns secret variables empty, and no generated secret appears in any page (tested, and checked against a running lab).
+- [x] Explorers for Kafka, Postgres, Redis, Consul and S3 Compatible return real data from the pinned images (integration tests), and a stopped service shows how to start it.
+- [x] Docs for Getting started and all five catalog types: every technology page and guide renders and every "On this page" link has a heading (tested); facts were checked against official docs and library source.
+- [x] The home page, starter list and every starter page render (tested; checked against frames 01, 09, 10).
+- [x] Search finds docs, starters and services; on a 390px screen the dashboard has no horizontal overflow (checked in a browser against frame 12).
+- [x] The full integration suite passes on the top of the Phase 3 stack.
+- [x] Docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated (D-059 to D-069, ADR-0012, ADR-0013).
+
+
 ## Phase 4: MCP server
 
 Tools that mirror the CLI (create experiment, add service, apply starter, up/down, status, logs, creds, learn, export), served by `bb mcp` over stdio.

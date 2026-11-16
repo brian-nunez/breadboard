@@ -17,7 +17,7 @@
   <img alt="Written in Go" src="https://img.shields.io/badge/written%20in-Go-4F46E5?style=flat-square&logo=go&logoColor=white">
   <img alt="Runs on macOS and Linux" src="https://img.shields.io/badge/runs%20on-macOS%20%C2%B7%20Linux-6366F1?style=flat-square">
   <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-4F46E5?style=flat-square">
-  <img alt="Status: phase 2" src="https://img.shields.io/badge/status-phase%202-6366F1?style=flat-square">
+  <img alt="Status: phase 3" src="https://img.shields.io/badge/status-phase%203-6366F1?style=flat-square">
   <br>
   <a href="https://www.linkedin.com/in/brianjnunez/"><img alt="LinkedIn: Brian Nunez" src="https://img.shields.io/badge/LinkedIn-Brian%20Nunez-0A66C2?style=flat-square&logo=linkedin&logoColor=white"></a>
   <img alt="Discord: .derthon" src="https://img.shields.io/badge/Discord-.derthon-5865F2?style=flat-square&logo=discord&logoColor=white">
@@ -34,11 +34,11 @@
 
 <p align="center">
   <img src="docs/images/hero.png" alt="Design mockup of the Breadboard dashboard for an experiment named kafka-lab: summary cards, a table of five containers with health, CPU and memory against their limits, addresses and TLS status, and an architecture map below" width="100%">
-  <br><sub><b>Design preview</b>: the planned <code>bb serve</code> dashboard. This is a design mockup, not a screenshot of running software.</sub>
+  <br><sub><b>Design preview</b>: the <code>bb serve</code> dashboard. This is a design mockup, not a screenshot of running software.</sub>
 </p>
 
 > [!IMPORTANT]
-> **Breadboard is early.** Phases 1 and 2 work: the core engine and CLI, five services including S3 Compatible, six starters, and Compose export. The web UI, MCP server, and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
+> **Breadboard is early.** Phases 1 to 3 work: the core engine and CLI, five services including S3 Compatible, six starters, Compose export, and the read-only web UI (`bb serve`). The MCP server and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
 
 <p align="center">
   <a href="#why-breadboard">Why Breadboard</a> ·
@@ -63,7 +63,7 @@
 
 An experiment is a directory with an `experiment.yaml`. Breadboard resolves it against its catalog of services, generates certificates and secrets, writes a Compose project, and runs it on its own Docker network. Your app code runs as containers on that same network, addressed as `<service>.bb.internal`.
 
-The Phase 1 workflow:
+The workflow:
 
 ```sh
 go install github.com/brian-nunez/breadboard/bb@latest   # one binary on your machine
@@ -73,6 +73,7 @@ bb add kafka                                             # add a real Kafka brok
 bb starter kafka/producer-consumer                       # write a Go producer and consumer
 bb up                                                    # start everything and wait for health
 bb logs consumer -f                                      # watch messages arrive over TLS
+bb serve                                                 # open the read-only dashboard and docs
 ```
 
 `bb` itself runs on your machine; only experiments run in containers. The CLI, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`) are thin wrappers over one core engine. See [architecture](docs/design/architecture.md).

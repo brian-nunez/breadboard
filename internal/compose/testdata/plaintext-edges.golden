@@ -82,7 +82,7 @@ SQL
   "ports": {
     "dns": -1,
     "grpc": -1,
-    "grpc_tls": 8503,
+    "grpc_tls": -1,
     "http": 8500,
     "https": 8501,
     "serf_wan": -1
@@ -307,7 +307,7 @@ services:
       breadboard.experiment-id: 0123456789abcdef
       breadboard.service: consul
       breadboard.kind: infra
-      breadboard.config-hash: b5bfb0a7d7da5747
+      breadboard.config-hash: 73117b435f95cae1
     mem_limit: 256m
     cpus: 0.5
     restart: unless-stopped

@@ -29,7 +29,7 @@ func consul() *Entry {
 			// Plain HTTP, gRPC, DNS, and WAN gossip are off. LAN gossip stays
 			// on for Phase 2 client agents, encrypted with the gossip key, and
 			// server RPC requires TLS with a certificate from the CA.
-			ports := map[string]any{"http": -1, "https": httpsPort, "grpc": -1, "grpc_tls": 8503, "dns": -1, "serf_wan": -1}
+			ports := map[string]any{"http": -1, "https": httpsPort, "grpc": -1, "grpc_tls": -1, "dns": -1, "serf_wan": -1}
 			cfg := map[string]any{
 				"datacenter":              "bb",
 				"node_name":               s.Name,

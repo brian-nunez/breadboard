@@ -87,3 +87,64 @@ func TestExportCompose(t *testing.T) {
 		t.Fatalf("bad secrets mode error = %v", err)
 	}
 }
+
+func TestServiceDetailsIsReadOnlyAndHidesSecrets(t *testing.T) {
+	h := setupStarter(t)
+	if _, err := h.eng.AddService(h.ctx(), AddServiceRequest{Dir: h.dir, Type: "postgres"}); err != nil {
+		t.Fatal(err)
+	}
+	// Before the first up: no certificates, and nothing gets generated.
+	d, err := h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: "postgres"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Certificate != nil {
+		t.Error("certificate reported before any was issued")
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, ".bb", "certs", "postgres")); !os.IsNotExist(err) {
+		t.Error("ServiceDetails issued a certificate")
+	}
+	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
+		t.Fatal(err)
+	}
+	d, err = h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: "postgres"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Kind != "infra" || d.Type != "postgres" || d.Address != "postgres.bb.internal:5432" || len(d.Listeners) != 1 {
+		t.Fatalf("details = %+v", d)
+	}
+	secrets := 0
+	for _, v := range d.Env[0].Vars {
+		if v.Secret {
+			secrets++
+			if v.Value != "" {
+				t.Errorf("%s leaked a secret value", v.Name)
+			}
+		}
+	}
+	if secrets == 0 {
+		t.Error("no variable was marked secret")
+	}
+	if c := d.Certificate; c == nil || c.Issuer == "" || c.DNSNames[0] != "postgres.bb.internal" || !strings.HasPrefix(c.Identity, "spiffe://") {
+		t.Errorf("certificate = %+v", d.Certificate)
+	}
+
+	app, err := h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: "consumer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app.Kind != "app" || app.Path != "./producer-consumer" || len(app.Env) != 2 || app.Env[1].Service != "kafka" {
+		t.Fatalf("app details = %+v", app)
+	}
+	if app.Env[0].Vars[0].Name != "SSL_CERT_FILE" || app.Env[1].Vars[0].Name != "KAFKA_BROKERS" {
+		t.Errorf("app env = %+v", app.Env)
+	}
+	k, _ := h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: "kafka"})
+	if !slices.Equal(k.UsedBy, []string{"producer", "consumer"}) {
+		t.Errorf("kafka used by = %v", k.UsedBy)
+	}
+	if _, err := h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: "nope"}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown service error = %v", err)
+	}
+}

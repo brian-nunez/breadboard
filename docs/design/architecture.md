@@ -8,7 +8,7 @@ One Go binary, `bb`, runs on the host and contains the core and all three wrappe
 
 ```
               ┌──────────────── bb (one binary, host) ────────────────┐
-              │   CLI            Web UI (bb ui)      MCP (bb mcp)     │
+              │   CLI          Web UI (bb serve)     MCP (bb mcp)     │
               │     └───────────────┼───────────────────┘             │
               │                     ▼                                 │
 experiment ──►│   engine: spec → resolved model → materialize         │
@@ -21,7 +21,7 @@ experiment ──►│   engine: spec → resolved model → materialize       
 | Wrapper | Started by | Phase | Role |
 |---|---|---|---|
 | CLI | `bb <command>` | 1 | Parses flags, calls the core, prints results and progress. |
-| Web UI | `bb ui` | 3 | Local web server on `127.0.0.1`: topology, health, logs, explorers, learning notes. templ + templUI + Tailwind, embedded in the binary. |
+| Web UI | `bb serve` | 3 | Local web server on `127.0.0.1`: topology, health, logs, explorers, docs. templ + Tailwind, embedded in the binary. Read-only. |
 | MCP server | `bb mcp` | 4 | stdio MCP server exposing core operations as tools. |
 
 ## Core API
@@ -141,13 +141,13 @@ Every file Breadboard owns carries a format version, and every format only moves
 
 Not part of Phase 1. Both are wrappers over the core API above.
 
-- `bb ui` serves on `127.0.0.1` from the same process as the engine, and opens the browser.
-- Local web endpoints that can drive Docker need protecting even on localhost, because a malicious page can reach them through DNS rebinding or cross-site requests. `bb ui` therefore:
+- `bb serve` serves on `127.0.0.1` from the same process as the engine, and opens the browser.
+- Local web endpoints that can drive Docker need protecting even on localhost, because a malicious page can reach them through DNS rebinding or cross-site requests. `bb serve` therefore:
   - binds only to `127.0.0.1`;
   - generates a random token per launch, puts it in the URL it opens, and exchanges it for a session cookie (sessions held in bkit `stash` with the in-memory driver and a TTL);
   - rejects requests whose `Host` or `Origin` header is not the UI's own.
 - `bb mcp` speaks MCP over stdio; MCP clients configure the command `bb mcp`.
-- How the UI's explorers reach services on an experiment's private network is open question Q-11.
+- Explorers read service data through Docker: each runs the service's own command-line tool with `docker exec`, inside the experiment's network ([ADR-0012](../adr/README.md)). Status comes from `docker inspect` and `docker stats`. The UI never changes the system.
 
 ## CLI surface (Phase 1)
 
@@ -211,8 +211,6 @@ Breadboard's own internals use Brian's [bkit](https://github.com/brian-nunez/bki
 | Configuration | `settings` + `settings/drivers/yaml` | Layered install settings: defaults → `config.yaml` → `BB_*` env. | 1 |
 | Rule checks | `gate` | Spec and policy validation: naming rules, TLS-off-requires-reason, reserved fields, phase-gated features. `gate.Join` reports every violation at once. | 1 |
 | Key/value store | `stash` + `stash/drivers/memory` | UI sessions with TTL; short-lived caches such as container stats. | 3 |
-| Relational database | `rdb` + `rdb/drivers/postgres` | Postgres explorer in the UI. | 3 |
-| Object storage | `objex` + `objex/drivers/s3` | Bucket explorer for the S3 Compatible entry. | 3 |
 
 `experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3` (strict decoding to reject unknown keys, and node-level editing to preserve comments), which `settings` does not offer. Where bkit has no matching capability, the engine uses the standard library; any other direct dependency needs Brian's approval and a row in [`decisions.md`](decisions.md).
 

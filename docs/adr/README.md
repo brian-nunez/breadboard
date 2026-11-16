@@ -15,3 +15,4 @@ Decisions that shape this project, in [MADR](https://adr.github.io/madr/) format
 | [0009](0009-limit-exporters-to-kubernetes-ansible-and-terraform.md) | Limit exporters to Kubernetes, Ansible and Terraform for AWS, GCP and Cloudflare | accepted | 2026-11-14 |
 | [0010](0010-use-seaweedfs-for-the-s3-compatible-catalog-entry.md) | Use SeaweedFS for the S3 Compatible catalog entry | accepted | 2026-11-14 |
 | [0011](0011-fill-bkit-gaps-with-the-standard-library.md) | Fill bkit gaps with the standard library | accepted | 2026-11-15 |
+| [0012](0012-read-service-data-for-the-web-ui-through-docker.md) | Read service data for the web UI through Docker | accepted | 2026-11-16 |

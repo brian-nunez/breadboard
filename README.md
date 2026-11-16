@@ -34,7 +34,7 @@
 
 <p align="center">
   <img src="docs/images/hero.png" alt="Design mockup of the Breadboard dashboard for an experiment named kafka-lab: summary cards, a table of five containers with health, CPU and memory against their limits, addresses and TLS status, and an architecture map below" width="100%">
-  <br><sub><b>Design preview</b>: the planned <code>bb ui</code> dashboard. This is a design mockup, not a screenshot of running software.</sub>
+  <br><sub><b>Design preview</b>: the planned <code>bb serve</code> dashboard. This is a design mockup, not a screenshot of running software.</sub>
 </p>
 
 > [!IMPORTANT]
@@ -75,7 +75,7 @@ bb up                                                    # start everything and 
 bb logs consumer -f                                      # watch messages arrive over TLS
 ```
 
-`bb` itself runs on your machine; only experiments run in containers. The CLI, the read-only web UI (`bb ui`) and the MCP server (`bb mcp`) are thin wrappers over one core engine. See [architecture](docs/design/architecture.md).
+`bb` itself runs on your machine; only experiments run in containers. The CLI, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`) are thin wrappers over one core engine. See [architecture](docs/design/architecture.md).
 
 ## Supported services
 

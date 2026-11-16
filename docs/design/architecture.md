@@ -59,7 +59,7 @@ The web UI and MCP phases add no core logic of their own; if a wrapper needs som
 - `go install` runs no code generators, so everything generated is committed and embedded:
   - templ output (`*_templ.go`) is committed; CI fails if `templ generate` produces a diff.
   - The compiled Tailwind stylesheet is committed and embedded with `go:embed`; CI fails if a rebuild produces a diff. Tailwind runs from its standalone CLI, so contributors need no npm.
-  - templUI components are copied into the repo (templUI's model), so they build with the module.
+  - UI components are written in `internal/web` with templ and Tailwind (ADR-0013); no component kit is copied in.
   - Starter templates and learning notes are embedded with `go:embed`.
 - `bb version` reads the module version from `runtime/debug.ReadBuildInfo`, so `go install …@vX.Y.Z` reports the right version without build flags.
 - Supported hosts for v1: macOS and Linux.

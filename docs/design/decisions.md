@@ -12,7 +12,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-002 | 2026-11-14 | No Breadboard SDK or wrappers. Users and starters use official client libraries. → [ADR-0006](../adr/README.md) |
 | D-003 | 2026-11-14 | Every experiment runs in Docker Compose: infra and user app code, each with limits, health checks, explicit env vars, healthy-dependency ordering. → [ADR-0003](../adr/README.md) |
 | D-004 | 2026-11-14 | Engine, CLI, UI, and MCP server are written in Go. → [ADR-0001](../adr/README.md) |
-| D-005 | 2026-11-14 | Web UI uses templ + templUI + Tailwind. → [ADR-0008](../adr/README.md) |
+| D-005 | 2026-11-14 | Web UI uses templ + ~~templUI~~ + Tailwind; components are written in-repo (D-062). → [ADR-0013](../adr/README.md) (supersedes ADR-0008) |
 | D-006 | 2026-11-14 | Name: Breadboard; CLI `bb`. |
 | D-007 | 2026-11-14 | Starters start with Go, targeting Go 1.27.4. The engine also pins toolchain go1.27.4. |
 | D-008 | 2026-11-14 | Default starter libraries: `franz-go`, `pgx/v5`, `go-redis/v9`, `hashicorp/consul/api`. Users may install anything else. → [ADR-0006](../adr/README.md) |
@@ -38,7 +38,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-028 | 2026-11-14 | Core-first architecture: all capability lives in the core engine API; the CLI, web UI, and MCP server are thin wrappers over it. Phase 1 is the core plus the CLI only. → [ADR-0002](../adr/README.md) |
 | D-029 | 2026-11-14 | S3 starter library: `aws-sdk-go-v2`. Starter libraries default to the most popular SDK in the ecosystem. → [ADR-0006](../adr/README.md) |
 | D-030 | 2026-11-14 | At Phase 1 kickoff: set `origin` to `git@github.com:brian-nunez/breadboard.git`, commit the design docs to `main`, push; build Phase 1 on a feature branch with a pull request. (Former Q-03.) |
-| D-031 | 2026-11-14 | Web UI design v1 accepted: read-only, calm, minimal copy, no alerts; commands instead of action buttons; Kafka overview and starter page are the templates for all tech and starter pages. Design in [`ui/`](ui/README.md). → [ADR-0008](../adr/README.md) |
+| D-031 | 2026-11-14 | Web UI design v1 accepted: read-only, calm, minimal copy, no alerts; commands instead of action buttons; Kafka overview and starter page are the templates for all tech and starter pages. Design in [`ui/`](ui/README.md). → [ADR-0013](../adr/README.md) (supersedes ADR-0008) |
 | D-032 | 2026-11-15 | Phase 1 image pins: `apache/kafka:4.3.2`, `postgres:18.7-alpine3.24`, `redis:8.10.3-alpine3.23`, `hashicorp/consul:1.22.7`; starters build on `golang:1.27.4-alpine3.24` and `alpine:3.24.4`. The catalog's Go code stays the source of truth for versions. |
 | D-033 | 2026-11-15 | Plaintext segments: an `internal` compose network `plain-<target>` with a `/24` from `10.213.0.0/16` (skipping subnets Docker already uses), recorded in `.bb/state.json`; the target sits at `.10` with alias `<target>.plain.<domain>`. Entries bind their plaintext listener to that address or limit it to that subnet. |
 | D-034 | 2026-11-15 | Redis has no plaintext listener in v1, because Redis cannot bind one port to a segment-only address; validation rejects `tls.mode: off` toward it. Plaintext Redis comes with terminating proxies (Phase 5). |
@@ -69,6 +69,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-059 | 2026-11-16 | The web UI reads service data through Docker: explorers run each service's own CLI tool with `docker exec` and parse its output; status comes from `docker inspect`/`docker stats`. `bb` gains no client libraries: templ (ADR-0008) and bkit `stash` are the UI's only new dependencies, and bkit `rdb`/`objex` are dropped from the plan. Resolves Q-11. (Brian's direction.) → [ADR-0012](../adr/README.md) |
 | D-060 | 2026-11-16 | The web UI is started with `bb serve` (was `bb ui` in the design). (Brian's direction.) |
 | D-061 | 2026-11-16 | Docs pages per technology: an overview linking to the official docs, basic usage, then useful features each explained as what is actually happening. Guides show the exact code that does the thing (for example the `kgo.ConsumerGroup` option that makes a consumer join a group) with diagrams. Content is authored as embedded templ pages, no markdown dependency. (Brian's direction.) |
+| D-062 | 2026-11-16 | Web UI components are written in `internal/web` with templ and Tailwind instead of copied from templUI, whose helpers import `tailwind-merge-go`. Keeps `bb`'s rendering dependencies to templ. → [ADR-0013](../adr/README.md) |
 
 ## Open questions
 

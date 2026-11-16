@@ -1,6 +1,6 @@
 # Web UI design (v1)
 
-Accepted by Brian on 2026-11-14 (D-031). This is the reference design for the Phase 3 web UI (`bb ui`).
+Accepted by Brian on 2026-11-14 (D-031). This is the reference design for the Phase 3 web UI (`bb serve`, D-060).
 
 - Design file: [`breadboard-ui.figcraft`](breadboard-ui.figcraft), 12 frames on one page.
 - Renders: [`renders/`](renders), one PNG per frame.

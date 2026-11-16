@@ -79,9 +79,9 @@ Catalog entry `s3-compatible` (SeaweedFS) with starter `s3/objects-basics` (buck
 
 ## Phase 3: Web UI
 
-Build to the accepted design in [`ui/`](ui/README.md) (D-031).
+Build to the accepted design in [`ui/`](ui/README.md) (D-031), served by `bb serve` (D-060).
 
-templ + templUI + Tailwind (standalone CLI, no npm). Topology rendered as server-side SVG (plaintext edges dashed red); live status, CPU and memory, and logs over SSE; explorers for Kafka topics and lag, Postgres tables and row counts, Redis keys, the Consul catalog; learning notes. Served by `bb ui` from the host binary with assets embedded. A wrapper over the core: anything the UI needs that the core lacks (explorer queries, event streams) becomes a core operation first. Resolve Q-11 (explorer connectivity) before starting.
+templ + Tailwind (standalone CLI, no npm), components written in-repo (ADR-0013), assets embedded. Topology rendered as server-side SVG (plaintext edges dashed red); live status, CPU and memory, and logs over SSE; explorers for Kafka topics, groups and lag, Postgres tables and row counts, Redis keys, the Consul catalog, and S3 buckets, read through Docker (ADR-0012); docs pages per technology (D-061); starter pages. A wrapper over the core: anything the UI needs that the core lacks (explorer queries, the topology) becomes a core operation first. `bb` adds no client libraries (D-059).
 
 ## Phase 4: MCP server
 

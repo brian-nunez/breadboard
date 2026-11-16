@@ -6,7 +6,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -344,13 +343,23 @@ func checkExperimentIDLabels(t *testing.T, data []byte, id string) {
 
 func TestReissuedCertificateChangesTheConfigHash(t *testing.T) {
 	h := setupStarter(t)
+	// Decode the compose file: a hash that looks like a number is quoted,
+	// which a text match would miss.
 	hashOf := func() string {
-		re := regexp.MustCompile(`(?m)breadboard.service: kafka\n\s+breadboard.kind: infra\n\s+breadboard.config-hash: (\w+)`)
-		m := re.FindStringSubmatch(string(h.rt.filesSeen["docker-compose.yml"]))
-		if m == nil {
-			t.Fatalf("no config hash for kafka:\n%s", h.rt.filesSeen["docker-compose.yml"])
+		var doc struct {
+			Services map[string]struct {
+				Labels map[string]string `yaml:"labels"`
+			} `yaml:"services"`
 		}
-		return m[1]
+		data := h.rt.filesSeen["docker-compose.yml"]
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("compose is not YAML: %v", err)
+		}
+		hash := doc.Services["kafka"].Labels["breadboard.config-hash"]
+		if hash == "" {
+			t.Fatalf("no config hash for kafka:\n%s", data)
+		}
+		return hash
 	}
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)

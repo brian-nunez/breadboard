@@ -199,3 +199,52 @@ func pct(used, limit float64) string {
 	}
 	return fmt.Sprintf("%.0f", p)
 }
+
+// commas formats an integer with thousands separators.
+func commas(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	if neg {
+		return "-" + s
+	}
+	return s
+}
+
+// size formats bytes in binary units.
+func size(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1f GiB", float64(b)/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(b)/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.0f KiB", float64(b)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", b)
+}
+
+// ttl describes a Redis TTL in seconds.
+func ttl(sec int64) string {
+	switch {
+	case sec == -1:
+		return "never"
+	case sec < 0:
+		return "—"
+	}
+	return "in " + humanDuration(time.Duration(sec)*time.Second)
+}
+
+func tableName(t core.PostgresTable) string {
+	if t.Schema == "public" {
+		return t.Name
+	}
+	return t.Schema + "." + t.Name
+}
+
+// container is a service's container name in compose's naming scheme, for
+// commands the page shows.
+func container(experiment, service string) string { return "bb-" + experiment + "-" + service + "-1" }

@@ -16,10 +16,27 @@ type servicePage struct {
 	Notes   notes
 	Tab     string
 	Problem string
+	// Explore is the explorer tab's result (one of the core explorer types),
+	// read only when that tab is open; ExploreErr says why it could not be.
+	Explore    any
+	ExploreErr string
+}
+
+// explorerTabs names each catalog type's explorer tab.
+var explorerTabs = map[string]string{
+	"postgres": "Tables",
+	"redis":    "Keys",
+	"consul":   "Catalog",
 }
 
 func (p servicePage) tabs() [][2]string {
-	t := [][2]string{{"overview", "Overview"}, {"connection", "Connection"}, {"logs", "Logs"}}
+	t := [][2]string{{"overview", "Overview"}}
+	if p.Details != nil && p.Details.Kind == "infra" {
+		if name, ok := explorerTabs[p.Details.Type]; ok {
+			t = append(t, [2]string{"explore", name})
+		}
+	}
+	t = append(t, [2]string{"connection", "Connection"}, [2]string{"logs", "Logs"})
 	if p.Details != nil && p.Details.Type != "" {
 		t = append(t, [2]string{"learn", "Learn"})
 	}
@@ -57,6 +74,8 @@ templ serviceView(p servicePage) {
 			</nav>
 			<div class="mt-6">
 				switch p.Tab {
+					case "explore":
+						@exploreTab(p)
 					case "connection":
 						@connectionTab(p)
 					case "logs":

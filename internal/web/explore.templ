@@ -1,0 +1,182 @@
+package web
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/brian-nunez/breadboard/internal/core"
+)
+
+templ exploreTab(p servicePage) {
+	if p.ExploreErr != "" {
+		@card() {
+			<div class="p-6">
+				<h2 class="text-base font-semibold">Could not read { p.Row.Name }</h2>
+				<p class="mt-2 font-mono text-sm text-red-700">{ p.ExploreErr }</p>
+				<p class="mt-2 text-sm text-slate-600">The explorer runs the service's own tools inside its container, so the service must be running. Start it, then reload.</p>
+				<div class="mt-4">
+					@terminal("bb up")
+				</div>
+			</div>
+		}
+	} else {
+		switch x := p.Explore.(type) {
+			case *core.PostgresTables:
+				@postgresTables(p.Dash.Experiment, p.Row.Name, x)
+			case *core.RedisKeys:
+				@redisKeys(p.Row.Name, x)
+			case *core.ConsulCatalog:
+				@consulCatalog(x)
+		}
+	}
+}
+
+// explorerCard is a card with a title, a note on where the data came from,
+// and a reload link.
+templ explorerCard(title, source string) {
+	@card() {
+		<div class="flex items-start justify-between gap-4 px-5 pt-5 pb-4">
+			<div>
+				<h2 class="text-base font-semibold">{ title }</h2>
+				<p class="mt-1 text-xs text-slate-500">Read with <code class="font-mono">{ source }</code> inside the container.</p>
+			</div>
+			<a href="?tab=explore" class="text-sm text-indigo-600 hover:text-indigo-800">Refresh</a>
+		</div>
+		{ children... }
+	}
+}
+
+templ emptyRow(cols int, text string) {
+	<tr><td colspan={ itoa(cols) } class="px-5 py-6 text-center text-sm text-slate-500">{ text }</td></tr>
+}
+
+templ th(label string) {
+	<th class="px-5 py-2.5 font-normal">{ label }</th>
+}
+
+templ postgresTables(experiment, name string, x *core.PostgresTables) {
+	@explorerCard("Tables in "+x.Database, "psql") {
+		<table class="w-full text-left text-sm">
+			<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+				<tr>
+					@th("Table")
+					@th("Rows")
+					@th("Size")
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-slate-200">
+				for _, t := range x.Tables {
+					<tr>
+						<td class="px-5 py-2.5 font-mono text-[13px]">{ tableName(t) }</td>
+						<td class="px-5 py-2.5">{ commas(t.Rows) }</td>
+						<td class="px-5 py-2.5 text-slate-600">{ size(t.Bytes) }</td>
+					</tr>
+				}
+				if len(x.Tables) == 0 {
+					@emptyRow(3, "No tables yet. Apps create them; this database starts empty.")
+				}
+			</tbody>
+		</table>
+		<div class="p-5">
+			@terminal(fmt.Sprintf("docker exec -it %s psql -U postgres %s", container(experiment, name), x.Database))
+		</div>
+	}
+}
+
+templ redisKeys(name string, x *core.RedisKeys) {
+	@explorerCard(fmt.Sprintf("Keys (%s in total)", commas(x.Total)), "redis-cli --scan") {
+		<table class="w-full text-left text-sm">
+			<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+				<tr>
+					@th("Key")
+					@th("Type")
+					@th("Expires")
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-slate-200">
+				for _, k := range x.Keys {
+					<tr>
+						<td class="px-5 py-2.5 font-mono text-[13px]">{ k.Key }</td>
+						<td class="px-5 py-2.5">{ k.Type }</td>
+						<td class="px-5 py-2.5 text-slate-600">{ ttl(k.TTL) }</td>
+					</tr>
+				}
+				if len(x.Keys) == 0 {
+					@emptyRow(3, "The cache is empty.")
+				}
+			</tbody>
+		</table>
+		if x.Truncated {
+			<p class="px-5 pt-3 text-xs text-slate-500">Showing the first { itoa(len(x.Keys)) } keys SCAN returned.</p>
+		}
+		<div class="p-5">
+			@terminal("bb creds " + name)
+		</div>
+	}
+}
+
+templ consulCatalog(x *core.ConsulCatalog) {
+	<div class="flex flex-col gap-6">
+		@explorerCard("Services in the catalog", "curl /v1/catalog/services") {
+			<table class="w-full text-left text-sm">
+				<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+					<tr>
+						@th("Service")
+						@th("Instances")
+						@th("Health")
+						@th("Tags")
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-200">
+					for _, s := range x.Services {
+						<tr>
+							<td class="px-5 py-2.5 font-mono text-[13px]">{ s.Name }</td>
+							<td class="px-5 py-2.5">
+								if s.Instances == 0 {
+									—
+								} else {
+									{ itoa(s.Instances) }
+								}
+							</td>
+							<td class="px-5 py-2.5">
+								@consulHealth(s)
+							</td>
+							<td class="px-5 py-2.5 text-slate-600">{ strings.Join(s.Tags, ", ") }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+		@explorerCard("Agents", "curl /v1/catalog/nodes") {
+			<table class="w-full text-left text-sm">
+				<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+					<tr>
+						@th("Node")
+						@th("Address")
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-200">
+					for _, n := range x.Nodes {
+						<tr>
+							<td class="px-5 py-2.5 font-mono text-[13px]">{ n.Name }</td>
+							<td class="px-5 py-2.5 font-mono text-[13px] text-slate-600">{ n.Address }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	</div>
+}
+
+templ consulHealth(s core.ConsulService) {
+	switch {
+		case s.Instances == 0:
+			<span class="text-slate-500">no checks</span>
+		case s.Critical > 0:
+			@statusWord(status{fmt.Sprintf("%d critical", s.Critical), "red"})
+		case s.Warning > 0:
+			@statusWord(status{fmt.Sprintf("%d warning", s.Warning), "amber"})
+		default:
+			@statusWord(status{fmt.Sprintf("%d passing", s.Passing), "green"})
+	}
+}

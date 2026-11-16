@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,9 @@ func (nullRuntime) Down(context.Context, runtime.Project, bool) error  { return 
 func (nullRuntime) RemoveOwned(context.Context, string, bool) error    { return nil }
 func (nullRuntime) Subnets(context.Context) ([]runtime.Network, error) { return nil, nil }
 func (nullRuntime) Owners(context.Context, string) ([]string, error)   { return nil, nil }
+func (nullRuntime) Exec(context.Context, string, string, []string) ([]byte, error) {
+	return nil, errors.New("not running")
+}
 func (nullRuntime) Containers(context.Context, string) ([]runtime.Container, error) {
 	return nil, nil
 }

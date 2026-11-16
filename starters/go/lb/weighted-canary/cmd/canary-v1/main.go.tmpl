@@ -1,0 +1,25 @@
+// Command canary-v1 is the release in production. It runs as two replicas
+// and names its replica and version in every answer.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+const version = "v1"
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // canary-v1-1 or canary-v1-2
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// The version travels in a header too, so a client can count a
+		// version's errors even when the body is an error page.
+		w.Header().Set("X-App-Version", version)
+		fmt.Fprintf(w, "%s %s\n", name, version)
+	})
+	// Breadboard mounts this replica's own certificate and points these at it.
+	log.Printf("%s %s listening on :8443", name, version)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

@@ -1,0 +1,71 @@
+# lb/health-checks
+
+A load balancer must stop sending traffic to a broken replica, and start again once it heals. There are two ways to find out that a replica is broken:
+
+- **Active** checks: the proxy probes every replica on a timer, traffic or not. Here that is [HAProxy](https://docs.haproxy.org/3.4/configuration.html#5.2-check) with `option httpchk`.
+- **Passive** checks: the proxy judges replicas by the answers real requests get. Here that is [Envoy's outlier detection](https://www.envoyproxy.io/docs/envoy/v1.40.0/intro/arch_overview/upstream/outlier).
+
+This starter puts both in front of the **same three replicas**, sends the same traffic through each, and times how long each takes to eject a failing replica and to let it back.
+
+- `cmd/hc-backend`: three replicas. `POST /fail` on a replica's loopback makes it answer 503 to everything; `POST /recover` heals it. Every answer says which replica answered, its state and when that state began: `hc-backend-3 failing since=…`.
+- `cmd/hc-client`: ten requests a second through each proxy. Every 5 seconds it logs which replicas answered through each; when a replica fails it logs, per proxy, **time to eject** (from the moment the replica began failing to the last failed answer that reached the client) and **time to recover** (from the moment it healed to its first good answer).
+- `haproxy.cfg`: `hc-active`, active checks only.
+- `envoy.yaml`: `hc-passive`, outlier detection only, no active checks.
+
+## How it works
+
+**Active, `hc-active`:**
+
+```haproxy
+option httpchk
+http-check send meth GET uri / ver HTTP/1.1 hdr Host hc-backend.{{.Domain}} hdr X-Via hc-active-check
+http-check expect status 200
+default-server inter 2s fall 3 rise 2
+```
+
+Every 2 seconds HAProxy sends `GET /` to each replica; only a 200 passes. After 3 failures in a row the server is `DOWN`; after 2 passes it is `UP` again. So ejection takes 4 to 6 seconds, during which real requests keep reaching the broken replica, and recovery takes 2 to 4 seconds after it heals, with no user request needed to discover it.
+
+**Passive, `hc-passive`:**
+
+```yaml
+outlier_detection:
+  consecutive_5xx: 3
+  interval: 1s
+  base_ejection_time: 10s
+  max_ejection_percent: 50
+```
+
+Envoy counts consecutive 5xx answers per host (connection failures count too). The third one ejects the host at once. At this traffic that is about a second, and exactly three failed requests. But Envoy has no way to see a recovery: the host comes back when its ejection time runs out (10 s, then 20 s, 30 s for each ejection in a row), healed or not. If it still fails, three more requests fail and it is ejected for longer. `max_ejection_percent: 50` lets Envoy eject one host of three; its default of 10% would eject none.
+
+Real systems usually combine them: active checks for a clear view of each replica, outlier detection for fast reaction to the errors users actually see.
+
+## Run it
+
+```sh
+bb up
+bb logs hc-client -f
+```
+
+Every 5 seconds: `last 5s: active: hc-backend-1=17 hc-backend-2=16 hc-backend-3=17 failed=0 | passive: hc-backend-1=17 hc-backend-2=17 hc-backend-3=16 failed=0`.
+
+## What to watch
+
+- `bb serve`: `hc-active`'s **HAProxy stats** tab shows each server slot `UP` or `DOWN` with its last check (`L7OK`, `L7STS` for a wrong status). `hc-passive`'s **Envoy clusters** tab shows the ejected host and the cluster's ejection counters. MCP clients: `haproxy_stats` with `service: hc-active`, `envoy_clusters` with `service: hc-passive`.
+- `bb logs hc-active`: `Server be_hc-backend/hc-backend3 is DOWN, reason: Layer7 wrong status, code: 503`, then `is UP` once it heals.
+- `bb logs hc-backend-3`: every 5 seconds, who sent requests: real requests through each proxy and HAProxy's probes (`hc-active-check`). While the replica is out of both rotations, only the probes arrive.
+
+## Try this
+
+- **Fail a replica.** `docker exec bb-{{.Experiment}}-hc-backend-3-1 wget -qO- --post-data= http://127.0.0.1:8080/fail`. The client logs both ejections, for example:
+  - `passive: hc-backend-3 ejected: last failed answer 0.8s after it began failing (3 failed requests reached the client)`
+  - `active: hc-backend-3 ejected: last failed answer 4.8s after it began failing (17 failed requests reached the client)`
+
+  Then, every 10, 20, 30 seconds: `passive: hc-backend-3 let back in while still failing`, and `ejected again after 3 more failed requests`. The active side stays quiet: HAProxy's probes keep failing, and no user request reaches the replica.
+- **Heal it.** `docker exec bb-{{.Experiment}}-hc-backend-3-1 wget -qO- --post-data= http://127.0.0.1:8080/recover`. `active: hc-backend-3 back: first good answer 3.6s after it recovered`, while the passive side waits out its current ejection: `back … 22.0s after it recovered`. Your numbers will differ by where in each cycle the change fell; the ratio will not.
+- **Make HAProxy passive too.** Append `observe layer7 error-limit 3 on-error mark-down` to the `server-template` line in `haproxy.cfg` and run `bb up`. HAProxy now also watches real responses, and fails the replica after 3 errors in about a second, like Envoy; its active checks still bring it back as soon as it heals. That combination is the usual production setup.
+
+## Break this
+
+- **Fail two of three.** Fail replicas 2 and 3. HAProxy takes both out and replica 1 serves everything, with no errors once the checks have run. Envoy ejects only one (a second ejection would put 67% of the cluster out, above `max_ejection_percent: 50`), so half of the passive requests keep failing. Neither is wrong: the cap protects you from a passive detector that misjudges a healthy fleet, and active checks have no such guard.
+- **Fail with no traffic.** `docker stop bb-{{.Experiment}}-hc-client-1`, fail replica 3, wait 20 seconds, then `docker start bb-{{.Experiment}}-hc-client-1`. HAProxy found the failure on its own, so its side never sends a request to replica 3. Envoy saw nothing while no requests flowed: its side's first requests to replica 3 fail before it is ejected. Passive detection needs failed requests to learn anything.
+- **Stop a replica.** `docker stop bb-{{.Experiment}}-hc-backend-3-1`. Through `hc-passive` a request or two fails with Envoy's own `503` (`upstream connect error … connection timeout`), and then the replica is gone from DNS, so strict DNS drops the host within 5 seconds: service discovery did the ejecting. HAProxy marks the slot `DOWN` on a `Layer4 timeout`. Start it again with `docker start bb-{{.Experiment}}-hc-backend-3-1`.

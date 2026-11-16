@@ -1,0 +1,87 @@
+# haproxy.cfg for sticky-edge: sticky sessions with a cookie.
+#
+# Every new client is balanced round robin across the three replicas of
+# sticky-backend. HAProxy then adds a cookie to the response that names the
+# replica (SERVERID=s1, s2 or s3), and every later request carrying that
+# cookie goes to the same replica. That is session persistence, or sticky
+# sessions: it lets a replica keep a user's session in its own memory.
+#
+# When the replica a cookie names is down, HAProxy ignores the cookie,
+# balances the request to another replica and sets a new cookie: the user
+# moves, and whatever the old replica held in memory is gone.
+#
+# Breadboard requires the monitor frontend on 127.0.0.1:8404 (the health
+# check reads /healthz) and the TLS listener on 8443 with
+# /etc/bb/tls/keystore.pem; the lab CA is /etc/bb/ca.pem.
+
+global
+    # Logs go to the container's stdout: bb logs sticky-edge.
+    log stdout format raw local0
+    # A lab-sized connection limit on one thread (see the HAProxy notes in
+    # bb serve for why maxconn matters in a small container).
+    maxconn 256
+    nbthread 1
+    ssl-default-bind-options ssl-min-ver TLSv1.2
+    ssl-default-server-options ssl-min-ver TLSv1.2
+
+# Docker's embedded DNS. Each server's name is resolved again at runtime, so
+# a replica that restarts with a new address is found again.
+resolvers docker
+    nameserver dns 127.0.0.11:53
+    accepted_payload_size 8192
+    resolve_retries 3
+    timeout resolve 1s
+    timeout retry 1s
+
+defaults
+    log global
+    mode http
+    option httplog
+    # On this network a connection opens in well under a millisecond. A
+    # replica that has gone away never answers, so this is how long a
+    # request waits before HAProxy retries it (see option redispatch).
+    timeout connect 1s
+    timeout client 30s
+    timeout server 30s
+    timeout check 5s
+    # Every server: a check every 2s, down after 3 failures, up after 2
+    # successes. A name that does not resolve yet starts down.
+    default-server inter 2s fall 3 rise 2 resolvers docker resolve-prefer ipv4 init-addr none
+
+# Loopback only: the health check and the stats page (/stats;csv for CSV).
+frontend monitor
+    bind 127.0.0.1:8404
+    monitor-uri /healthz
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats show-legends
+
+frontend https
+    bind :8443 ssl crt /etc/bb/tls/keystore.pem alpn h2,http/1.1
+    http-request set-header X-Forwarded-Proto https
+    option forwardfor
+    default_backend be_sticky-backend
+
+backend be_sticky-backend
+    # A client without the cookie gets the next replica in turn.
+    balance roundrobin
+    # The stickiness. insert: HAProxy adds the cookie itself; the app knows
+    # nothing about it. indirect: the cookie is not passed on to the app,
+    # and is only set again when the replica changes. nocache: responses
+    # that set it are marked uncacheable, so a shared cache never hands one
+    # user's cookie to another. httponly and secure: scripts cannot read it,
+    # and it only travels over HTTPS.
+    cookie SERVERID insert indirect nocache httponly secure
+    # A request that cannot reach its replica (it died, and the checks have
+    # not noticed yet) is retried twice, a second apart; with redispatch the
+    # last retry goes to another replica instead of failing.
+    option redispatch
+    retries 2
+    # One server per replica, each with the cookie value that names it.
+    # Re-encrypt: TLS to each replica, verified against the lab CA by its
+    # own name. To add a replica, add a line (and raise replicas in
+    # experiment.yaml).
+    server sticky-backend-1 sticky-backend-1.{{.Domain}}:8443 cookie s1 ssl verify required ca-file /etc/bb/ca.pem sni str(sticky-backend-1.{{.Domain}}) verifyhost sticky-backend-1.{{.Domain}} check check-sni sticky-backend-1.{{.Domain}}
+    server sticky-backend-2 sticky-backend-2.{{.Domain}}:8443 cookie s2 ssl verify required ca-file /etc/bb/ca.pem sni str(sticky-backend-2.{{.Domain}}) verifyhost sticky-backend-2.{{.Domain}} check check-sni sticky-backend-2.{{.Domain}}
+    server sticky-backend-3 sticky-backend-3.{{.Domain}}:8443 cookie s3 ssl verify required ca-file /etc/bb/ca.pem sni str(sticky-backend-3.{{.Domain}}) verifyhost sticky-backend-3.{{.Domain}} check check-sni sticky-backend-3.{{.Domain}}

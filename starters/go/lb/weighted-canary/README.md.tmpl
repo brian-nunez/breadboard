@@ -1,0 +1,54 @@
+# lb/weighted-canary
+
+Release a new version to a small share of real traffic first, watch it, then shift the rest over, or back. That is a **canary release**, and the proxy's part is a **weighted split**: here a [Traefik weighted service](https://doc.traefik.io/traefik/v3.7/reference/routing-configuration/http/load-balancing/service/#weighted-round-robin) sends 90% of requests to v1 and 10% to v2.
+
+- `cmd/canary-v1`: the release in production, two replicas. It answers `canary-v1-2 v1`.
+- `cmd/canary-v2`: the canary, one replica. It answers `canary-v2 v2 canary=false`.
+- `cmd/canary-client`: calls `CANARY_EDGE_URL` (the proxy) twenty times a second and logs, every 5 seconds, the last window by replica and the running totals by version, with each version's share and its errors.
+- `dynamic.yml`: Traefik's routing for `canary-edge`, yours to read and change. `experiment.yaml` points the service's `file` at it.
+
+## How it works
+
+```yaml
+services:
+  canary:
+    weighted:
+      services:
+        - name: canary-v1
+          weight: 90
+        - name: canary-v2
+          weight: 10
+      healthCheck: {}
+```
+
+1. The router `canary` sends every request to the weighted service `canary`.
+2. The weighted service picks a version by **weighted round robin**, scheduled earliest deadline first: of every 100 requests, 90 go to `canary-v1` and 10 to `canary-v2`, spread out rather than in a burst of 10.
+3. Each version is an ordinary load balancer over its own replicas: `canary-v1` alternates between its two. Weights apply to **services, not servers**, so v2 gets 10% whether it has one replica or ten. (Giving one server among many a higher `weight` in a single load balancer is a different tool: it shares by server, so the split changes whenever you scale.)
+4. `healthCheck: {}` on the weighted service makes it follow its children: if every server of a version is down, the version's share goes to the other one instead of failing.
+5. The router `canary-testers` matches ``Header(`X-Canary`, `always`)`` and sends those requests straight to v2. Traefik ranks routers by rule length, so the longer rule wins when the header is there: testers see v2 every time while users see it 10% of the time.
+
+## Run it
+
+```sh
+bb up
+bb logs canary-client -f
+```
+
+Every 5 seconds: `last 5s: canary-v1-1=45 canary-v1-2=45 canary-v2=10 | total 1000: v1=900 (90.0%) v2=100 (10.0%) errors=0`.
+
+## What to watch
+
+- `bb serve`: the **Traefik routes** tab of `canary-edge` lists both routers and every service: the weighted `canary`, and `canary-v1` and `canary-v2` with each server's health (`UP`, `DOWN`). MCP clients get the same from `traefik_routes` with `service: canary-edge`.
+- `bb logs canary-edge`: Traefik's access log, one line per request with the router and the server that answered.
+- `bb status`: all three replicas and the proxy, healthy.
+
+## Try this
+
+- **Opt in as a tester.** `docker exec bb-{{.Experiment}}-canary-client-1 sh -c 'for i in 1 2 3; do wget -qO- --header "X-Canary: always" "$CANARY_EDGE_URL"; done'`: three answers from `canary-v2 v2 canary=true`.
+- **Shift traffic.** Set the weights to 50 and 50 in `dynamic.yml` and run `bb up`. Breadboard recreates `canary-edge` (and the client, which uses it), and the new totals settle at 50% each. Then try 0 and 100: v1 still runs, ready to take traffic back, but gets none. In production, Traefik's file provider applies an edited file without a restart; here your file is copied into the container, so `bb up` restarts it.
+- **Roll back.** Set v2's weight to 0 and run `bb up`. Rolling back a canary is the same one-line change as rolling it out.
+
+## Break this
+
+- **Ship a bad canary.** In `cmd/canary-v2/main.go`, add `http.Error(w, "v2 is broken", http.StatusInternalServerError); return` after the `X-App-Version` line, then `bb up`, which rebuilds the apps from this directory. The client logs `error from v2: 500 Internal Server Error` for about 10% of requests, and the totals count `v2-errors`, while every v1 request still succeeds. That is the canary doing its job: the bad release reached a tenth of the traffic. Roll back with weight 0, or fix the code.
+- **Lose the canary.** `docker stop bb-{{.Experiment}}-canary-v2-1`. A request or two fails with `502 Bad Gateway` (`error from proxy`) before Traefik's check marks the server `DOWN`; from then on, because the weighted service follows health, v1 answers 100% with no errors. Now delete `healthCheck: {}` from the weighted service, run `bb up`, and stop v2 again: about 10% of requests fail with `503 Service Unavailable` from Traefik itself, the share still sent to a version with no live server. Start it again with `docker start bb-{{.Experiment}}-canary-v2-1`.

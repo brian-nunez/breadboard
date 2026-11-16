@@ -1,0 +1,45 @@
+// Command sticky-backend runs as three replicas behind HAProxy. Each replica
+// keeps sessions in its own memory: a session cookie it sets on the first
+// visit, and a visit count per session. Nothing is shared between replicas,
+// which is exactly why the proxy must send a user back to the same one.
+package main
+
+import (
+	"crypto/rand"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"sync"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // sticky-backend-1, -2 or -3
+	var mu sync.Mutex
+	visits := map[string]int{} // session id -> visits, this replica only
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		id := ""
+		if c, err := r.Cookie("session"); err == nil {
+			id = c.Value
+		} else {
+			// A new visitor: start a session. The proxy adds its own
+			// cookie (SERVERID) to this response; this one is the app's.
+			id = rand.Text()[:12]
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: id, Path: "/", Secure: true, HttpOnly: true})
+		}
+		mu.Lock()
+		visits[id]++
+		n := visits[id]
+		mu.Unlock()
+		if n == 1 {
+			log.Printf("new session %s", id)
+		}
+		// visits=1 for a session id the client already had means this
+		// replica has never seen it: the session started over.
+		fmt.Fprintf(w, "%s session=%s visits=%d\n", name, id, n)
+	})
+	// Breadboard mounts this replica's own certificate and points these at it.
+	log.Printf("%s listening on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

@@ -1,0 +1,51 @@
+# lb/sticky-sessions
+
+Send each user back to the replica that already knows them. That is **session persistence**, or **sticky sessions**: the proxy remembers which server a client belongs to, here with a cookie that [HAProxy](https://docs.haproxy.org/3.4/configuration.html#4.2-cookie) adds to the response. It lets a replica keep sessions in its own memory, and it shows what that costs when the replica dies.
+
+- `cmd/sticky-backend`: three replicas. Each sets a `session` cookie on a user's first visit and counts visits per session **in its own memory**. It answers `sticky-backend-2 session=… visits=7`.
+- `cmd/sticky-client`: three users, each with its own cookie jar like a browser, and one anonymous caller that sends no cookies. Every 5 seconds it logs which replica each user is on and how the anonymous requests spread. When a user lands on another replica it logs `user-1 moved: …`.
+- `haproxy.cfg`: the proxy's config, yours to read and change. `experiment.yaml` points `sticky-edge`'s `file` at it.
+
+## How it works
+
+```haproxy
+backend be_sticky-backend
+    balance roundrobin
+    cookie SERVERID insert indirect nocache httponly secure
+    option redispatch
+    server sticky-backend-1 sticky-backend-1.{{.Domain}}:8443 cookie s1 ssl verify required ... check
+```
+
+1. A user's first request has no `SERVERID` cookie, so `balance roundrobin` picks a replica, say `sticky-backend-2`.
+2. HAProxy adds `Set-Cookie: SERVERID=s2` to the response (`insert`). The app never sees this cookie (`indirect`) and has no code for it.
+3. Every later request carries `SERVERID=s2`, and HAProxy sends it to the server whose `cookie` is `s2`. The user's visit count keeps climbing.
+4. When `sticky-backend-2` is down (3 failed checks, 2 seconds apart), HAProxy ignores the cookie, balances the request to a live replica and sets a new cookie. The user **moves**, and the new replica has never seen their session: `visits=1`. `option redispatch` covers the seconds before the checks notice: a request that cannot connect (`timeout connect 1s`) is retried, and the last retry goes to another server.
+
+That last step is the trade-off. Stickiness keeps state where it was made, which is fast and simple, but the state dies with the replica. The fix is to keep sessions somewhere every replica can read (Redis, a database, or a signed cookie) and balance freely.
+
+## Run it
+
+```sh
+bb up
+bb logs sticky-client -f
+```
+
+Every 5 seconds: `user-1 on sticky-backend-1 visits=25 | user-2 on sticky-backend-2 visits=25 | user-3 on sticky-backend-3 visits=25 | no cookie: sticky-backend-1=9 sticky-backend-2=8 sticky-backend-3=8`. Each user stays put; the anonymous requests rotate.
+
+## What to watch
+
+- `bb serve`: the **HAProxy stats** tab of `sticky-edge` lists each server with its status (`UP`, `DOWN`), last check, sessions and requests. MCP clients get the same from `haproxy_stats` with `service: sticky-edge`.
+- `bb logs sticky-edge`: one line per request, with the server that took it and the cookie flags: `--NI` (no cookie, inserted), `--VN` (valid cookie, nothing to insert), `--DI` (cookie for a down server, new one inserted).
+- `bb status`: the replicas and the proxy, healthy.
+
+## Try this
+
+- **Read the cookies.** Ask the proxy from inside the client, where `$STICKY_EDGE_URL` is set: `docker exec bb-{{.Experiment}}-sticky-client-1 sh -c 'wget -S -O /dev/null "$STICKY_EDGE_URL" 2>&1 | grep -i set-cookie'`. You get two: the app's `session` and HAProxy's `SERVERID`.
+- **Pin a request by hand.** `docker exec bb-{{.Experiment}}-sticky-client-1 sh -c 'for i in 1 2 3; do wget -qO- --header "Cookie: SERVERID=s3" "$STICKY_EDGE_URL"; done'`: three answers from `sticky-backend-3`. Without the header they rotate.
+- **Switch to stickiness by address.** In `haproxy.cfg`, replace the `cookie` line with `balance source` (and delete `cookie s1`… from the servers), then `bb up`. The anonymous caller now sticks too: all three users and the stranger come from one container address, so they all land on one replica. Stickiness by source address cannot tell users apart behind one address (a NAT, a corporate proxy). Put the cookie back when you are done.
+
+## Break this
+
+- **Stop a user's replica.** Find where `user-1` is, then stop it: `docker stop bb-{{.Experiment}}-sticky-backend-2-1` (use the replica the log names). Within a few seconds the client logs `user-1 moved: sticky-backend-2 -> sticky-backend-3 (visits=1 there: the session started over)`, and HAProxy's stats show the server `DOWN`. The user keeps working, but their session is gone.
+- **Bring it back.** `docker start bb-{{.Experiment}}-sticky-backend-2-1`. HAProxy marks it `UP` after two good checks, but `user-1` stays on its new replica: its cookie now says `s3`. Only new users fill the restarted replica, which is why a sticky cluster rebalances slowly after a restart.
+- **Remove the redispatch.** Delete `option redispatch` in `haproxy.cfg`, run `bb up`, and stop a user's replica again. With it, the user moved within a couple of seconds and saw no error. Without it, HAProxy retries the dead replica the cookie names, a second apart, and the user's request hangs until the client gives up (`Client.Timeout exceeded`); anonymous requests that round robin lands on the dead replica hang too. Only when the checks mark the server `DOWN` does the user move.

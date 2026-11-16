@@ -1,0 +1,78 @@
+# haproxy.cfg for hc-active: ACTIVE health checks.
+#
+# HAProxy asks every replica of hc-backend "GET /" every 2 seconds, whether
+# or not any traffic is flowing. Three failed checks in a row take a replica
+# out of rotation; two passing checks bring it back. Detection costs check
+# traffic and a few seconds, but it needs no failed user request to start,
+# and HAProxy notices a recovery on its own.
+#
+# Compare hc-passive (envoy.yaml): the same replicas, judged only by the
+# answers real requests get.
+#
+# Breadboard requires the monitor frontend on 127.0.0.1:8404 (the health
+# check reads /healthz) and the TLS listener on 8443 with
+# /etc/bb/tls/keystore.pem; the lab CA is /etc/bb/ca.pem.
+
+global
+    # Logs go to the container's stdout: bb logs hc-active. A replica going
+    # DOWN or UP is logged with the reason.
+    log stdout format raw local0
+    maxconn 256
+    nbthread 1
+    ssl-default-bind-options ssl-min-ver TLSv1.2
+    ssl-default-server-options ssl-min-ver TLSv1.2
+
+# Docker's embedded DNS: server-template keeps resolving hc-backend's name,
+# so the slots follow the replicas.
+resolvers docker
+    nameserver dns 127.0.0.11:53
+    accepted_payload_size 8192
+    resolve_retries 3
+    timeout resolve 1s
+    timeout retry 1s
+
+defaults
+    log global
+    mode http
+    option httplog
+    timeout connect 1s
+    timeout client 30s
+    timeout server 30s
+    timeout check 2s
+    default-server resolvers docker resolve-prefer ipv4 init-addr none
+
+# Loopback only: the health check and the stats page (/stats;csv for CSV).
+frontend monitor
+    bind 127.0.0.1:8404
+    monitor-uri /healthz
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats show-legends
+
+frontend https
+    bind :8443 ssl crt /etc/bb/tls/keystore.pem alpn h2,http/1.1
+    http-request set-header X-Forwarded-Proto https
+    option forwardfor
+    default_backend be_hc-backend
+
+backend be_hc-backend
+    balance roundrobin
+    # Tell the backend which proxy sent a request, so its log can count
+    # them: real requests and this proxy's checks.
+    http-request set-header X-Via hc-active
+    # The active check: an HTTP request (not just a TCP or TLS handshake),
+    # and only a 200 passes. A replica answering 503 fails it.
+    option httpchk
+    http-check send meth GET uri / ver HTTP/1.1 hdr Host hc-backend.{{.Domain}} hdr X-Via hc-active-check
+    http-check expect status 200
+    # Every 2s (inter); out after 3 failures in a row (fall), back after 2
+    # passes (rise). Time to eject: between 2 x inter and 3 x inter after the
+    # replica breaks, depending on where in the cycle it broke. Time to
+    # recover: up to rise x inter after it heals. A 503 is passed to the
+    # client: retries only cover connection failures.
+    default-server inter 2s fall 3 rise 2
+    # Three slots filled from the DNS answers for hc-backend; re-encrypt to
+    # each replica, verified against the lab CA as hc-backend.{{.Domain}}.
+    # The checks use the same TLS settings.
+    server-template hc-backend 3 hc-backend.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(hc-backend.{{.Domain}}) verifyhost hc-backend.{{.Domain}} check check-sni hc-backend.{{.Domain}}

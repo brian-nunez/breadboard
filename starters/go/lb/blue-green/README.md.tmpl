@@ -1,0 +1,64 @@
+# lb/blue-green
+
+Release a new version by switching all traffic from the old copy of the app to the new one at once, with a way back that is just as quick. That is a **blue-green deployment**: two complete environments, one live and one idle, and a proxy that decides which one is live. Here the proxy is [NGINX](https://nginx.org/en/docs/), and the switch fails no request.
+
+- `cmd/bg-blue`: v1, the version in production. It answers `bg-blue v1`.
+- `cmd/bg-green`: v2, the next version, deployed beside blue and idle. It answers `bg-green v2 at=<time>`.
+- `cmd/bg-client`: calls `BG_EDGE_URL` (the proxy) twenty times a second, one request after another, and logs a tally every 2 seconds: which colour answered and how many requests failed. When the colour changes it logs one `cutover:` line.
+- `nginx.conf`: the proxy's config, yours to read and change. `experiment.yaml` points `bg-edge`'s `file` at it.
+- `switch.sh`: the cutover. `sh blue-green/switch.sh green` makes green live; `sh blue-green/switch.sh blue` rolls back.
+
+## How it works
+
+`nginx.conf` has one `upstream` per colour and a variable that names the live one:
+
+```nginx
+set $bg_live bg-blue;
+include /etc/nginx/bg-live/*.conf;
+
+location / {
+    proxy_pass https://$bg_live;
+    proxy_ssl_name $bg_live.{{.Domain}};
+}
+```
+
+`switch.sh green` runs four steps inside the `bg-edge` container (`docker exec`):
+
+1. **Smoke test.** It calls `https://bg-edge.{{.Domain}}:8443/bg-green/`, a location that reaches green whether it is live or not. If green does not answer, nothing changes.
+2. **Write the switch file.** `/etc/nginx/bg-live/live.conf` gets one line, `set $bg_live bg-green;`. NGINX includes it after the default, so its `set` wins. The include pattern matches nothing until this file exists, and NGINX accepts that.
+3. **Check.** `nginx -t` parses the whole config again. If it fails, the old switch file comes back.
+4. **Reload.** `nginx -s reload` sends the master process `SIGHUP`. The master reads the config, starts new workers with it, and tells the old workers to stop accepting connections, finish the requests they hold, and exit. The listening socket stays open the whole time, so new connections always find a worker.
+
+The client keeps its connection open between requests, as real clients do. When an old worker closes that connection, the client opens a new one to a new worker. Go's HTTP client retries a `GET` that was sent on an idle connection just as the server closed it, which is safe because a `GET` changes nothing. The same race exists in every reload, so clients that send `POST`s need their own retry rules.
+
+### Why not edit `nginx.conf` and run `bb up`?
+
+Breadboard mounts your `nginx.conf` read-only into the container, and a changed file changes the container's config hash, so `bb up` **recreates** `bg-edge`: the old container stops and a new one starts. That is a restart, not a reload, and requests that arrive in between fail. (`bb up` recreates `bg-client` too, because it uses the proxy, so the client cannot show you the gap; `docker restart` in *Break this* can.) That is why the switch lives in a file inside the container, and why it is lost when the container is recreated: a new `bg-edge` starts on the default colour in `nginx.conf`. To make green the default, change `set $bg_live bg-blue;` and run `bb up` when a restart is acceptable.
+
+## Run it
+
+```sh
+bb up
+bb logs bg-client -f
+```
+
+The client logs `live colour: bg-blue` and then, every 2 seconds, `last 2s: bg-blue=40 | total ok=… errors=0`.
+
+## What to watch
+
+- `bb logs bg-edge`: one access log line per request, with the live colour and the address that answered (`live=bg-blue upstream=<address>:8443`).
+- `bb status`: both colours are running and healthy the whole time; only the proxy's choice changes.
+- `bb serve`: the **NGINX status** tab of `bg-edge` shows its connections and requests, and what `bg-blue.{{.Domain}}` and `bg-green.{{.Domain}}` resolve to. MCP clients get the same from `nginx_status` with `service: bg-edge`.
+
+## Try this
+
+- **Cut over.** In a second terminal, `sh blue-green/switch.sh green`. The client logs `cutover: bg-blue -> bg-green after … answers, 0 errors so far`, and from the next tally on only `bg-green` answers.
+- **Roll back.** `sh blue-green/switch.sh blue`. The way back is the same single step, which is the point of keeping blue running.
+- **Watch the reload.** `bb logs bg-edge` shows `signal 1 (SIGHUP) received`, `start worker process`, and the old worker `gracefully shutting down`, then exiting.
+- **Smoke test by hand.** `docker exec bb-{{.Experiment}}-bg-edge-1 curl -sS --cacert /etc/bb/ca.pem https://bg-edge.{{.Domain}}:8443/bg-green/` reaches green while blue is live: test the new version on the real path before any user sees it.
+
+## Break this
+
+- **Restart instead of reload.** `docker restart bb-{{.Experiment}}-bg-edge-1`. Docker sends NGINX `SIGQUIT`, a graceful shutdown, yet the client logs a few `error:` lines: `connection refused`, and `no such host` while the container is gone from DNS. A graceful shutdown still closes the listening socket; a reload never does. The switch file survives a restart (same container), so the live colour does not change.
+- **Switch to a dead colour.** `docker stop bb-{{.Experiment}}-bg-green-1`, then `sh blue-green/switch.sh green`: the smoke test gets a 502 and blue stays live. Now skip the smoke test, as a hurried deploy might: `docker exec bb-{{.Experiment}}-bg-edge-1 sh -c 'echo "set \$bg_live bg-green;" > /etc/nginx/bg-live/live.conf && nginx -s reload -c /etc/bb/config/nginx.conf'`. Every request fails with `502 Bad Gateway` until you roll back (`sh blue-green/switch.sh blue`) or start green again (`docker start bb-{{.Experiment}}-bg-green-1`), which NGINX finds through DNS within seconds.
+- **Load a broken config.** `docker exec bb-{{.Experiment}}-bg-edge-1 sh -c 'echo "set \$bg_live;" > /etc/nginx/bg-live/live.conf && nginx -s reload -c /etc/bb/config/nginx.conf'`. `nginx -s reload` parses the config before it signals anything, so it refuses with `invalid number of arguments in "set" directive`. Send the signal yourself (`docker exec bb-{{.Experiment}}-bg-edge-1 kill -HUP 1`): the master logs the same error and keeps its old workers, and traffic never notices. `sh blue-green/switch.sh blue` writes a valid file again.

@@ -220,4 +220,52 @@ var starterContents = map[string]starterContent{
 		KeyFile: "envoy.yaml", KeyTitle: "Two hashing clusters",
 		Covers: []string{"Consistent hashing", "Ring hash vs Maglev", "Cache locality", "Remapping when a replica leaves"},
 	},
+	"lb/sticky-sessions": {
+		Area:  "haproxy",
+		About: "Three replicas that each keep sessions in their own memory, behind HAProxy. A cookie HAProxy adds to the first response pins each user to one replica, so their session survives every request. Stop that replica and the user moves to another one, and the session starts over: the trade-off sticky sessions make.",
+		Steps: []step{
+			{"The first request is balanced round robin", "The user has no SERVERID cookie yet, so HAProxy picks the next replica, and the replica starts a session."},
+			{"HAProxy inserts SERVERID", "cookie SERVERID insert indirect: the proxy sets the cookie on the response, and the app never sees it."},
+			{"Every later request returns to the same replica", "The cookie names the server (s1, s2, s3), and the visit count keeps climbing."},
+			{"The replica dies; the user moves", "With the server down, HAProxy ignores the cookie, balances the request elsewhere and sets a new cookie. The new replica answers visits=1."},
+		},
+		KeyFile: "haproxy.cfg", KeyTitle: "Cookie persistence in the backend",
+		Covers: []string{"Session persistence with cookies", "insert, indirect and nocache", "option redispatch", "Why sticky state is lost on failure"},
+	},
+	"lb/weighted-canary": {
+		Area:  "traefik",
+		About: "v1 runs as two replicas and v2, the canary, as one. A Traefik weighted service sends 90% of requests to v1 and 10% to v2, so a bad release reaches a tenth of the traffic before anyone shifts the rest. Testers can opt in to v2 with a header.",
+		Steps: []step{
+			{"One router, one weighted service", "Every request goes to the weighted service canary, which picks a version by weighted round robin: 90 to v1, 10 to v2, spread out."},
+			{"Each version balances its own replicas", "Weights apply to services, not servers: v2 keeps its 10% at any replica count."},
+			{"The client keeps score by version", "Running totals with each version's share and its errors, the numbers you watch during a canary."},
+			{"Shift or roll back", "Change the weights in dynamic.yml and run bb up: 50/50, then 0/100, or v2 back to 0."},
+		},
+		KeyFile: "dynamic.yml", KeyTitle: "The weighted service",
+		Covers: []string{"Canary releases", "Weighted round robin", "Weights per service vs per server", "Header-based opt-in routing"},
+	},
+	"lb/blue-green": {
+		Area:  "nginx",
+		About: "Blue (v1) serves while green (v2) runs beside it, idle. One variable in nginx.conf names the live colour, and switch.sh changes it with NGINX's graceful reload: a smoke test, a one-line switch file, nginx -t, then nginx -s reload. The client sees only blue, then only green, and no failed request.",
+		Steps: []step{
+			{"$bg_live names the live upstream", "proxy_pass https://$bg_live sends every request to the upstream block of that name."},
+			{"Smoke test the idle colour", "/bg-green/ reaches green through the proxy while blue is live."},
+			{"Write the switch and check it", "A one-line include sets $bg_live to the new colour; nginx -t parses the whole config first."},
+			{"Reload, not restart", "The master starts new workers with the new config and lets the old ones finish their requests. The listening socket never closes."},
+		},
+		KeyFile: "switch.sh", KeyTitle: "The cutover, step by step",
+		Covers: []string{"Blue-green deployments", "Graceful reload vs restart", "Smoke testing the idle environment", "Instant rollback"},
+	},
+	"lb/health-checks": {
+		Area:  "haproxy",
+		About: "The same three replicas behind two proxies: HAProxy probes each one every 2 seconds (active checks), Envoy judges them only by the answers real requests get (outlier detection). Fail one replica and the client times how long each proxy takes to eject it and to let it back, and how many requests failed meanwhile.",
+		Steps: []step{
+			{"POST /fail on replica 3", "It answers 503 to everything, and stamps when it began failing in each answer."},
+			{"Envoy ejects after 3 failures", "About a second at this traffic, and exactly three failed requests; HAProxy needs three failed probes, 4 to 6 seconds."},
+			{"Envoy retries blindly", "An ejected host returns when its ejection time runs out, healed or not, and is ejected for longer if it still fails."},
+			{"HAProxy sees the recovery", "Two passing probes bring the replica back within seconds of healing; Envoy waits out its ejection."},
+		},
+		KeyFile: "cmd/hc-client/main.go", KeyTitle: "Timing ejection and recovery",
+		Covers: []string{"Active health checks", "Passive health checks (outlier detection)", "Time to eject and time to recover", "max_ejection_percent"},
+	},
 }

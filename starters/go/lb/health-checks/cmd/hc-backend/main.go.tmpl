@@ -1,0 +1,97 @@
+// Command hc-backend runs as three replicas behind two proxies at once:
+// hc-active (HAProxy, active checks) and hc-passive (Envoy, outlier
+// detection). Any replica can be made to fail from inside its container:
+//
+//	wget -qO- --post-data= http://127.0.0.1:8080/fail     # answer 503
+//	wget -qO- --post-data= http://127.0.0.1:8080/recover  # answer 200 again
+//
+// Every answer carries the replica's name, its state and when that state
+// began, so the client can time how long each proxy takes to react.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+type state struct {
+	mu      sync.Mutex
+	failing bool
+	since   time.Time      // when the current state began
+	seen    map[string]int // requests by sender in the current 5s window
+}
+
+func (s *state) set(failing bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failing != failing {
+		s.failing, s.since = failing, time.Now()
+	}
+}
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // hc-backend-1, -2 or -3
+	s := &state{since: time.Now(), seen: map[string]int{}}
+
+	// The knob, on loopback only: reachable with docker exec, not through
+	// either proxy.
+	control := http.NewServeMux()
+	control.HandleFunc("POST /fail", func(w http.ResponseWriter, r *http.Request) {
+		s.set(true)
+		log.Printf("%s now answers 503 to everything", name)
+	})
+	control.HandleFunc("POST /recover", func(w http.ResponseWriter, r *http.Request) {
+		s.set(false)
+		log.Printf("%s is healthy again", name)
+	})
+	go func() { log.Fatal(http.ListenAndServe("127.0.0.1:8080", control)) }()
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		failing, since := s.failing, s.since
+		// X-Via names the proxy, set in its config: hc-active,
+		// hc-active-check (HAProxy's probes) or hc-passive.
+		s.seen[r.Header.Get("X-Via")]++
+		s.mu.Unlock()
+		if failing {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, "%s failing since=%d\n", name, since.UnixMilli())
+			return
+		}
+		fmt.Fprintf(w, "%s healthy since=%d\n", name, since.UnixMilli())
+	})
+
+	// Every 5 seconds: who sent requests. While a replica is out of both
+	// rotations, only HAProxy's probes still arrive.
+	go func() {
+		for range time.Tick(5 * time.Second) {
+			s.mu.Lock()
+			st := "healthy"
+			if s.failing {
+				st = "failing"
+			}
+			keys := make([]string, 0, len(s.seen))
+			for k := range s.seen {
+				keys = append(keys, k)
+			}
+			slices.Sort(keys)
+			parts := make([]string, len(keys))
+			for i, k := range keys {
+				parts[i] = fmt.Sprintf("%s=%d", k, s.seen[k])
+			}
+			clear(s.seen)
+			s.mu.Unlock()
+			log.Printf("%s, last 5s: %s", st, strings.Join(parts, " "))
+		}
+	}()
+
+	// Breadboard mounts this replica's own certificate and points these at it.
+	log.Printf("%s listening on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

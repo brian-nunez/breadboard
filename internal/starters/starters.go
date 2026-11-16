@@ -326,6 +326,89 @@ var all = []Starter{
 			File:      "envoy.yaml",
 		}},
 	},
+	{
+		ID:       "lb/sticky-sessions",
+		Title:    "Sticky sessions with HAProxy",
+		Summary:  "An HAProxy cookie pins each user to one replica that holds their session; stop that replica and the user moves, and the session starts over.",
+		Language: "go",
+		Template: "go/lb/sticky-sessions",
+		Dir:      "sticky-sessions",
+		Apps: []App{
+			{Name: "sticky-backend", Command: []string{"sticky-backend"}, Replicas: 3},
+			{Name: "sticky-client", Command: []string{"sticky-client"}, Uses: []string{"sticky-edge"}},
+		},
+		Services: []Service{{
+			Name: "sticky-edge",
+			Type: "haproxy",
+			// Re-encrypt to every replica's TLS port.
+			Upstreams: []spec.Upstream{{Service: "sticky-backend", Port: 8443}},
+			File:      "haproxy.cfg",
+		}},
+	},
+	{
+		ID:       "lb/weighted-canary",
+		Title:    "Weighted canary with Traefik",
+		Summary:  "A Traefik weighted service sends 90% of requests to v1 and 10% to the v2 canary; shift the weights to roll v2 out or back.",
+		Language: "go",
+		Template: "go/lb/weighted-canary",
+		Dir:      "weighted-canary",
+		Apps: []App{
+			{Name: "canary-v1", Command: []string{"canary-v1"}, Replicas: 2},
+			{Name: "canary-v2", Command: []string{"canary-v2"}},
+			{Name: "canary-client", Command: []string{"canary-client"}, Uses: []string{"canary-edge"}},
+		},
+		Services: []Service{{
+			Name:      "canary-edge",
+			Type:      "traefik",
+			Upstreams: []spec.Upstream{{Service: "canary-v1", Port: 8443}, {Service: "canary-v2", Port: 8443}},
+			File:      "dynamic.yml",
+		}},
+	},
+	{
+		ID:       "lb/blue-green",
+		Title:    "Blue-green deployment with NGINX",
+		Summary:  "Blue serves while green waits; one variable and NGINX's graceful reload cut every request over to green, and back, without failing one.",
+		Language: "go",
+		Template: "go/lb/blue-green",
+		Dir:      "blue-green",
+		Apps: []App{
+			{Name: "bg-blue", Command: []string{"bg-blue"}},
+			{Name: "bg-green", Command: []string{"bg-green"}},
+			{Name: "bg-client", Command: []string{"bg-client"}, Uses: []string{"bg-edge"}},
+		},
+		Services: []Service{{
+			Name:      "bg-edge",
+			Type:      "nginx",
+			Upstreams: []spec.Upstream{{Service: "bg-blue", Port: 8443}, {Service: "bg-green", Port: 8443}},
+			File:      "nginx.conf",
+		}},
+	},
+	{
+		ID:       "lb/health-checks",
+		Title:    "Active and passive health checks",
+		Summary:  "The same flaky replica behind HAProxy's active checks and Envoy's passive outlier detection, with the time each takes to eject it and to let it back.",
+		Language: "go",
+		Template: "go/lb/health-checks",
+		Dir:      "health-checks",
+		Apps: []App{
+			{Name: "hc-backend", Command: []string{"hc-backend"}, Replicas: 3},
+			{Name: "hc-client", Command: []string{"hc-client"}, Uses: []string{"hc-active", "hc-passive"}},
+		},
+		Services: []Service{
+			{
+				Name:      "hc-active",
+				Type:      "haproxy",
+				Upstreams: []spec.Upstream{{Service: "hc-backend", Port: 8443}},
+				File:      "haproxy.cfg",
+			},
+			{
+				Name:      "hc-passive",
+				Type:      "envoy",
+				Upstreams: []spec.Upstream{{Service: "hc-backend", Port: 8443}},
+				File:      "envoy.yaml",
+			},
+		},
+	},
 }
 
 // envoyInbound is an Envoy sidecar terminating TLS on 8443 in front of an

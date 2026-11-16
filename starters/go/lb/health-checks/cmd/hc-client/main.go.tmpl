@@ -1,0 +1,177 @@
+// Command hc-client sends the same traffic through both proxies, ten
+// requests a second each, and times how each one handles a failing replica:
+//
+//   - time to eject: from the moment the replica began failing (the backend
+//     stamps it in every answer) to the last failed answer that reached
+//     this client through that proxy;
+//   - time to recover: from the moment the replica healed to its first good
+//     answer through that proxy.
+//
+// Every 5 seconds it also logs which replicas answered through each proxy.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"maps"
+	"net/http"
+	"os"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// episode is one replica's failure as seen through one proxy.
+type episode struct {
+	began     time.Time // when the replica began failing
+	lastFail  time.Time // the last failed answer through this proxy
+	failures  int       // failed answers through this proxy
+	ejected   bool      // no answers from it for a while: out of rotation
+	ejections int       // how many times it was ejected
+	sinceBack int       // failed answers since it was last let back in
+}
+
+type proxy struct {
+	name     string
+	url      string
+	client   *http.Client
+	mu       sync.Mutex
+	window   map[string]int      // replica -> good answers, last 5s
+	failed   int                 // failed answers, last 5s
+	episodes map[string]*episode // replica -> its current failure
+}
+
+// quiet is how long a failing replica must go without answering before we
+// call it out of rotation. At ten requests a second over three replicas,
+// that is several requests it would otherwise have taken.
+const quiet = 2 * time.Second
+
+func main() {
+	// TLS is verified against SSL_CERT_FILE, the lab CA.
+	proxies := []*proxy{
+		{name: "active", url: os.Getenv("HC_ACTIVE_URL")},   // HAProxy, active checks
+		{name: "passive", url: os.Getenv("HC_PASSIVE_URL")}, // Envoy, outlier detection
+	}
+	for _, p := range proxies {
+		p.client = &http.Client{Timeout: 5 * time.Second}
+		p.window, p.episodes = map[string]int{}, map[string]*episode{}
+		go p.run()
+	}
+	for range time.Tick(5 * time.Second) {
+		var parts []string
+		for _, p := range proxies {
+			p.mu.Lock()
+			parts = append(parts, fmt.Sprintf("%s: %s failed=%d", p.name, format(p.window), p.failed))
+			clear(p.window)
+			p.failed = 0
+			p.mu.Unlock()
+		}
+		log.Printf("last 5s: %s", strings.Join(parts, " | "))
+	}
+}
+
+func (p *proxy) run() {
+	calls := time.Tick(100 * time.Millisecond)
+	sweep := time.Tick(250 * time.Millisecond)
+	for {
+		select {
+		case <-calls:
+			p.call()
+		case <-sweep:
+			p.checkEjections()
+		}
+	}
+}
+
+func (p *proxy) call() {
+	resp, err := p.client.Get(p.url + "/")
+	if err != nil {
+		log.Printf("%s: error: %v", p.name, err)
+		p.mu.Lock()
+		p.failed++
+		p.mu.Unlock()
+		return
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	// "hc-backend-3 failing since=1731770000123"
+	var replica, st string
+	var since int64
+	if _, err := fmt.Sscanf(string(body), "%s %s since=%d", &replica, &st, &since); err != nil {
+		// No replica answered: the proxy itself did, for example Envoy's
+		// 503 when it cannot connect to the replica it picked.
+		log.Printf("%s: failed: %s from the proxy: %.80s", p.name, resp.Status, strings.TrimSpace(string(body)))
+		p.mu.Lock()
+		p.failed++
+		p.mu.Unlock()
+		return
+	}
+	changed := time.UnixMilli(since)
+	now := time.Now()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e := p.episodes[replica]
+	if resp.StatusCode != http.StatusOK {
+		p.failed++
+		if e == nil {
+			e = &episode{began: changed}
+			p.episodes[replica] = e
+		}
+		if e.ejected {
+			// Back in rotation without having healed: Envoy's ejection
+			// time ran out. It will be ejected again, for longer.
+			log.Printf("%s: %s let back in while still failing, %s after its last failure", p.name, replica, secs(now.Sub(e.lastFail)))
+			e.ejected, e.sinceBack = false, 0
+		}
+		e.failures++
+		e.sinceBack++
+		e.lastFail = now
+		return
+	}
+	p.window[replica]++
+	if e != nil {
+		log.Printf("%s: %s back: first good answer %s after it recovered (%d failed requests reached the client in all)",
+			p.name, replica, secs(now.Sub(changed)), e.failures)
+		delete(p.episodes, replica)
+	}
+}
+
+// checkEjections notices failing replicas that stopped answering: the proxy
+// took them out of rotation.
+func (p *proxy) checkEjections() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, replica := range slices.Sorted(maps.Keys(p.episodes)) {
+		e := p.episodes[replica]
+		if e.ejected || time.Since(e.lastFail) <= quiet {
+			continue
+		}
+		e.ejected = true
+		e.ejections++
+		if e.ejections == 1 {
+			log.Printf("%s: %s ejected: last failed answer %s after it began failing (%d failed requests reached the client)",
+				p.name, replica, secs(e.lastFail.Sub(e.began)), e.failures)
+		} else {
+			log.Printf("%s: %s ejected again after %d more failed requests (%d in all)", p.name, replica, e.sinceBack, e.failures)
+		}
+	}
+}
+
+func secs(d time.Duration) string {
+	return strconv.FormatFloat(d.Seconds(), 'f', 1, 64) + "s"
+}
+
+func format(m map[string]int) string {
+	if len(m) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, m[k]))
+	}
+	return strings.Join(parts, " ")
+}

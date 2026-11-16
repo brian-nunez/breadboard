@@ -1,0 +1,108 @@
+// Command canary-client calls the proxy twenty times a second and keeps
+// score by version: how many requests each one answered, how many failed,
+// and its share of the total. Every 5 seconds it logs the last window and
+// the running totals, which is what you watch while a canary takes traffic.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"time"
+)
+
+func main() {
+	url := os.Getenv("CANARY_EDGE_URL") // https://canary-edge.<domain>:8443, the proxy
+	// TLS is verified against SSL_CERT_FILE, the lab CA.
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	window := map[string]int{}   // replica -> answers, last 5s
+	answered := map[string]int{} // version -> answers, since start
+	failed := map[string]int{}   // version (or "proxy") -> failures, since start
+	total := 0
+	report := time.Tick(5 * time.Second)
+	for range time.Tick(50 * time.Millisecond) {
+		replica, version, err := call(client, url)
+		total++
+		if err != nil {
+			failed[version]++
+			window["errors"]++
+			log.Printf("error from %s: %v", version, err)
+		} else {
+			answered[version]++
+			window[replica]++
+		}
+		select {
+		case <-report:
+			log.Printf("last 5s: %s | total %d: %s", format(window), total, shares(total, answered, failed))
+			clear(window)
+		default:
+		}
+	}
+}
+
+// call returns the replica and version that answered ("canary-v1-2 v1").
+// On a failure the version comes from the X-App-Version header, or is
+// "proxy" when the request never reached a version.
+func call(client *http.Client, url string) (replica, version string, err error) {
+	resp, err := client.Get(url + "/")
+	if err != nil {
+		return "", "proxy", err
+	}
+	defer resp.Body.Close()
+	version = resp.Header.Get("X-App-Version")
+	if version == "" {
+		version = "proxy"
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", version, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", version, fmt.Errorf("%s", resp.Status)
+	}
+	fields := strings.Fields(string(body))
+	if len(fields) < 2 {
+		return "", version, fmt.Errorf("unexpected answer %q", body)
+	}
+	return fields[0], fields[1], nil
+}
+
+// shares formats each version's answers with its share of all requests,
+// and failures by version.
+func shares(total int, answered, failed map[string]int) string {
+	var parts []string
+	for _, v := range sorted(answered) {
+		parts = append(parts, fmt.Sprintf("%s=%d (%.1f%%)", v, answered[v], 100*float64(answered[v])/float64(total)))
+	}
+	errs := 0
+	for _, v := range sorted(failed) {
+		errs += failed[v]
+		parts = append(parts, fmt.Sprintf("%s-errors=%d", v, failed[v]))
+	}
+	return strings.Join(append(parts, fmt.Sprintf("errors=%d", errs)), " ")
+}
+
+func sorted(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func format(m map[string]int) string {
+	if len(m) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(m))
+	for _, k := range sorted(m) {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, m[k]))
+	}
+	return strings.Join(parts, " ")
+}

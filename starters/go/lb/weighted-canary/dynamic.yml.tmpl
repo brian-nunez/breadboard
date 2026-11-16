@@ -1,0 +1,88 @@
+# dynamic.yml for canary-edge: a weighted canary through Traefik.
+#
+# v1 is the release in production (two replicas); v2 is the canary (one
+# replica). The router sends every request to the weighted service
+# "canary", which splits requests between the two versions by weight:
+# 90 to v1, 10 to v2. Watch v2's errors and latency while it takes a small
+# share, then shift the weights (50/50, then 0/100) to roll it out, or set
+# v2 to 0 to roll it back.
+#
+# Weights apply to services, not servers: v2 gets 10% with one replica or
+# with ten. Inside each version, its own load balancer spreads requests over
+# its replicas.
+#
+# This file replaces Traefik's dynamic configuration only. Breadboard keeps
+# traefik.yml (the websecure entrypoint on :8443, the API and ping on
+# 127.0.0.1:8080) and tls.yml (this service's certificate). Traefik reads
+# this file through Go templates, so it contains no double braces, not even
+# in comments.
+
+http:
+  routers:
+    # Every request goes to the weighted service.
+    canary:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/`)
+      service: canary
+    # Testers opt in to the canary with a header. Traefik gives longer rules
+    # a higher priority, so this rule wins over PathPrefix(`/`) whenever the
+    # header is present.
+    canary-testers:
+      entryPoints:
+        - websecure
+      rule: Header(`X-Canary`, `always`)
+      service: canary-v2
+
+  services:
+    # The split. Weighted round robin, scheduled earliest deadline first:
+    # out of every 100 requests, 90 go to canary-v1 and 10 to canary-v2,
+    # spread out rather than in bursts.
+    canary:
+      weighted:
+        services:
+          - name: canary-v1
+            weight: 90
+          - name: canary-v2
+            weight: 10
+        # Follow the children's health: when every server of a version is
+        # down, its share goes to the other version instead of failing.
+        healthCheck: {}
+
+    # v1: round robin over both replicas, each listed by name (Traefik does
+    # not turn one DNS name into several servers).
+    canary-v1:
+      loadBalancer:
+        servers:
+          - url: https://canary-v1-1.{{.Domain}}:8443
+          - url: https://canary-v1-2.{{.Domain}}:8443
+        # Active checks every 2s; a 2xx or 3xx keeps a server in.
+        healthCheck:
+          path: /
+          hostname: canary-v1.{{.Domain}}
+          interval: 2s
+          timeout: 2s
+        serversTransport: canary-v1
+
+    # v2: the canary, one replica.
+    canary-v2:
+      loadBalancer:
+        servers:
+          - url: https://canary-v2.{{.Domain}}:8443
+        healthCheck:
+          path: /
+          hostname: canary-v2.{{.Domain}}
+          interval: 2s
+          timeout: 2s
+        serversTransport: canary-v2
+
+  # Re-encrypt: TLS to each version, verified against the lab CA by its name.
+  serversTransports:
+    canary-v1:
+      serverName: canary-v1.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem
+    canary-v2:
+      serverName: canary-v2.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem

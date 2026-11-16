@@ -2,9 +2,11 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +40,9 @@ type fakeRuntime struct {
 	// start time, still running and healthy) on that Containers call.
 	restartOnPoll map[string]int
 	polls         int
+	// execOut is what Exec prints, by service; execs records each call.
+	execOut map[string]string
+	execs   []string
 }
 
 func newFake() *fakeRuntime {
@@ -103,6 +108,23 @@ func (f *fakeRuntime) RemoveOwned(ctx context.Context, experimentID string, volu
 	}
 	f.removedOwned = append(f.removedOwned, experimentID)
 	return nil
+}
+
+func (f *fakeRuntime) Exec(ctx context.Context, experiment, service string, cmd []string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	line := strings.Join(cmd, " ")
+	f.execs = append(f.execs, service+": "+line)
+	// "service|part" matches commands containing part; "service" matches any.
+	for k, out := range f.execOut {
+		if svc, part, ok := strings.Cut(k, "|"); ok && svc == service && strings.Contains(line, part) {
+			return []byte(out), nil
+		}
+	}
+	if out, ok := f.execOut[service]; ok {
+		return []byte(out), nil
+	}
+	return nil, fmt.Errorf("fake: no exec output for %s", service)
 }
 
 func (f *fakeRuntime) Containers(ctx context.Context, experiment string) ([]runtime.Container, error) {

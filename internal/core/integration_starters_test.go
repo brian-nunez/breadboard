@@ -391,3 +391,40 @@ func TestIntegrationUpCatchesACrashAfterStart(t *testing.T) {
 	}
 	t.Logf("Up failed as it should: %v", err)
 }
+
+// TestIntegrationExplorers runs the Postgres, Redis and Consul explorers
+// against the pinned images, through docker exec of each one's own tools.
+func TestIntegrationExplorers(t *testing.T) {
+	eng, dir, name := starterLab(t, "explore", "consul/service-discovery")
+	ctx := context.Background()
+	for _, typ := range []string{"postgres", "redis"} {
+		if _, err := eng.AddService(ctx, AddServiceRequest{Dir: dir, Type: typ}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	upHealthy(t, eng, dir)
+	docker(t, "exec", containerOf(t, name, "postgres"), "psql", "-U", "postgres", "-d", "app", "-c", "create table orders(id int); insert into orders select generate_series(1, 42);")
+	docker(t, "exec", containerOf(t, name, "redis"), "sh", "-c", `redis-cli --tls --cacert /etc/bb/ca.pem -h redis.bb.internal --no-auth-warning -a "$REDIS_PASSWORD" set product:apple 100 EX 600`)
+
+	req := func(s string) ExploreRequest { return ExploreRequest{Dir: dir, Service: s} }
+	pg, err := eng.PostgresTables(ctx, req("postgres"))
+	if err != nil || len(pg.Tables) != 1 || pg.Tables[0].Name != "orders" || pg.Tables[0].Rows != 42 || pg.Tables[0].Bytes == 0 {
+		t.Errorf("PostgresTables = %+v %v", pg, err)
+	}
+	keys, err := eng.RedisKeys(ctx, req("redis"))
+	if err != nil || keys.Total != 1 || len(keys.Keys) != 1 || keys.Keys[0].Key != "product:apple" || keys.Keys[0].Type != "string" || keys.Keys[0].TTL <= 0 {
+		t.Errorf("RedisKeys = %+v %v", keys, err)
+	}
+	eventually(t, time.Minute, "the greeter to pass its check in the catalog", func() bool {
+		cat, err := eng.ConsulCatalog(ctx, req("consul"))
+		if err != nil {
+			return false
+		}
+		for _, s := range cat.Services {
+			if s.Name == "greeter" && s.Passing == 1 {
+				return len(cat.Nodes) == 2
+			}
+		}
+		return false
+	})
+}

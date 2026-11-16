@@ -228,6 +228,24 @@ func (c *Compose) Containers(ctx context.Context, experiment string) ([]Containe
 	return list, nil
 }
 
+// Exec runs a command in the running container of an experiment's service
+// and returns its standard output. It is how the web UI's explorers read
+// service data with each service's own tools (ADR-0012).
+func (c *Compose) Exec(ctx context.Context, experiment, service string, cmd []string) ([]byte, error) {
+	out, err := c.run(ctx, "ps", "--quiet", "--no-trunc",
+		"--filter", "label=breadboard.experiment="+experiment,
+		"--filter", "label=breadboard.service="+service,
+		"--filter", "status=running")
+	if err != nil {
+		return nil, err
+	}
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("%s is not running: %w", service, errs.ErrNotFound)
+	}
+	return c.run(ctx, append([]string{"exec", ids[0]}, cmd...)...)
+}
+
 // Stats samples CPU and memory use once for running containers.
 func (c *Compose) Stats(ctx context.Context, ids []string) (map[string]Usage, error) {
 	if len(ids) == 0 {

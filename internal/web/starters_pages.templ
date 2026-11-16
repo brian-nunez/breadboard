@@ -125,6 +125,14 @@ templ starterPage(v starterView) {
 						<h2 class="mt-8 text-xl font-semibold">{ v.Content.KeyTitle }</h2>
 						@docCode(v.Details.Dir+"/"+v.Content.KeyFile, v.KeyCode)
 					}
+					if len(v.Configs) > 0 {
+						<h2 class="mt-8 text-xl font-semibold">Proxy configs</h2>
+						<p class="mt-3 text-[15px] leading-6 text-slate-600">Native configs the starter writes into your code directory. Each proxy runs its own instead of a generated one; edit it and run <code class="font-mono text-[13px]">bb up</code>.</p>
+						for _, c := range v.Configs {
+							<h3 class="mt-5 font-semibold">{ c.Service } <span class="font-normal text-slate-500">· { techNames([]string{c.Type}, v.Catalog) }</span></h3>
+							@docCode(v.Details.Dir+"/"+c.Path, c.Data)
+						}
+					}
 					@card() {
 						<div class="p-5">
 							<h3 class="font-semibold">Files it creates</h3>

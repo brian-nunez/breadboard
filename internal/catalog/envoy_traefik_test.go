@@ -24,7 +24,8 @@ func TestEnvoyConfigShapes(t *testing.T) {
 		// Several upstreams: prefixes rewritten to /, the first is the default.
 		"prefix: /api/\n                          route:\n                            cluster: api\n                            prefix_rewrite: /",
 		"prefix: /\n                          route:\n                            cluster: web\n",
-		"type: STRICT_DNS",
+		"name: envoy.clusters.dns",
+		"dns_refresh_rate: 5s",
 		"lb_policy: ROUND_ROBIN",
 		"address: web.bb.internal\n                      port_value: 8443",
 		"address: api.plain.bb.internal\n                      port_value: 8080",
@@ -58,6 +59,10 @@ func TestEnvoyConfigShapes(t *testing.T) {
 	cfg = string(envoyConfig(one))
 	if strings.Contains(cfg, "prefix_rewrite") || strings.Contains(cfg, "9443") {
 		t.Errorf("a single upstream rewrites paths or listens for passthrough:\n%s", cfg)
+	}
+	// D-162: no deprecated cluster fields, which Envoy v1.40 warns about.
+	if strings.Contains(cfg, "type: STRICT_DNS") {
+		t.Errorf("the config uses the deprecated STRICT_DNS type with dns_refresh_rate:\n%s", cfg)
 	}
 	none := haproxyServer()
 	none.Upstreams = nil
@@ -352,6 +357,9 @@ func TestEnvoyConfigValidates(t *testing.T) {
 			e.Image, "envoy", "--mode", "validate", "-c", "/etc/bb/config/"+cfg).CombinedOutput()
 		if err != nil || !strings.Contains(string(out), "configuration '/etc/bb/config/"+cfg+"' OK") {
 			t.Errorf("envoy --mode validate %s: %v\n%s", cfg, err, out)
+		}
+		if strings.Contains(string(out), "Deprecated field") {
+			t.Errorf("envoy --mode validate %s warns about a deprecated field (D-162):\n%s", cfg, out)
 		}
 	}
 }

@@ -29,6 +29,9 @@ const (
 	envoyTypeDownTLS   = "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext"
 	envoyTypeUpTLS     = "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext"
 	envoyTypeStdoutLog = "type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog"
+	// The DNS cluster extension (cluster_type envoy.clusters.dns), the
+	// successor of type STRICT_DNS with dns_refresh_rate (D-162).
+	envoyTypeDNSCluster = "type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster"
 )
 
 func envoy() *Entry {
@@ -257,10 +260,15 @@ func envoyCluster(u Upstream, name string) ymap {
 	c := ym(
 		ycomment(proxyModeComment(u)),
 		"name", name,
-		ycomment(fmt.Sprintf("STRICT_DNS: every address %s resolves to is a host;\nEnvoy re-resolves it every 5s, so replicas that start later join.", u.Host)),
-		"type", "STRICT_DNS",
-		"dns_lookup_family", "V4_ONLY",
-		"dns_refresh_rate", "5s",
+		ycomment(fmt.Sprintf("Strict DNS: every address %s resolves to is a host;\nEnvoy re-resolves it every 5s, so replicas that start later join.\nThe DNS cluster extension is the successor of the STRICT_DNS type\nand its deprecated dns_refresh_rate field.", u.Host)),
+		"cluster_type", ym(
+			"name", "envoy.clusters.dns",
+			"typed_config", ym(
+				"@type", envoyTypeDNSCluster,
+				"dns_lookup_family", "V4_ONLY",
+				"dns_refresh_rate", "5s",
+			),
+		),
 		"connect_timeout", "2s",
 		"lb_policy", "ROUND_ROBIN",
 		"load_assignment", ym(

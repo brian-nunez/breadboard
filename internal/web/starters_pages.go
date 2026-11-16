@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/brian-nunez/breadboard/internal/core"
-	// Only for the sidecar types core.StarterApp exposes.
+	// Only for the sidecar and upstream types core.StarterDetails exposes.
 	"github.com/brian-nunez/breadboard/internal/spec"
 )
 
@@ -20,8 +20,19 @@ type starterView struct {
 	KeyCode   string
 	Libraries []string
 	Spec      string // what the starter adds to experiment.yaml
-	Graph     graph
-	Catalog   map[string]core.CatalogEntry
+	// Configs are the native configs of the starter's proxies, in the
+	// order of its services.
+	Configs []starterConfig
+	Graph   graph
+	Catalog map[string]core.CatalogEntry
+}
+
+// starterConfig is one proxy's native config file.
+type starterConfig struct {
+	Service string
+	Type    string
+	Path    string // relative to the starter's directory
+	Data    string
 }
 
 func (s *Server) startersList(w http.ResponseWriter, r *http.Request) {
@@ -52,10 +63,27 @@ func (s *Server) starter(w http.ResponseWriter, r *http.Request) {
 			v.KeyCode = string(f.Data)
 		}
 	}
+	v.Configs = starterConfigs(d)
 	v.Spec = specAdditions(d)
 	v.Graph = layout(starterRows(d, v.Catalog), "")
 	v.Graph.Static = true
 	render(w, r, starterPage(v))
+}
+
+// starterConfigs pairs each proxy that ships a file with its content.
+func starterConfigs(d *core.StarterDetails) []starterConfig {
+	var out []starterConfig
+	for _, svc := range d.Services {
+		if svc.File == "" {
+			continue
+		}
+		for _, f := range d.Files {
+			if f.Path == svc.File {
+				out = append(out, starterConfig{Service: svc.Name, Type: svc.Type, Path: f.Path, Data: string(f.Data)})
+			}
+		}
+	}
+	return out
 }
 
 // directRequires lists the module paths a go.mod requires directly.
@@ -80,12 +108,19 @@ func directRequires(gomod string) []string {
 }
 
 // specAdditions is the experiment.yaml a fresh experiment gets from the
-// starter: one service per required type, and its apps.
+// starter: one service per required type, its proxies, and its apps.
 func specAdditions(d *core.StarterDetails) string {
 	var b strings.Builder
 	b.WriteString("services:\n")
 	for _, t := range d.Requires {
 		fmt.Fprintf(&b, "  %s:\n    type: %s\n", t, t)
+	}
+	for _, svc := range d.Services {
+		fmt.Fprintf(&b, "  %s:\n    type: %s\n", svc.Name, svc.Type)
+		writeUpstreams(&b, svc.Upstreams)
+		if svc.File != "" {
+			fmt.Fprintf(&b, "    file: ./%s/%s\n", d.Dir, svc.File)
+		}
 	}
 	b.WriteString("apps:\n")
 	for _, a := range d.Apps {
@@ -110,6 +145,43 @@ func specAdditions(d *core.StarterDetails) string {
 		}
 	}
 	return b.String()
+}
+
+// writeUpstreams writes a proxy's upstreams the way bb starter writes them:
+// the short form when every entry names only its target.
+func writeUpstreams(b *strings.Builder, ups []spec.Upstream) {
+	if len(ups) == 0 {
+		return
+	}
+	short := !slices.ContainsFunc(ups, func(u spec.Upstream) bool { return u.Port != 0 || u.Name != "" || u.TLS != (spec.TLS{}) })
+	if short {
+		names := make([]string, len(ups))
+		for i, u := range ups {
+			names[i] = u.Service
+		}
+		fmt.Fprintf(b, "    upstreams: [%s]\n", strings.Join(names, ", "))
+		return
+	}
+	b.WriteString("    upstreams:\n")
+	for _, u := range ups {
+		if u.Port == 0 && u.Name == "" && u.TLS == (spec.TLS{}) {
+			fmt.Fprintf(b, "      - %s\n", u.Service)
+			continue
+		}
+		fmt.Fprintf(b, "      - service: %s\n", u.Service)
+		if u.Port != 0 {
+			fmt.Fprintf(b, "        port: %d\n", u.Port)
+		}
+		if u.Name != "" {
+			fmt.Fprintf(b, "        name: %s\n", u.Name)
+		}
+		switch {
+		case u.TLS.Reason != "":
+			fmt.Fprintf(b, "        tls:\n          mode: %s\n          reason: %s\n", u.TLS.Mode, u.TLS.Reason)
+		case u.TLS.Mode != "":
+			fmt.Fprintf(b, "        tls: {mode: %s}\n", u.TLS.Mode)
+		}
+	}
 }
 
 // writeSidecar writes one sidecars entry the way bb starter writes it.
@@ -187,7 +259,15 @@ func starterRows(d *core.StarterDetails, cat map[string]core.CatalogEntry) []row
 	for _, t := range d.Requires {
 		rows = append(rows, row{ServiceStatus: core.ServiceStatus{Name: t, Kind: "infra", Health: core.HealthHealthy}, TLS: true})
 	}
-	catPort := func(typ string) int {
+	proxyType := map[string]string{}
+	for _, svc := range d.Services {
+		proxyType[svc.Name] = svc.Type
+	}
+	catPort := func(name string) int {
+		typ := name
+		if t, ok := proxyType[name]; ok {
+			typ = t
+		}
 		if e, ok := cat[typ]; ok && len(e.Ports) > 0 {
 			return e.Ports[0]
 		}
@@ -196,6 +276,25 @@ func starterRows(d *core.StarterDetails, cat map[string]core.CatalogEntry) []row
 	apps := map[string]core.StarterApp{}
 	for _, a := range d.Apps {
 		apps[a.Name] = a
+	}
+	for _, svc := range d.Services {
+		var ups []core.Edge
+		for _, u := range svc.Upstreams {
+			e := core.Edge{To: u.Service, Port: u.Port, TLS: u.Mode() != spec.TLSOff, Reason: u.TLS.Reason, Mode: u.Mode()}
+			if target, ok := apps[u.Service]; ok {
+				e.ToApp = true
+				if e.Port == 0 {
+					e.Port = starterTLSPort(target)
+					if u.Mode() == spec.TLSOff {
+						e.Port = spec.DefaultPlainPort
+					}
+				}
+			} else if e.Port == 0 {
+				e.Port = catPort(u.Service)
+			}
+			ups = append(ups, e)
+		}
+		rows = append(rows, row{ServiceStatus: core.ServiceStatus{Name: svc.Name, Kind: "infra", Type: svc.Type, Health: core.HealthHealthy, Uses: ups}, TLS: true})
 	}
 	for _, a := range d.Apps {
 		var uses []core.Edge

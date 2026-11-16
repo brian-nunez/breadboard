@@ -314,6 +314,7 @@ type StarterInfo struct {
 	Language string
 	Requires []string
 	Apps     []string
+	Services []string // proxy services the starter adds
 }
 
 // StartersResult lists starters.
@@ -328,6 +329,9 @@ func (e *Engine) Starters(ctx context.Context) (*StartersResult, error) {
 		info := StarterInfo{ID: s.ID, Title: s.Title, Summary: s.Summary, Language: s.Language, Requires: s.Requires}
 		for _, a := range s.Apps {
 			info.Apps = append(info.Apps, a.Name)
+		}
+		for _, svc := range s.Services {
+			info.Services = append(info.Services, svc.Name)
 		}
 		res.Starters = append(res.Starters, info)
 	}
@@ -352,11 +356,14 @@ type ApplyStarterResult struct {
 	AddedServices []string
 	AddedApps     []string
 	ExistingApps  []string // app names already present, left untouched
+	// ExistingServices are the starter's proxy services already present
+	// from an earlier apply to the same directory, left untouched.
+	ExistingServices []string
 }
 
-// ApplyStarter writes a starter's code into the project and adds its apps
-// (and any infra services it needs) to experiment.yaml. Re-applying never
-// overwrites user changes.
+// ApplyStarter writes a starter's code into the project and adds its apps,
+// its proxy services and any infra services it needs to experiment.yaml.
+// Re-applying never overwrites user changes.
 func (e *Engine) ApplyStarter(ctx context.Context, req ApplyStarterRequest) (*ApplyStarterResult, error) {
 	st, ok := starters.Lookup(req.ID)
 	if !ok {
@@ -365,6 +372,34 @@ func (e *Engine) ApplyStarter(ctx context.Context, req ApplyStarterRequest) (*Ap
 			ids = append(ids, s.ID)
 		}
 		return nil, fmt.Errorf("starter %q (known: %s): %w", req.ID, strings.Join(ids, ", "), ErrNotFound)
+	}
+	return e.applyStarter(ctx, st, starters.Render, req)
+}
+
+// starterInfra is the service of type typ among services, with its config
+// resolved against the catalog. The caller has made sure one exists.
+func starterInfra(services []spec.Service, typ string) starters.Infra {
+	i := slices.IndexFunc(services, func(s spec.Service) bool { return s.Type == typ })
+	if i < 0 {
+		return starters.DefaultInfra(typ)
+	}
+	in := starters.DefaultInfra(typ)
+	in.Name = services[i].Name
+	if e, ok := catalog.Lookup(typ); ok {
+		in.Config = e.ResolveConfig(services[i].Config)
+	}
+	return in
+}
+
+// renderFunc renders a starter's templates for a lab.
+type renderFunc func(s starters.Starter, lab starters.Lab) ([]starters.File, error)
+
+// applyStarter is ApplyStarter for a starter value and its templates, so
+// tests can apply starters that do not ship.
+func (e *Engine) applyStarter(ctx context.Context, st starters.Starter, render renderFunc, req ApplyStarterRequest) (*ApplyStarterResult, error) {
+	settings, err := e.settings(ctx)
+	if err != nil {
+		return nil, err
 	}
 	p, unlock, err := e.openLocked(req.Dir, "starter")
 	if err != nil {
@@ -420,8 +455,12 @@ func (e *Engine) ApplyStarter(ctx context.Context, req ApplyStarterRequest) (*Ap
 			return nil, fmt.Errorf("starter %s needs an app named %q, but experiment.yaml already uses that name for something else; rename it there, then apply the starter again: %w", st.ID, a.Name, ErrExists)
 		}
 		app := spec.App{Name: a.Name, Path: res.Dir, Command: a.Command, Register: a.Register, Replicas: a.Replicas}
-		for _, typ := range a.Uses {
-			app.Uses = append(app.Uses, spec.Use{Service: typeService(typ)})
+		for _, ref := range a.Uses {
+			// A proxy of this starter by its name; otherwise a catalog type.
+			if !slices.ContainsFunc(st.Services, func(s starters.Service) bool { return s.Name == ref }) {
+				ref = typeService(ref)
+			}
+			app.Uses = append(app.Uses, spec.Use{Service: ref})
 		}
 		app.Sidecars = starterSidecars(a.Sidecars, func(ref string) string {
 			if slices.Contains(st.Requires, ref) {
@@ -434,11 +473,44 @@ func (e *Engine) ApplyStarter(ctx context.Context, req ApplyStarterRequest) (*Ap
 		}
 		res.AddedApps = append(res.AddedApps, a.Name)
 	}
+	for _, sv := range st.Services {
+		file := ""
+		if sv.File != "" {
+			file = "./" + path.Join(target, sv.File)
+		}
+		if doc.HasName(sv.Name) {
+			// Same rule as apps (D-047): only this starter's service from an
+			// earlier apply to this directory is kept as the user left it.
+			if existing, ok := serviceNamed(p.spec, sv.Name); ok && starterOwnsService(p.spec, st, existing, sv.Type, file, res.Dir) {
+				res.ExistingServices = append(res.ExistingServices, sv.Name)
+				continue
+			}
+			return nil, fmt.Errorf("starter %s needs a service named %q, but experiment.yaml already uses that name for something else; rename it there, then apply the starter again: %w", st.ID, sv.Name, ErrExists)
+		}
+		svc := spec.Service{Name: sv.Name, Type: sv.Type, File: file}
+		for _, u := range sv.Upstreams {
+			if !slices.ContainsFunc(st.Apps, func(a starters.App) bool { return a.Name == u.Service }) && slices.Contains(st.Requires, u.Service) {
+				u.Service = typeService(u.Service)
+			}
+			svc.Upstreams = append(svc.Upstreams, u)
+		}
+		if err := doc.AddProxy(svc); err != nil {
+			return nil, err
+		}
+		res.AddedServices = append(res.AddedServices, sv.Name)
+	}
 	if _, err := decodeAndValidate(doc); err != nil {
 		return nil, err
 	}
 
-	files, err := starters.Render(st, p.spec.Name)
+	// Templates name the experiment's services of the required types, as
+	// resolved above (an existing one, or the one just added), with their
+	// config, defaults applied (D-161).
+	lab := starters.Lab{Experiment: p.spec.Name, Domain: settings.Domain, Infra: map[string]starters.Infra{}}
+	for _, typ := range st.Requires {
+		lab.Infra[typ] = starterInfra(have, typ)
+	}
+	files, err := render(st, lab)
 	if err != nil {
 		return nil, err
 	}
@@ -472,6 +544,52 @@ func (e *Engine) ApplyStarter(ctx context.Context, req ApplyStarterRequest) (*Ap
 		}
 	}
 	return res, nil
+}
+
+// serviceNamed finds an infra service by name.
+func serviceNamed(s *spec.Spec, name string) (spec.Service, bool) {
+	i := slices.IndexFunc(s.Services, func(svc spec.Service) bool { return svc.Name == name })
+	if i < 0 {
+		return spec.Service{}, false
+	}
+	return s.Services[i], true
+}
+
+// starterOwnsService reports whether existing is the starter's proxy from
+// an earlier apply to dir: the same type, and either the file this apply
+// would set, an upstream to one of the starter's apps in dir, or a client
+// among the starter's apps in dir that the starter declares as using this
+// proxy. The last two keep a re-apply idempotent after the user points file
+// elsewhere: an app-backed proxy is recognised by its upstream, and a proxy
+// in front of infra (a shared PgBouncer) by its client.
+func starterOwnsService(s *spec.Spec, st starters.Starter, existing spec.Service, typ, file, dir string) bool {
+	if existing.Type != typ {
+		return false
+	}
+	if file != "" && existing.File != "" && path.Clean(existing.File) == path.Clean(file) {
+		return true
+	}
+	starterAppInDir := func(name string) (spec.App, bool) {
+		if !slices.ContainsFunc(st.Apps, func(a starters.App) bool { return a.Name == name }) {
+			return spec.App{}, false
+		}
+		app, ok := s.App(name)
+		return app, ok && path.Clean(app.Path) == path.Clean(dir)
+	}
+	for _, u := range existing.Upstreams {
+		if _, ok := starterAppInDir(u.Service); ok {
+			return true
+		}
+	}
+	for _, a := range st.Apps {
+		if !slices.Contains(a.Uses, existing.Name) {
+			continue
+		}
+		if app, ok := starterAppInDir(a.Name); ok && slices.ContainsFunc(app.Uses, func(u spec.Use) bool { return u.Service == existing.Name }) {
+			return true
+		}
+	}
+	return false
 }
 
 // starterSidecars copies a starter app's sidecars with their infra
@@ -556,9 +674,22 @@ type StarterDetailsRequest struct {
 // writing anything: for the web UI's starter pages.
 type StarterDetails struct {
 	StarterInfo
-	Dir   string // default directory the code is written to
-	Apps  []StarterApp
-	Files []StarterFile
+	Dir      string // default directory the code is written to
+	Apps     []StarterApp
+	Services []StarterService
+	Files    []StarterFile
+}
+
+// StarterService is a proxy service the starter adds to experiment.yaml.
+type StarterService struct {
+	Name string
+	Type string
+	// Upstreams name the starter's apps or catalog types (resolved to the
+	// experiment's service of that type when applied).
+	Upstreams []spec.Upstream
+	// File is the native config, relative to the starter's directory
+	// (one of Files); empty when the generated config is kept.
+	File string
 }
 
 // StarterApp is an app the starter adds to experiment.yaml.
@@ -583,7 +714,11 @@ func (e *Engine) StarterDetails(ctx context.Context, req StarterDetailsRequest) 
 	if !ok {
 		return nil, fmt.Errorf("starter %q: %w", req.ID, ErrNotFound)
 	}
-	files, err := starters.Render(st, "lab")
+	settings, err := e.settings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	files, err := starters.Render(st, st.DefaultLab("lab", settings.Domain))
 	if err != nil {
 		return nil, err
 	}
@@ -591,6 +726,10 @@ func (e *Engine) StarterDetails(ctx context.Context, req StarterDetailsRequest) 
 	for _, a := range st.Apps {
 		d.StarterInfo.Apps = append(d.StarterInfo.Apps, a.Name)
 		d.Apps = append(d.Apps, StarterApp{Name: a.Name, Command: a.Command, Uses: a.Uses, Register: a.Register, Replicas: a.Replicas, Sidecars: a.Sidecars})
+	}
+	for _, svc := range st.Services {
+		d.StarterInfo.Services = append(d.StarterInfo.Services, svc.Name)
+		d.Services = append(d.Services, StarterService{Name: svc.Name, Type: svc.Type, Upstreams: slices.Clone(svc.Upstreams), File: svc.File})
 	}
 	for _, f := range files {
 		d.Files = append(d.Files, StarterFile{Path: f.Path, Data: f.Data})

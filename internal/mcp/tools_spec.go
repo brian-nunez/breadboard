@@ -62,7 +62,9 @@ type applyStarterOut struct {
 	AddedServices []string `json:"added_services"`
 	AddedApps     []string `json:"added_apps"`
 	ExistingApps  []string `json:"existing_apps" jsonschema:"app names already present, left untouched"`
-	Events        []event  `json:"events"`
+	// Proxy services from an earlier apply to the same directory.
+	ExistingServices []string `json:"existing_services" jsonschema:"the starter's proxy services already present from an earlier apply, left untouched"`
+	Events           []event  `json:"events"`
 }
 
 type migrateOut struct {
@@ -141,7 +143,7 @@ func (s *Server) addSpecTools() {
 
 	add(s, writeTool, true, &sdk.Tool{
 		Name:        "apply_starter",
-		Description: "Write a starter's code into the project and add its apps, and any infra services it needs, to experiment.yaml. Never overwrites a file the user changed: those are reported as conflicts. Run up afterwards. Same as bb starter.",
+		Description: "Write a starter's code into the project and add its apps, its proxies (with their native config files), and any infra services it needs, to experiment.yaml. Never overwrites a file the user changed: those are reported as conflicts. Run up afterwards. Same as bb starter.",
 	}, func(ctx context.Context, req *sdk.CallToolRequest, in applyStarterIn) (applyStarterOut, error) {
 		dir, err := s.dir(in.Dir)
 		if err != nil {
@@ -155,7 +157,7 @@ func (s *Server) addSpecTools() {
 		return applyStarterOut{
 			Dir: res.Dir, Written: orEmpty(res.Written), Unchanged: orEmpty(res.Unchanged), Conflicts: orEmpty(res.Conflicts),
 			AddedServices: orEmpty(res.AddedServices), AddedApps: orEmpty(res.AddedApps), ExistingApps: orEmpty(res.ExistingApps),
-			Events: p.list(),
+			ExistingServices: orEmpty(res.ExistingServices), Events: p.list(),
 		}, nil
 	})
 

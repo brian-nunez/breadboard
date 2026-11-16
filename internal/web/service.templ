@@ -1,0 +1,393 @@
+package web
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/brian-nunez/breadboard/internal/core"
+)
+
+// servicePage is everything one service's page shows.
+type servicePage struct {
+	Dash    dashboardData
+	Row     row
+	Details *core.ServiceDetails
+	Notes   notes
+	Tab     string
+	Problem string
+}
+
+func (p servicePage) tabs() [][2]string {
+	t := [][2]string{{"overview", "Overview"}, {"connection", "Connection"}, {"logs", "Logs"}}
+	if p.Details != nil && p.Details.Type != "" {
+		t = append(t, [2]string{"learn", "Learn"})
+	}
+	return t
+}
+
+templ serviceView(p servicePage) {
+	@dashboardShell(pageTitle(p.Dash, p.Row.Name), p.Dash, "service:"+p.Row.Name) {
+		if p.Problem != "" {
+			@problem(p.Problem)
+		} else {
+			<nav class="text-sm text-slate-500"><a href="/" class="hover:text-slate-900">Services</a> <span class="mx-1.5">/</span> <span class="text-slate-900">{ p.Row.Name }</span></nav>
+			<div class="mt-4 flex items-start justify-between">
+				<div class="flex items-center gap-4">
+					<span class="scale-125">
+						@badge(p.Row)
+					</span>
+					<div>
+						<div class="flex items-center gap-3">
+							<h1 class="text-[28px] font-semibold leading-tight">{ p.Row.Name }</h1>
+							@statusWord(p.Row.Status())
+						</div>
+						<p class="mt-1 text-slate-600">{ serviceSubtitle(p) }</p>
+					</div>
+				</div>
+				<span class="flex items-center gap-2 text-sm text-slate-500">
+					@dot("green")
+					Live
+				</span>
+			</div>
+			<nav class="mt-6 flex gap-6 border-b border-slate-200 text-sm">
+				for _, t := range p.tabs() {
+					<a href={ templ.SafeURL("/services/" + p.Row.Name + "?tab=" + t[0]) } class={ "-mb-px border-b-2 pb-3", templ.KV("border-slate-900 font-medium text-slate-900", p.Tab == t[0]), templ.KV("border-transparent text-slate-500 hover:text-slate-900", p.Tab != t[0]) }>{ t[1] }</a>
+				}
+			</nav>
+			<div class="mt-6">
+				switch p.Tab {
+					case "connection":
+						@connectionTab(p)
+					case "logs":
+						@logsTab(p)
+					case "learn":
+						@learnTab(p)
+					default:
+						@serviceOverview(p)
+				}
+			</div>
+		}
+	}
+}
+
+func serviceSubtitle(p servicePage) string {
+	d := p.Details
+	parts := []string{}
+	switch d.Kind {
+	case "app":
+		parts = append(parts, "your code in "+d.Path)
+		if len(d.Command) > 0 {
+			parts = append(parts, "runs "+strings.Join(d.Command, " "))
+		}
+	case "sidecar":
+		parts = append(parts, d.Title+" agent registering "+d.Parent)
+	default:
+		parts = append(parts, d.Image)
+	}
+	if u := uptime(p.Row); u != "" {
+		parts = append(parts, u)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func uptime(r row) string {
+	if r.State != "running" || r.StartedAt.IsZero() {
+		return ""
+	}
+	return "up " + humanDuration(time.Since(r.StartedAt))
+}
+
+templ serviceOverview(p servicePage) {
+	<div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+		<div class="flex flex-col gap-6">
+			@card() {
+				<div class="p-6">
+					<h2 class="text-base font-semibold">What you're running</h2>
+					<div class="mt-3 text-[15px] leading-7 text-slate-700">
+						if p.Details.Kind == "app" {
+							<p>
+								Your code from <code class="font-mono text-sm">{ p.Details.Path }</code>, compiled into its image and run as <code class="font-mono text-sm">{ strings.Join(p.Details.Command, " ") }</code>.
+								if len(p.Row.Uses) > 0 {
+									It connects to { usesList(p.Row.Uses) }.
+								}
+							</p>
+						} else if p.Details.Kind == "sidecar" {
+							<p>A Consul client agent sharing { p.Details.Parent }'s network address and certificate. It joined the Consul server { p.Details.Registry } and registered { p.Details.Parent } there with a health check; when it stops, it leaves and the registration goes with it.</p>
+						} else {
+							@noteBlocks(p.Notes.section("What you got").Blocks)
+						}
+					</div>
+				</div>
+			}
+			if p.Details.Kind == "infra" {
+				<div class="grid gap-6 md:grid-cols-2">
+					@exerciseCard("Try this", "text-indigo-700", p.Notes.section("Try this").bullets())
+					@exerciseCard("Break this", "text-red-700", p.Notes.section("Break this").bullets())
+				</div>
+			}
+		</div>
+		<div class="flex flex-col gap-6">
+			@connectionCard(p)
+			@resourcesCard(p.Row)
+			@certificateCard(p.Details.Certificate)
+		</div>
+	</div>
+}
+
+func usesList(uses []core.Edge) string {
+	names := make([]string, len(uses))
+	for i, e := range uses {
+		names[i] = e.To
+		if !e.TLS {
+			names[i] += " (plaintext)"
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+templ exerciseCard(label, color string, items [][]inline) {
+	@card() {
+		<div class="p-6">
+			<div class={ "text-[11px] font-semibold uppercase tracking-wider", color }>{ label }</div>
+			<ul class="mt-3 flex flex-col gap-3 text-sm leading-6 text-slate-700">
+				for _, it := range items {
+					<li>
+						@inlineText(it)
+					</li>
+				}
+			</ul>
+		</div>
+	}
+}
+
+templ kv(k string) {
+	<div class="flex items-start justify-between gap-4 py-1.5 text-sm">
+		<span class="text-slate-500">{ k }</span>
+		<span class="text-right">
+			{ children... }
+		</span>
+	</div>
+}
+
+templ connectionCard(p servicePage) {
+	@card() {
+		<div class="p-5">
+			<h2 class="text-base font-semibold">Connection</h2>
+			<div class="mt-3">
+				@kv("Address") {
+					<span class="font-mono text-[13px]">{ p.Details.Address }</span>
+				}
+				if len(p.Details.Listeners) > 0 {
+					@kv("Protocol") {
+						{ listenerSummary(p.Details.Listeners[0]) }
+					}
+					@kv("Client auth") {
+						None in v1
+					}
+				}
+				if len(p.Details.UsedBy) > 0 {
+					@kv("Used by") {
+						{ strings.Join(p.Details.UsedBy, ", ") }
+					}
+				}
+			</div>
+			if p.Details.Kind == "infra" && len(p.Details.Env) > 0 {
+				<div class="mt-4 border-t border-slate-200 pt-4 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Env vars injected into apps</div>
+				<div class="mt-2 flex flex-col gap-2.5">
+					for _, v := range p.Details.Env[0].Vars {
+						@envVar(v, p.Row.Name)
+					}
+				</div>
+			}
+		</div>
+	}
+}
+
+func listenerSummary(l core.Listener) string {
+	s := fmt.Sprintf("%s over TLS :%d", strings.ToUpper(l.Protocol[:1])+l.Protocol[1:], l.Port)
+	if l.Protocol == "https" {
+		s = fmt.Sprintf("HTTPS :%d", l.Port)
+	}
+	return s
+}
+
+templ envVar(v core.EnvVar, service string) {
+	<div class="text-[13px]">
+		<div class="font-mono font-semibold text-slate-900">{ v.Name }</div>
+		if v.Secret {
+			<div class="font-mono text-slate-500">hidden · <span class="text-slate-700">bb creds { service }</span></div>
+		} else {
+			<div class="break-all font-mono text-slate-600">{ v.Value }</div>
+		}
+	</div>
+}
+
+templ resourcesCard(r row) {
+	@card() {
+		<div class="p-5">
+			<h2 class="text-base font-semibold">Resources</h2>
+			<div class="mt-3 flex flex-col gap-3 text-sm">
+				<div>
+					<div class="flex justify-between"><span class="text-slate-500">CPU</span><span>{ fmt.Sprintf("%.2f / %.2f cores", r.CPUUsed, r.CPULimit) }</span></div>
+					<div class="mt-1.5">
+						@bar(r.CPUUsed, r.CPULimit, false)
+					</div>
+				</div>
+				<div>
+					<div class="flex justify-between"><span class="text-slate-500">Memory</span><span>{ fmt.Sprintf("%.0f / %.0f MiB", r.MemUsed, r.MemLimit) }</span></div>
+					<div class="mt-1.5">
+						@bar(r.MemUsed, r.MemLimit, r.Status().Color == "amber")
+					</div>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ certificateCard(c *core.Certificate) {
+	@card() {
+		<div class="p-5">
+			<h2 class="text-base font-semibold">Certificate</h2>
+			if c == nil {
+				<p class="mt-3 text-sm text-slate-600">Issued on the first <code class="font-mono">bb up</code>.</p>
+			} else {
+				<div class="mt-3">
+					@kv("Issuer") {
+						{ c.Issuer }
+					}
+					@kv("Name") {
+						<span class="font-mono text-[13px]">{ strings.Join(c.DNSNames, ", ") }</span>
+					}
+					@kv("Expires") {
+						{ expiresIn(c.NotAfter) }
+					}
+				</div>
+				<div class="mt-2 break-all font-mono text-xs text-slate-500">{ c.Identity }</div>
+			}
+		</div>
+	}
+}
+
+func expiresIn(t time.Time) string {
+	days := int(time.Until(t).Hours() / 24)
+	switch {
+	case days < 0:
+		return "expired"
+	case days == 0:
+		return "today"
+	case days == 1:
+		return "in 1 day"
+	}
+	return fmt.Sprintf("in %d days", days)
+}
+
+templ connectionTab(p servicePage) {
+	<div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+		@card() {
+			<div class="p-6">
+				if p.Details.Kind == "app" {
+					<h2 class="text-base font-semibold">Environment of { p.Row.Name }</h2>
+					<p class="mt-1 text-sm text-slate-600">Every variable this container starts with. Your code reads these; it holds no addresses or credentials of its own.</p>
+				} else {
+					<h2 class="text-base font-semibold">What apps receive</h2>
+					<p class="mt-1 text-sm text-slate-600">Each app that lists { p.Row.Name } under <code class="font-mono">uses</code> starts with these variables.</p>
+				}
+				for _, g := range p.Details.Env {
+					<div class="mt-5">
+						<div class={ "text-[11px] font-semibold uppercase tracking-wider", templ.KV("text-red-700", g.Plaintext), templ.KV("text-slate-500", !g.Plaintext) }>
+							if g.Service == "" {
+								Breadboard
+							} else {
+								{ g.Service } · { g.Title }
+								if g.Plaintext {
+									· plaintext: { g.Reason }
+								}
+							}
+						</div>
+						<div class="mt-2 grid gap-3 md:grid-cols-2">
+							for _, v := range g.Vars {
+								@envVar(v, g.Service)
+							}
+						</div>
+					</div>
+				}
+				if len(p.Details.Env) == 0 {
+					<p class="mt-4 text-sm text-slate-600">This service receives no environment from Breadboard beyond its own configuration.</p>
+				}
+			</div>
+		}
+		<div class="flex flex-col gap-6">
+			@connectionCard(p)
+			if p.Details.Kind == "infra" {
+				@card() {
+					<div class="p-5">
+						<h2 class="text-base font-semibold">Credentials</h2>
+						<p class="mt-2 text-sm text-slate-600">The UI never shows secrets. Print them in your terminal:</p>
+						<div class="mt-3">
+							@terminal("bb creds " + p.Row.Name)
+						</div>
+					</div>
+				}
+			}
+		</div>
+	</div>
+}
+
+templ logsTab(p servicePage) {
+	@card() {
+		<div class="flex items-center justify-between px-5 pt-4 pb-3">
+			<h2 class="text-base font-semibold">Logs</h2>
+			<span class="font-mono text-xs text-slate-500">bb logs { p.Row.Name } -f</span>
+		</div>
+		<pre class="h-[560px] overflow-auto rounded-b-xl bg-slate-900 px-5 py-4 font-mono text-[12.5px] leading-5 text-slate-100" data-logs={ "/live/logs/" + p.Row.Name }></pre>
+	}
+}
+
+templ learnTab(p servicePage) {
+	@card() {
+		<article class="max-w-3xl p-6">
+			for _, s := range p.Notes.Sections {
+				if s.Heading != "" {
+					<h2 class="mt-6 text-lg font-semibold first:mt-0">{ s.Heading }</h2>
+				}
+				<div class="mt-2 text-[15px] leading-7 text-slate-700">
+					@noteBlocks(s.Blocks)
+				</div>
+			}
+			<a href={ templ.SafeURL("/docs/" + p.Details.Type) } class="mt-6 inline-block text-sm text-indigo-600 hover:text-indigo-800">Read the { p.Details.Title } docs →</a>
+		</article>
+	}
+}
+
+templ noteBlocks(blocks []noteBlock) {
+	for _, b := range blocks {
+		if b.List {
+			<ul class="my-2 list-disc space-y-1.5 pl-5">
+				for _, it := range b.Items {
+					<li>
+						@inlineText(it)
+					</li>
+				}
+			</ul>
+		} else {
+			for _, it := range b.Items {
+				<p class="my-2">
+					@inlineText(it)
+				</p>
+			}
+		}
+	}
+}
+
+templ inlineText(parts []inline) {
+	for _, in := range parts {
+		if in.Code {
+			<code class="rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.9em]">{ in.Text }</code>
+		} else if in.Bold {
+			<strong class="font-semibold text-slate-900">{ in.Text }</strong>
+		} else {
+			{ in.Text }
+		}
+	}
+}

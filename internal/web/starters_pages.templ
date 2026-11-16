@@ -10,11 +10,12 @@ import (
 templ startersPage(d docsData, home bool) {
 	@page(pick(home, "What do you want to build?", "Starters")) {
 		if home {
-			<header class="flex h-16 items-center px-8">
+			@searchDialog()
+			<header class="flex h-16 items-center px-4 md:px-8">
 				@logo()
 				<nav class="ml-auto flex items-center gap-6 text-sm">
-					<a href="/docs" class="text-slate-500 hover:text-slate-900">Docs</a>
-					<a href="/starters" class="text-slate-500 hover:text-slate-900">Starters</a>
+					<a href="/docs" class="hidden text-slate-500 hover:text-slate-900 sm:inline">Docs</a>
+					<a href="/starters" class="hidden text-slate-500 hover:text-slate-900 sm:inline">Starters</a>
 					<a href="/dashboard" class="rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 font-medium text-slate-900 hover:border-slate-400">Skip to dashboard →</a>
 				</nav>
 			</header>
@@ -23,8 +24,11 @@ templ startersPage(d docsData, home bool) {
 		}
 		<main class="mx-auto max-w-[880px] px-6 py-12">
 			if home {
-				<h1 class="text-center text-[44px] font-semibold tracking-tight">What do you want to build?</h1>
+				<h1 class="text-center text-[32px] font-semibold tracking-tight md:text-[44px]">What do you want to build?</h1>
 				<p class="mt-3 text-center text-[17px] text-slate-500">Pick a scenario to see its architecture and how to run it.</p>
+				<div class="mt-8">
+					@searchBox("flex h-12 w-full text-[15px]")
+				</div>
 			} else {
 				<h1 class="text-[32px] font-semibold">Starters</h1>
 				<p class="mt-1 text-slate-500">Small working projects on the official client libraries. Each adds its apps and the services they need to your experiment.</p>

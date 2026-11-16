@@ -142,7 +142,22 @@ Real sidecars that share an app's network namespace, so the app uses them over `
 
 ### Wave B: Proxies as infra
 
-Catalog entries Envoy, Traefik, HAProxy, NGINX and PgBouncer as infra services, with `upstream` edges to other services and the terminate, passthrough and re-encrypt modes ([`security.md`](security.md#proxy-and-relay-modes-phase-5)), private segments for plaintext hops.
+Reverse proxies, load balancers and a connection pooler as infra services in front of apps and other services, with a TLS mode per upstream: re-encrypt, terminate and passthrough ([`security.md`](security.md#proxy-and-relay-modes-phase-5), D-103 onward).
+
+**Scope:** `services.<name>.upstreams` and `services.<name>.file` ([`spec.md`](spec.md#proxies-and-upstreams)); upstream edges from a proxy to apps (every replica) and infra, with plaintext segments for terminate hops (`plain-<app>`, `BB_PLAIN_LISTEN_ADDR`); the proxy rendering seam in the catalog (resolved upstreams, the 8443/9443 convention, the `<NAME>_URL` / `<NAME>_PASSTHROUGH_ADDR` contract, `file` copied into the bundle); infra entries `haproxy` (`haproxy:3.4.7`), `envoy` (`envoyproxy/envoy:v1.40.2`), `traefik` (`traefik:v3.7.19`, file provider only), `nginx` (`nginx:1.30.6-alpine`) and `pgbouncer` (`edoburu/pgbouncer:v1.26.1-p0`, one `postgres` upstream, the Postgres env contract with `verify-full`); upstream edges in status, the architecture graph and service details, labelled by mode; explorers (HAProxy stats, Traefik routes, NGINX `stub_status`; `EnvoyClusters` and `PgBouncerPools` for the infra Envoy and PgBouncer), with web UI tabs and MCP tools `haproxy_stats`, `traefik_routes`, `nginx_status`; learning notes for every entry.
+
+**Completion criteria:**
+
+- [ ] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift.
+- [ ] Golden tests: experiments without proxies render byte-identical to `main`; a golden fixture per proxy type covers every mode the type supports.
+- [ ] Unit tests check each generated config with its pinned image: `haproxy -c`, `envoy --mode validate`, `nginx -t`; Traefik's file config is loaded by a running container in an integration test.
+- [ ] Integration (real Docker), for each HTTP proxy (HAProxy, Envoy, Traefik, NGINX): re-encrypt to an app with 3 replicas reaches more than one replica, and the client verified the proxy's certificate.
+- [ ] Integration, for each HTTP proxy: terminate makes the app's plaintext port reachable from the proxy and from no other container.
+- [ ] Integration: passthrough (at least HAProxy and Envoy) shows the client the backend's own certificate.
+- [ ] Integration: PgBouncer infra: two apps share the pool, and Postgres sees connections only from PgBouncer, over TLS.
+- [x] Integration: each explorer returns real data (`TestIntegrationProxyExplorers`: HAProxy, Traefik, NGINX, infra Envoy and infra PgBouncer).
+- [ ] Every integration test leaves no labelled containers, networks or volumes; the full suite (`go test -tags integration ./internal/core/`) passes on the top of the wave B stack.
+- [ ] Docs in `docs/design/` match what was built: catalog entries, spec fields, security modes, architecture operations and MCP tools; [`decisions.md`](decisions.md) updated.
 
 ### Wave C: Load-balancing and reverse-proxy examples
 

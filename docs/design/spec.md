@@ -41,6 +41,8 @@ apps:                        # user code; one compose service each
 | `services.<name>.type` | yes | A catalog entry id. The map key is the service name and its DNS label. |
 | `services.<name>.resources` | no | `memory` (Docker size string), `cpus` (decimal). |
 | `services.<name>.config` | no | Type-specific options defined by the catalog entry (e.g. Postgres database name). Validated by the entry. |
+| `services.<name>.upstreams` | no | Proxy types only (`haproxy`, `nginx`, `pgbouncer`, …): the services and apps the proxy sits in front of, each with its own TLS mode. See [Proxies and upstreams](#proxies-and-upstreams). |
+| `services.<name>.file` | no | Proxy types only: a native config file, relative to `experiment.yaml`, that replaces the generated one. See [Proxies and upstreams](#proxies-and-upstreams). |
 | `apps.<name>.path` | yes | Relative to the spec file. Must contain a `Dockerfile` with a `dev` stage (checked by `bb up` and `bb export`). Compile the app in that stage and run the binary as the `command`, as the starters do; then the app is the container's main process and receives SIGTERM. |
 | `apps.<name>.command` | no | Overrides the image command. |
 | `apps.<name>.uses` | no | Infra services this app connects to. Each entry creates an edge, injects that service's env contract, and adds `depends_on: service_healthy`. When two used services share an env variable name (two Postgres services, say), the later one's variables are prefixed with its name: `ANALYTICS_DATABASE_URL`. |
@@ -66,7 +68,68 @@ uses:
       reason: practice TLS termination at a pooler
 ```
 
-Reserved for later phases, rejected by v1 validation: `tls.clientAuth` (mTLS), `tls.ca` (multiple CAs), infra-to-infra `upstream` edges for proxies.
+Reserved for later phases, rejected by v1 validation: `tls.clientAuth` (mTLS), `tls.ca` (multiple CAs).
+
+## Proxies and upstreams
+
+A proxy is an infra service whose catalog entry is a proxy type (see [`catalog.md`](catalog.md#proxies-phase-5-wave-b)). Its `upstreams` are the backends it sits in front of: apps (every replica) or other infra services. Apps reach the proxy with `uses: [edge]`, like any infra service.
+
+```yaml
+services:
+  edge:
+    type: haproxy
+    upstreams:
+      - web                     # short form: re-encrypt to web's TLS port
+      - service: api            # an app (all its replicas) or an infra service
+        port: 9090              # optional: see below
+        name: v1                # optional: route name, default the service name
+        tls:
+          mode: off             # terminate: a plaintext hop on a private segment
+          reason: practice TLS termination
+      - service: payments
+        tls: {mode: passthrough}  # L4, routed by SNI, never decrypted
+    file: ./edge/haproxy.cfg    # optional: your own native config replaces the generated one
+apps:
+  client:
+    path: ./client
+    uses: [edge]                # EDGE_URL=https://edge.bb.internal:8443
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `upstreams[]` | no | A target name (short form) or a mapping. An HTTP proxy without upstreams starts and answers `503`; `pgbouncer` requires exactly one. |
+| `upstreams[].service` | yes | An app or an infra service, other than the proxy itself, listed once per proxy. |
+| `upstreams[].tls.mode` | no | `on` (default): **re-encrypt**; the proxy decrypts, then connects to the target over TLS and verifies it against the lab CA with SNI set to the target's name. `off`: **terminate**; the hop is plaintext on a private segment and needs a `reason`. `passthrough`: the proxy routes the client's TLS session by SNI on its passthrough port without decrypting, so the client sees the target's own certificate. The catalog entry lists the modes it supports. |
+| `upstreams[].port` | no | App targets only (an infra target is reached on its catalog listener). For `on` and `passthrough`, the port the app serves TLS on; default its Envoy `inbound.port` or `register.port`, and an app with neither must set it. For `off`, the plaintext port the app listens on, default `8080`. |
+| `upstreams[].name` | no | The route name, a DNS label unique within the proxy; default the service name. With one decrypted upstream every request goes to it; with several, requests under `/<name>/` go to that upstream with the prefix stripped, and the first one also takes every other path. |
+| `file` | no | Copied into the run directory at each `bb up` and mounted in place of the generated config; the certificate (`/etc/bb/tls/`), the lab CA (`/etc/bb/ca.pem`) and the trust bundle stay mounted. The catalog entry says what the file must keep (HAProxy and NGINX: the loopback endpoint their health checks read; Envoy: the admin API on `127.0.0.1:15000`; PgBouncer: the auth and HBA files). For Traefik the file replaces the dynamic (routing) configuration `dynamic.yml` only; the static configuration and the certificate store stay generated. |
+
+**Terminate hops to apps.** For an `off` upstream to an app, every replica joins the private segment `plain-<app>` with a static address, the alias `<app>.plain.<domain>` and its own `<instance>.plain.<domain>`, and receives `BB_PLAIN_LISTEN_ADDR=<its segment address>:<port>`. The app should bind its plaintext listener to that address; whether it does or not, the app runs as a pod whose init container drops the plaintext port on every other address, so the proxy reaches it and no other container can ([`security.md`](security.md#proxy-and-relay-modes-phase-5)). The pod adds the generated names `<instance>-pod` and `<instance>-netinit` to the namespace. Every terminating proxy of one app uses the same port. The edge is reported as a plaintext warning like any `tls.mode: off` edge.
+
+**Passthrough targets** must speak TLS from the first byte (HTTPS, Kafka, Redis, Consul): the proxy reads the server name from the TLS ClientHello. Clients connect to the proxy's passthrough address (`<NAME>_PASSTHROUGH_ADDR`) and must send the target's name as SNI (`<target>.<domain>`). Postgres negotiates TLS after a plaintext request, so a Postgres client needs direct TLS (`sslnegotiation=direct`, libpq 17 and later) to pass through.
+
+Variables an app receives from a proxy it uses (the service name upper-cased, `-` → `_`):
+
+| Variable | Value |
+|---|---|
+| `<NAME>_URL` | `https://<name>.<domain>:8443` |
+| `<NAME>_PASSTHROUGH_ADDR` | `<name>.<domain>:9443`, when an upstream is `passthrough` |
+
+**A shared Postgres pool.** `pgbouncer` is a proxy type with exactly one upstream, a `postgres` service, in mode `on` (default: PgBouncer connects with `verify-full`) or `off` (with a `reason`: plaintext over the Postgres segment, like a plaintext `uses` edge). It takes no `port` and no passthrough. `config.pool_mode` (`session`, `transaction` or `statement`; default `transaction`) and `config.pool_size` (server connections per database and user, 1 to 1000; default `10`) tune it. An app that uses it receives the Postgres contract pointing at the pool, with the Postgres service's application role (see [`catalog.md`](catalog.md#pgbouncer)):
+
+```yaml
+services:
+  postgres:
+    type: postgres
+  pool:
+    type: pgbouncer
+    config: {pool_size: 5}
+    upstreams: [postgres]
+apps:
+  orders:
+    path: ./orders
+    uses: [pool]                # DATABASE_URL=postgres://app:…@pool.bb.internal:6432/app?sslmode=verify-full
+```
 
 ## Replicas
 
@@ -150,6 +213,7 @@ Validation fails with every violation listed, each with its YAML path:
 - `tls.mode: off` requires a non-empty `reason`.
 - Reserved fields are rejected with a message naming the phase that introduces them.
 - `register` requires a registry service in `uses`.
+- Proxies: `upstreams` and `file` are accepted only on proxy types. Each upstream names an existing app or service other than the proxy, at most once; route names are unique DNS labels; the mode is one the type supports; `off` requires a `reason`, and toward an infra service a plaintext listener; an HTTP proxy decrypts (`on`, `off`) only HTTP targets (apps, or infra with an HTTPS listener) and takes other TLS services as `passthrough`; `port` is not allowed on infra targets; an app target of `on` or `passthrough` needs a TLS port (its own or `port`); an `off` app target is not in transparent mode, its plaintext port differs from its TLS and health ports, and every terminating proxy of that app uses the same port. A type may restrict targets to catalog types, require a minimum number of upstreams (`pgbouncer`: one) and cap the number.
 - `replicas` is between 1 and 10; an app with more than one replica cannot publish `ports`.
 - Sidecars: `type` must be a sidecar catalog type; keys must belong to that type (`transparent` only on `envoy`); names are unique within the app; no two containers of one pod bind the same port (the app's `inbound.app_port`, Envoy's `inbound.port`, outbound ports, admin `15000`, transparent `15001`/`15006`, PgBouncer's `port`, Fluent Bit's `2020`, the registration agent's `8301`/`8501`); `pgbouncer.service` is a postgres service and `fluent-bit.to` an s3-compatible service in the app's `uses`; `outbound.service` names an existing app or HTTPS infra service other than the app itself. The app's own ports (`health.port`, default 8080 with `health`; `register.port` unless it is an Envoy `inbound.port`; `inbound.app_port`) are claimed before any sidecar's, and the error names where each was declared. A variable a sidecar gives the app (`BB_LISTEN_ADDR`, `<TARGET>_URL`, `BB_LOG_DIR`) must not share a name with one the app already receives from Breadboard, a used service or another sidecar (for example an outbound target named `database` beside Postgres's `DATABASE_URL`); PgBouncer's rewrite of its own service's variables is allowed.
 - Every name the engine generates for an app is unique in the shared namespace and at most 63 characters.

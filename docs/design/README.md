@@ -37,7 +37,9 @@ These words carry fixed meanings across the docs and the code.
 | **pod** | An app instance with sidecars: a namespace holder (`<app>-pod`) that owns the network, joined by the app and its sidecars, started in order. |
 | **starter** | A template that writes app code into the project and adds app services to `experiment.yaml`. |
 | **listener** | A port an infra service accepts connections on, with a TLS mode. |
-| **edge** | A directed connection from a client (app or infra service) to a listener. Derived from `uses`. TLS policy lives on edges. |
+| **edge** | A directed connection from a client (app or infra service) to a listener. Derived from `uses`, Envoy outbound targets and proxy upstreams. TLS policy lives on edges. |
+| **proxy** | An infra service whose catalog entry is a proxy type (HAProxy, …): it sits in front of its upstreams and decides TLS per hop. |
+| **upstream** | One backend of a proxy (an app with all its replicas, or an infra service) and the edge to it, with a TLS mode: re-encrypt, terminate or passthrough. |
 | **segment** | A compose network. Plaintext listeners live only on a private segment shared with their intended clients. |
 | **resolved model** | The engine's internal, fully-defaulted representation of an experiment. Every output is generated from it. |
 | **materialize** | Render the resolved model plus state into a concrete medium: compose files, `.env`, cert files, Kubernetes Secrets, Terraform variables. |

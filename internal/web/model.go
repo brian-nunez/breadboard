@@ -331,6 +331,8 @@ func clusterRole(c core.EnvoyCluster) string {
 		return "Transparent mode: connections to undeclared destinations, passed to their original address."
 	case "inbound passthrough":
 		return "Transparent mode: connections into the pod, forwarded to the app on loopback."
+	case "upstream":
+		return "Upstream " + c.Target + " (" + modeName(c.Mode) + "): " + modeHelp(c.Mode) + "."
 	}
 	return "Defined by your own Envoy configuration."
 }
@@ -386,7 +388,7 @@ func micros(us int64) string {
 }
 
 // pgbouncerConsole is the command that opens PgBouncer's admin console
-// inside the sidecar, with the password it already holds.
+// inside its container, with the password it already holds.
 func pgbouncerConsole(experiment string, x *core.PgBouncerPools) string {
-	return fmt.Sprintf(`docker exec -it %s sh -c 'PGPASSWORD="$BB_PG_PASSWORD" psql -h 127.0.0.1 -p %d -U "$BB_PG_USER" pgbouncer'`, container(experiment, x.Sidecar), x.Port)
+	return fmt.Sprintf(`docker exec -it %s sh -c 'PGPASSWORD="$BB_PG_PASSWORD" psql -h 127.0.0.1 -p %d -U "$BB_PG_USER" pgbouncer'`, container(experiment, pgbouncerName(x)), x.Port)
 }

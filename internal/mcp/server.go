@@ -84,7 +84,7 @@ func (s *Server) Connect(ctx context.Context, t sdk.Transport) (*sdk.ServerSessi
 
 const instructions = `Breadboard (bb) runs real system design experiments locally: real services (Kafka, Postgres, Redis, Consul, S3 compatible) in Docker Compose with TLS on by default, plus app code from starters. experiment.yaml is the source of truth; every tool reads or edits it.
 
-Call "guide" first for how bb works and the usual workflow. Typical flow: init, add_service or apply_starter, up, then status, logs, creds and the explorers (postgres_tables, redis_keys, consul_catalog, kafka_topics, s3_buckets) to inspect it, and down when done. Tools act on the experiment containing the directory bb mcp was started in; pass "dir" to choose another one inside it.`
+Call "guide" first for how bb works and the usual workflow. Typical flow: init, add_service or apply_starter, up, then status, logs, creds and the explorers (postgres_tables, redis_keys, consul_catalog, kafka_topics, s3_buckets; for proxies and sidecars haproxy_stats, traefik_routes, nginx_status, envoy_clusters, pgbouncer_pools) to inspect it, and down when done. Tools act on the experiment containing the directory bb mcp was started in; pass "dir" to choose another one inside it.`
 
 // kind is how a tool affects the system, which sets its annotations and
 // whether --read-only keeps it.

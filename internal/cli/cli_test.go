@@ -140,3 +140,22 @@ func TestStatusRowsNestSidecarsAndReplicas(t *testing.T) {
 		t.Errorf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// A proxy's row lists its upstream edges with mode and target port.
+func TestStatusRowsShowProxyUpstreamModes(t *testing.T) {
+	services := []core.ServiceStatus{
+		{Name: "edge", Kind: "infra", Health: "healthy", Uses: []core.Edge{
+			{To: "web", Port: 8443, TLS: true, ToApp: true, Mode: "on"},
+			{To: "api", Port: 8080, ToApp: true, Mode: "off", Reason: "practice"},
+			{To: "payments", Port: 8443, TLS: true, ToApp: true, Mode: "passthrough"},
+		}},
+		{Name: "worker", Kind: "app", Health: "healthy", Uses: []core.Edge{{To: "postgres", Port: 5432, Reason: "pooler"}}},
+	}
+	rows := serviceRows(services)
+	if got := rows[0][6]; got != "web (TLS :8443), api (terminate :8080, PLAINTEXT), payments (passthrough :8443)" {
+		t.Errorf("edge uses = %q", got)
+	}
+	if got := rows[1][6]; got != "postgres (PLAINTEXT)" {
+		t.Errorf("worker uses = %q", got)
+	}
+}

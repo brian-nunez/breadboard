@@ -97,7 +97,7 @@ const pgTxCode = `tx, err := db.Begin(ctx)
 if err != nil {
     return err
 }
-// Rollback after a successful Commit does nothing, so this is always safe.
+// After Commit, Rollback only returns ErrTxClosed, so deferring it is always safe.
 defer tx.Rollback(ctx)
 
 if _, err := tx.Exec(ctx, ` + "`" + `UPDATE accounts SET balance = balance - $2 WHERE id = $1` + "`" + `, from, amount); err != nil {

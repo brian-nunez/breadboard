@@ -22,7 +22,7 @@ experiment ──►│   engine: spec → resolved model → materialize       
 |---|---|---|---|
 | CLI | `bb <command>` | 1 | Parses flags, calls the core, prints results and progress. |
 | Web UI | `bb serve` | 3 | Local web server on `127.0.0.1`: topology, health, logs, explorers, docs. templ + Tailwind, embedded in the binary. Read-only. |
-| MCP server | `bb mcp` | 4 | stdio MCP server exposing core operations as tools. |
+| MCP server | `bb mcp` | 4 | stdio MCP server exposing core operations as tools, on the official Go SDK (ADR-0014). |
 
 ## Core API
 
@@ -150,7 +150,18 @@ Not part of Phase 1. Both are wrappers over the core API above.
   - generates a random token per launch, puts it in the URL it opens, and exchanges it for an `HttpOnly`, `SameSite=Strict` session cookie (sessions held in bkit `stash` with the in-memory driver and a 12-hour TTL), then redirects so the token leaves the address bar;
   - rejects requests whose `Host` or `Origin` header is not the UI's own;
   - sends a strict content security policy (no inline scripts or styles; resource bars are SVG attributes) and forbids framing.
-- `bb mcp` speaks MCP over stdio; MCP clients configure the command `bb mcp`.
+- `bb mcp` speaks MCP over stdio with the official Go SDK (ADR-0014), serving 2026-07-28 clients and older ones that still send `initialize`. MCP clients configure the command `bb mcp`; stdout carries only protocol messages.
+- Tools mirror the CLI and add the read-only operations agents need (D-072). Inputs and outputs are MCP-side view types with `snake_case` names whose JSON Schemas the SDK derives; results are structured content plus the same JSON as text.
+
+  | Kind | Tools |
+  |---|---|
+  | About bb | `guide` (embedded agent guide), `version`, `catalog`, `learn`, `starters`, `starter_details` (every file's content), `ca`, `config_get` |
+  | Inspect | `status`, `logs` (no follow; default 200, at most 2,000 lines per service), `creds` (with values, D-071), `service_details`, `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets` |
+  | Change | `init`, `add_service`, `apply_starter`, `migrate`, `config_set`, `export_compose`, `up` |
+  | Destructive | `remove_service`, `down` (with `volumes`, deletes data) |
+
+- Safety (D-073): `dir` and `export_compose`'s `out` resolve against the directory `bb mcp` started in (or `-C`), following symlinks, and anything outside it is refused. `--read-only` registers only the tools that change nothing the user owns. Annotations mark reads `readOnlyHint`, `down` and `remove_service` `destructiveHint`, and every tool `openWorldHint: false`.
+- Progress: `up`, `down`, `apply_starter` and `export_compose` send each core event as a progress notification when the request carries a progress token, and return the events in the result (on failure, in the error text). Cancelling a call cancels its context, so the core operation stops and releases the experiment's lock.
 - Explorers read service data through Docker: each runs the service's own command-line tool with `docker exec`, inside the experiment's network ([ADR-0012](../adr/README.md)). Status comes from `docker inspect` and `docker stats`. The UI never changes the system.
 
 ## CLI surface (Phase 1)
@@ -176,6 +187,7 @@ Each command is a thin wrapper over one core operation.
 | `bb migrate` | Upgrade `experiment.yaml` to the current spec version. |
 | `bb export compose [--out dir] [--secrets inline\|dotenv]` | Write a standalone compose stack (default `export/compose`). |
 | `bb serve [--addr host:port] [--no-open]` | Serve the read-only web UI on a loopback address (default `127.0.0.1:7777`) and open the browser with a one-time sign-in link (Phase 3). |
+| `bb mcp [--read-only]` | Serve the core as MCP tools over stdio for AI agents; `--read-only` exposes only tools that change nothing the user owns (Phase 4). |
 | `bb version` | Print the bb version. |
 
 `bb add`, `bb remove`, and `bb starter` edit `experiment.yaml` through a YAML node tree, so the user's comments and ordering survive.
@@ -191,7 +203,7 @@ internal/
   cli/                  CLI wrapper: subcommand dispatch, flag parsing, rendering
   web/                  web UI wrapper: templ components, handlers, embedded assets (Phase 3);
                         styles/input.css is the Tailwind source, static/ is embedded
-  mcp/                  MCP wrapper (Phase 4)
+  mcp/                  MCP wrapper: tools over the official Go SDK, embedded agent guide (Phase 4)
   spec/                 experiment.yaml types, parse, validate, version upgrades
   model/                resolved model and resolver
   catalog/              one file per catalog entry + embedded learning notes
@@ -218,7 +230,7 @@ Breadboard's own internals use Brian's [bkit](https://github.com/brian-nunez/bki
 | Rule checks | `gate` | Spec and policy validation: naming rules, TLS-off-requires-reason, reserved fields, phase-gated features. `gate.Join` reports every violation at once. | 1 |
 | Key/value store | `stash` + `stash/drivers/memory` | UI sessions with TTL; short-lived caches such as container stats. | 3 |
 
-`experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3` (strict decoding to reject unknown keys, and node-level editing to preserve comments), which `settings` does not offer. Where bkit has no matching capability, the engine uses the standard library; any other direct dependency needs Brian's approval and a row in [`decisions.md`](decisions.md).
+`experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3` (strict decoding to reject unknown keys, and node-level editing to preserve comments), which `settings` does not offer. `bb mcp` uses the official MCP Go SDK (ADR-0014). Where bkit has no matching capability, the engine uses the standard library; any other direct dependency needs Brian's approval and a row in [`decisions.md`](decisions.md).
 
 ## Engineering conventions
 

@@ -1,0 +1,268 @@
+package web
+
+// Traefik docs (Phase 5, wave C; D-157, D-158). Config excerpts are the
+// generated traefik.yml, tls.yml and dynamic.yml (internal/catalog/
+// traefik.go, compose golden traefik.golden); options follow the Traefik
+// v3.7 reference.
+
+func init() {
+	registerTech(tech{
+		ID:      "traefik",
+		Name:    "Traefik",
+		Tagline: "A reverse proxy for changing environments: providers feed it routes, and it applies them without a restart.",
+		Order:   73,
+		Intro:   traefikIntro(),
+		GoodFit: []string{"Routes that change often, applied live", "Routing discovered from Docker or Kubernetes", "Automatic certificates (ACME)", "Weighted, mirrored and failover services in config", "A built-in dashboard of routers and services"},
+		PoorFit: []string{"Deep TCP tuning", "Per-server request counters (the API has none)", "Balancing one DNS name across several addresses"},
+		Diagram: proxyDiagram(proxyFig{ID: "tf", Name: "Traefik", L7: "websecure → router → service", L4: "passthrough → TCP router on HostSNI"}),
+		Official: []link{
+			{"Traefik v3.7 documentation", traefikDocs},
+			{"Traefik v3.7: HTTP services and load balancing", traefikLB},
+			{"Traefik v3.7: rules and priority", traefikDocs + "reference/routing-configuration/http/routing/rules-and-priority/"},
+			{"Traefik v3.7: file provider", traefikDocs + "reference/install-configuration/providers/others/file/"},
+		},
+		Starters: []string{stP2C.URL, stCanary.URL},
+		Guides: []guide{
+			{
+				Slug: "config-anatomy", Title: "Anatomy of the Traefik config", Summary: "Static traefik.yml, tls.yml and the dynamic routes in dynamic.yml.",
+				Starter:  stP2C.URL,
+				Sections: []docSection{{"two", "Static and dynamic"}, {"static", "traefik.yml"}, {"tls", "tls.yml"}, {"routers", "Routers and middlewares"}, {"services", "Services"}, {"tcp", "TCP routers for passthrough"}, {"change", "Changing it"}, {"templates", "The template pass"}},
+				Body:     traefikAnatomy(),
+			},
+			{
+				Slug: "in-breadboard", Title: "Traefik in Breadboard", Summary: "The image, 8443 and 9443, upstreams and modes, file:, the routes tab.",
+				Sections: []docSection{{"image", "Image and limits"}, {"upstreams", "Upstreams and routes"}, {"modes", "The three TLS modes"}, {"health", "Health checks"}, {"env", "What your app receives"}, {"see", "Seeing it work"}, {"own", "Owning the config"}},
+				Body:     traefikInBreadboard(),
+			},
+		},
+	})
+}
+
+const traefikStaticCode = `entryPoints:
+  # HTTPS with this service's certificate. Routers on it use TLS without saying so.
+  websecure:
+    address: :8443
+    http:
+      tls: {}
+      aliasHeadersStrategy: delete
+  # TLS routed by SNI without decrypting: TCP routers with passthrough.
+  passthrough:
+    address: :9443
+  # Loopback only: the API, the dashboard and /ping.
+  traefik:
+    address: 127.0.0.1:8080
+# The file provider only; Traefik never sees the Docker socket.
+providers:
+  file:
+    directory: /etc/bb/traefik
+    watch: true
+api:
+  insecure: true
+  dashboard: true
+ping:
+  entryPoint: traefik`
+
+const traefikTLSCode = `tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/bb/tls/tls.crt
+        keyFile: /etc/bb/tls/tls.key
+  options:
+    default:
+      minVersion: VersionTLS12`
+
+const traefikRoutersCode = `http:
+  routers:
+    # /v1/ goes to api with the prefix stripped.
+    route-v1:
+      entryPoints: [websecure]
+      rule: PathPrefix(` + "`/v1/`" + `)
+      service: v1
+      middlewares: [strip-v1]
+    # Every other path goes to the first upstream: a longer rule has a
+    # higher priority, so the prefixes above win.
+    default-web:
+      entryPoints: [websecure]
+      rule: PathPrefix(` + "`/`" + `)
+      service: web
+  middlewares:
+    strip-v1:
+      stripPrefix:
+        prefixes: [/v1]`
+
+const traefikServicesCode = `  services:
+    # Re-encrypt: TLS to every replica of web, verified as web.bb.internal.
+    web:
+      loadBalancer:
+        strategy: wrr
+        servers:
+          - url: https://web-1.bb.internal:8443
+          - url: https://web-2.bb.internal:8443
+          - url: https://web-3.bb.internal:8443
+        healthCheck:
+          path: /
+          hostname: web.bb.internal
+          interval: 2s
+          timeout: 2s
+        serversTransport: web
+  serversTransports:
+    web:
+      serverName: web.bb.internal
+      rootCAs: [/etc/bb/ca.pem]`
+
+const traefikTCPCode = `tcp:
+  routers:
+    tls-payments:
+      entryPoints: [passthrough]
+      rule: HostSNI(` + "`payments.bb.internal`" + `)
+      service: tls-payments
+      tls:
+        passthrough: true
+  services:
+    tls-payments:
+      loadBalancer:
+        servers:
+          - address: payments.bb.internal:8443
+        healthCheck: {interval: 2s, timeout: 2s}`
+
+const traefikChangeCode = `http:
+  services:
+    web:
+      loadBalancer:
+        strategy: p2c              # or wrr, hrw, leasttime
+        sticky:
+          cookie: {name: srv, httpOnly: true, secure: true}
+        servers:
+          - url: https://web-1.bb.internal:8443
+            weight: 3              # three times the share of the others
+          - url: https://web-2.bb.internal:8443
+        # ...
+    # Split traffic between two services, 90/10.
+    canary:
+      weighted:
+        services:
+          - name: web
+            weight: 90
+          - name: web-v2
+            weight: 10`
+
+templ traefikIntro() {
+	@docP() {
+		Traefik is a reverse proxy and load balancer written in Go, designed for environments where services come and go. Providers (Docker labels, Kubernetes, Consul, files) tell it which routes exist, and it applies changes while running, without a restart or a reload command.
+	}
+	@docP() {
+		Its model has four parts. An entrypoint is a port it listens on. A router matches requests on an entrypoint with a rule, such as @docCodeWord("PathPrefix") or @docCodeWord("Host") in HTTP routers and @docCodeWord("HostSNI") in TCP routers, and passes them through middlewares (strip a prefix, add headers, rate limit) to a service. A service balances across servers, or across other services by weight, with mirroring or with failover.
+	}
+	@docP() {
+		Choose it when configuration changes often and should apply live, when routes should come from the platform rather than a file, or when you want certificates from Let's Encrypt with no extra tooling. Breadboard uses the file provider only and never gives Traefik the Docker socket, so every route is in a file you can read and own.
+	}
+}
+
+templ traefikAnatomy() {
+	@docLead() {
+		Breadboard generates three files for every Traefik service, all commented. The routes are from the example in @docLink("/docs/traefik/in-breadboard", "Traefik in Breadboard"): web re-encrypted, api terminated as /v1/, payments passed through. Excerpts are shortened to YAML flow style.
+	}
+	@docH2("two", "Static and dynamic")
+	@docList(
+		"Static configuration is read once at startup: entrypoints, providers, the API, logging. Breadboard's is traefik.yml, and Breadboard owns it.",
+		"Dynamic configuration comes from providers and can change at any time: routers, middlewares, services, TLS. The file provider watches /etc/bb/traefik and applies every edit.",
+		"Breadboard's dynamic configuration is two files: tls.yml (the certificate) and dynamic.yml (the routes). Your file: replaces dynamic.yml only.",
+	)
+	@docH2("static", "traefik.yml")
+	@docCode("traefik.yml", traefikStaticCode)
+	@docList(
+		"websecure on 8443 turns TLS on for every router attached to it, with the default certificate from tls.yml.",
+		"passthrough on 9443 is written only when an upstream is passthrough.",
+		"traefik on 127.0.0.1:8080 serves the API, the dashboard and /ping, which the container's health check (traefik healthcheck --ping) reads. api.insecure is safe here only because the entrypoint is loopback.",
+		"aliasHeadersStrategy: delete drops request headers whose names alias one Traefik manages (X_Forwarded_For for X-Forwarded-For), so a client cannot spoof them.",
+	)
+	@docH2("tls", "tls.yml")
+	@docCode("tls.yml", traefikTLSCode)
+	@docP() {
+		The @docCodeWord("default") store's certificate is the service's own, and the @docCodeWord("default") TLS options require TLS 1.2 or newer. It stays generated when you own @docCodeWord("dynamic.yml"), so the certificate keeps working.
+	}
+	@docH2("routers", "Routers and middlewares")
+	@docCode("dynamic.yml", traefikRoutersCode)
+	@docList(
+		"A router's priority defaults to the length of its rule, so PathPrefix(`/v1/`) wins over PathPrefix(`/`) without any setting.",
+		"Router names are prefixed (route-<name>, default-<first>), so a route name never collides with another router.",
+		"stripPrefix removes /v1 before forwarding, and puts it in X-Forwarded-Prefix.",
+		"With one decrypted upstream there is a single route-<name> on PathPrefix(`/`); with none, router no-upstream points at a service without servers, which answers 503.",
+	)
+	@docH2("services", "Services")
+	@docCode("dynamic.yml", traefikServicesCode)
+	@docList(
+		"strategy: wrr is weighted round robin, the default. Traefik 3.7 also has p2c, hrw and leasttime.",
+		"Every replica is listed by its own name: Traefik does not turn one DNS name into several servers. When the replica count changes, Breadboard regenerates the list; in your own file, edit it yourself.",
+		"healthCheck sends GET / with the target's hostname every 2 seconds to each server; a failing server leaves the rotation until it passes again. Infra upstreams have one server and no check.",
+		"serversTransport is re-encrypt: serverName is both the SNI and the name verified, rootCAs the lab CA. Terminate servers are http:// URLs on the segment, such as http://api-1.plain.bb.internal:9090.",
+	)
+	@docH2("tcp", "TCP routers for passthrough")
+	@docCode("dynamic.yml", traefikTCPCode)
+	@docP() {
+		A TCP router with @docCodeWord("tls.passthrough: true") matches the SNI and forwards the connection still encrypted; a name no router claims is closed. Its service checks each server with a TCP connect.
+	}
+	@docH2("change", "Changing it")
+	@docCode("dynamic.yml", traefikChangeCode)
+	@docList(
+		"p2c picks two servers at random and sends the request to the one with fewer active connections.",
+		"hrw (highest random weight) scores every server against the client's IP, so one client keeps one server.",
+		"leasttime prefers servers with the lowest time to first byte, weighted by their active connections.",
+		"Sticky cookies: when the server in the cookie becomes unhealthy, the request goes to another server and the cookie follows it.",
+		"mirroring (a service and mirrors with a percent) and failover (a service and a fallback, driven by health checks) are services too.",
+	)
+	@docH2("templates", "The template pass")
+	@docP() {
+		The file provider runs every dynamic file through Go templates before reading the YAML, comments included. Breadboard's generated @docCodeWord("dynamic.yml") escapes every double opening brace so user text stays literal; your own file is not rewritten, so keep double braces out of it entirely unless you mean a template.
+	}
+}
+
+templ traefikInBreadboard() {
+	@docLead() {
+		What Breadboard runs for @docCodeWord("type: traefik"), and how its upstreams, TLS modes and health checks are wired.
+	}
+	@docH2("image", "Image and limits")
+	@docList(
+		"Image traefik:v3.7.19 (Alpine: wget and nc, no curl or openssl), 128m of memory and 0.25 CPU.",
+		"The container runs traefik --configFile=/etc/bb/config/traefik.yml. Logs and access logs go to stdout: bb logs <name>.",
+		"Entrypoints: websecure on 8443; passthrough on 9443, only when an upstream is passthrough; traefik on 127.0.0.1:8080 for the API, the dashboard and ping.",
+		"The file provider only. Traefik never sees the Docker socket, so it cannot discover containers on its own.",
+	)
+	@docH2("upstreams", "Upstreams and routes")
+	@docCode("experiment.yaml", proxyExampleSpec("traefik", "dynamic.yml"))
+	@proxyRoutes()
+	@docP() {
+		Each upstream becomes a service named after its route, @docCodeWord("<route>"), with router @docCodeWord("route-<route>"); passthrough upstreams become TCP router and service @docCodeWord("tls-<route>")&#46;
+	}
+	@docH2("modes", "The three TLS modes")
+	@docTable([]string{"Mode", "What the generated config does"},
+		[]string{"re-encrypt (on)", "servers https://<app>-<n>.<domain>:<port>, and a serversTransport with serverName <target> and rootCAs /etc/bb/ca.pem"},
+		[]string{"terminate (off)", "servers http://<app>-<n>.plain.<domain>:<port>, on the app's private segment"},
+		[]string{"passthrough", "TCP router HostSNI(`<target>`) with tls.passthrough on entrypoint passthrough, to a TCP service listing every instance"},
+	)
+	@docH2("health", "Health checks")
+	@docList(
+		"App upstreams: GET / every 2 seconds with the target's hostname; a 2xx or 3xx answer keeps a server in. Infra upstreams: one server, no check.",
+		"Passthrough services: a TCP connect every 2 seconds.",
+		"The container's own health check is traefik healthcheck --ping against the loopback entrypoint.",
+	)
+	@docH2("env", "What your app receives")
+	@proxyEnv()
+	@docH2("see", "Seeing it work")
+	@docList(
+		"In bb serve, the service's Traefik routes tab reads the API: routers with their rule, entrypoints, middlewares and TLS (terminate or passthrough), and services with each server's UP or DOWN status. MCP clients use traefik_routes.",
+		"The API has no per-server request counter; the access log in bb logs <name> has every request with the server that took it.",
+	)
+	@docTerminal("docker exec bb-lab-edge-1 wget -qO- http://127.0.0.1:8080/api/http/services")
+	@docH2("own", "Owning the config")
+	@docP() {
+		The generated files are in @docCodeWord(".bb/runtime/config/<name>/")&#46; Copy @docCodeWord("dynamic.yml") next to @docCodeWord("experiment.yaml"), edit it, and set @docCodeWord("file:") on the service. It replaces @docCodeWord("dynamic.yml") only: @docCodeWord("traefik.yml") and @docCodeWord("tls.yml") stay generated, so the entrypoints, the certificate and the health check keep working.
+	}
+	@docList(
+		"Route on the websecure entrypoint for 8443, and passthrough for 9443 (it exists only while the spec has a passthrough upstream).",
+		"Use the lab CA (/etc/bb/ca.pem) in serversTransports for re-encrypt.",
+		"List every replica by name, and update the list when you change replicas.",
+		"No double opening braces: the template pass would run them.",
+	)
+}

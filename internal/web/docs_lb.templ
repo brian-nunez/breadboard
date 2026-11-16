@@ -1,0 +1,863 @@
+package web
+
+// Load balancing docs: the concept guides behind the proxies (Phase 5,
+// wave C), written in the Kafka docs' style (D-031, D-061, D-157). The
+// proxies' own sections are docs_haproxy.templ and its siblings.
+
+const (
+	haproxyDocs = "https://docs.haproxy.org/3.4/configuration.html"
+	haproxyMgmt = "https://docs.haproxy.org/3.4/management.html"
+	traefikDocs = "https://doc.traefik.io/traefik/v3.7/"
+	traefikLB   = traefikDocs + "reference/routing-configuration/http/load-balancing/service/"
+	nginxDocs   = "https://nginx.org/en/docs/"
+	nginxUp     = nginxDocs + "http/ngx_http_upstream_module.html"
+)
+
+// Diagram data.
+var (
+	lbInFlight = []int{4, 1, 2}
+	lbTLSRows  = []string{"re-encrypt", "terminate", "passthrough"}
+	lbTLSPorts = []string{":8443", ":8443", ":9443"}
+)
+
+// The wave C starters, by id, with what each one shows.
+var (
+	stRoundRobin  = link{"Round robin across replicas that DNS re-resolves, on NGINX.", "lb/round-robin"}
+	stLeastConn   = link{"leastconn against roundrobin with one slow replica, on HAProxy.", "lb/least-connections"}
+	stP2C         = link{"Power of two choices against weighted round robin, on Traefik.", "lb/power-of-two-choices"}
+	stHashing     = link{"ring_hash and maglev on a key header, and what moves when a replica leaves, on Envoy.", "lb/consistent-hashing"}
+	stSticky      = link{"Cookie stickiness, and what happens when the sticky server dies, on HAProxy.", "lb/sticky-sessions"}
+	stCanary      = link{"A 90/10 weighted canary, then shifting the weights, on Traefik.", "lb/weighted-canary"}
+	stBlueGreen   = link{"Cutting over from blue to green without a failed request, on NGINX.", "lb/blue-green"}
+	stHealth      = link{"Active checks on HAProxy and passive outlier detection on Envoy, timed.", "lb/health-checks"}
+	stL4L7        = link{"mode tcp against mode http: what each can see and route on, on HAProxy.", "proxy/l4-vs-l7"}
+	stTLSModes    = link{"Re-encrypt, terminate and passthrough side by side, and whose certificate the client sees.", "proxy/tls-modes"}
+	stMirroring   = link{"Shadow traffic to v2 with its responses discarded, on Envoy.", "proxy/request-mirroring"}
+	stDraining    = link{"Removing a backend under load without a failed request.", "proxy/connection-draining"}
+	stPoolModes   = link{"Session against transaction pooling, and the session-state trap, on a shared PgBouncer.", "pgbouncer/pooling-modes"}
+	stPoolSidecar = link{"A PgBouncer sidecar in the app's pod (wave A), to compare with a shared pool.", "sidecar/pgbouncer-pool"}
+)
+
+func init() {
+	registerTech(tech{
+		ID:      "load-balancing",
+		Name:    "Load balancing",
+		Tagline: "One address in front of many replicas: how a proxy picks a backend, notices failures, handles TLS and moves traffic.",
+		Order:   70,
+		Intro:   lbIntro(),
+		GoodFit: []string{"Spreading requests over replicas", "Hiding a failed instance from clients", "Shifting traffic during a deployment", "One TLS endpoint in front of many services", "Capping connections to a database"},
+		PoorFit: []string{"Making one slow service fast", "Sharing state between replicas (the app's or a store's job)", "Clients that already pick servers themselves (Kafka, Redis Cluster)"},
+		Diagram: lbDiagram(),
+		Official: []link{
+			{"HAProxy 3.4: balance", haproxyDocs + "#4.2-balance"},
+			{"Envoy: load balancers", envoyDocs + "intro/arch_overview/upstream/load_balancing/load_balancers"},
+			{"Traefik v3.7: load-balancing services", traefikLB},
+			{"NGINX: upstream module", nginxUp},
+			{"PgBouncer: configuration", pgbouncerDocs + "config.html"},
+		},
+		Starters: []string{
+			stRoundRobin.URL, stLeastConn.URL, stP2C.URL, stHashing.URL, stSticky.URL, stCanary.URL, stBlueGreen.URL,
+			stHealth.URL, stL4L7.URL, stTLSModes.URL, stMirroring.URL, stDraining.URL, stPoolModes.URL,
+		},
+		Guides: []guide{
+			{
+				Slug: "strategies", Title: "Load-balancing strategies", Summary: "Round robin, weights, least connections, two choices, hashing, stickiness.",
+				Starter:  stRoundRobin.URL,
+				Sections: []docSection{{"round-robin", "Round robin"}, {"weighted", "Weighted"}, {"least", "Least connections"}, {"p2c", "Power of two choices"}, {"hashing", "Consistent hashing: ring and Maglev"}, {"sticky", "Sticky sessions"}, {"choosing", "Which to choose"}, {"try", "Try them"}},
+				Body:     lbStrategies(),
+			},
+			{
+				Slug: "health-checks", Title: "Health checks: active and passive", Summary: "Probing backends, watching real traffic, and how long each takes.",
+				Starter:  stHealth.URL,
+				Sections: []docSection{{"why", "Why check at all"}, {"active", "Active checks"}, {"passive", "Passive checks"}, {"timing", "Time to eject, time to recover"}, {"endpoint", "What a health endpoint should say"}, {"generated", "What Breadboard generates"}, {"try", "Try it"}},
+				Body:     lbHealth(),
+			},
+			{
+				Slug: "l4-vs-l7", Title: "L4 vs L7 proxying", Summary: "Connections or requests: what each layer sees and can route on.",
+				Starter:  stL4L7.URL,
+				Sections: []docSection{{"layers", "What each layer sees"}, {"l4", "L4: connections"}, {"l7", "L7: requests"}, {"per", "Per connection or per request"}, {"cost", "What L7 costs"}, {"breadboard", "Both in Breadboard"}, {"try", "Try it"}},
+				Body:     lbLayers(),
+			},
+			{
+				Slug: "tls-at-the-proxy", Title: "TLS at the proxy: re-encrypt, terminate, passthrough", Summary: "Who decrypts, whose certificate the client sees, and what can be routed.",
+				Starter:  stTLSModes.URL,
+				Sections: []docSection{{"modes", "Three modes"}, {"reencrypt", "Re-encrypt"}, {"terminate", "Terminate"}, {"passthrough", "Passthrough"}, {"compare", "Side by side"}, {"declare", "Declaring the mode"}, {"check", "Checking which one you got"}},
+				Body:     lbTLS(),
+			},
+			{
+				Slug: "deployments", Title: "Deployments through a proxy", Summary: "Blue-green, canary, mirroring and draining.",
+				Starter:  stBlueGreen.URL,
+				Sections: []docSection{{"switch", "The proxy as a switch"}, {"blue-green", "Blue-green"}, {"canary", "Canary"}, {"mirroring", "Mirroring"}, {"draining", "Draining"}, {"try", "Try them"}},
+				Body:     lbDeployments(),
+			},
+			{
+				Slug: "connection-pooling", Title: "Connection pooling", Summary: "Reusing connections to HTTP backends and to Postgres.",
+				Starter:  stPoolModes.URL,
+				Sections: []docSection{{"cost", "What a connection costs"}, {"http", "Pooling at an HTTP proxy"}, {"postgres", "Pooling Postgres"}, {"modes", "Session, transaction, statement"}, {"sizing", "Sizing a pool"}, {"where", "A shared pool or a sidecar"}, {"try", "Try it"}},
+				Body:     lbPooling(),
+			},
+		},
+	})
+}
+
+templ lbIntro() {
+	@docP() {
+		A load balancer stands between clients and several copies of a service. Clients know one name and one address; for each new connection, or each request, the load balancer picks a copy to answer. It keeps track of which copies are healthy, so one failing instance does not become every client's problem.
+	}
+	@docP() {
+		In practice the load balancer is a reverse proxy: it accepts the client's connection, opens its own to a backend and relays between them. That position lets it do more than spread load: hold the TLS certificate, route by path, retry, shift traffic from an old version to a new one, and pool connections to a database that can only afford a few.
+	}
+	@docP() {
+		Breadboard runs five proxies as services. HAProxy, Envoy, Traefik and NGINX are HTTP proxies: TLS on 8443, SNI passthrough on 9443, and any apps or services as upstreams. PgBouncer is a pool in front of one Postgres. These guides explain the ideas; each proxy's own section shows how it expresses them.
+	}
+}
+
+templ lbDiagram() {
+	<svg viewBox="0 0 900 230" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Clients connect to one proxy address; the proxy picks a healthy replica for each request and skips the failed one">
+		<defs>
+			<marker id="lb-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		for i, y := range []int{40, 100, 160} {
+			<rect x="20" y={ itoa(y) } width="130" height="40" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="36" y={ itoa(y + 25) } class="fill-slate-700 text-[13px]">client { itoa(i + 1) }</text>
+			<line x1="150" y1={ itoa(y + 20) } x2="306" y2="120" stroke-width="1.5" marker-end="url(#lb-arrow)" class="stroke-slate-400"></line>
+		}
+		<text x="228" y="56" text-anchor="middle" class="fill-slate-500 text-[12px]">one name, TLS</text>
+		<rect x="310" y="45" width="250" height="150" rx="12" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="326" y="72" class="fill-indigo-800 font-mono text-[13px] font-semibold">proxy</text>
+		<text x="326" y="100" class="fill-slate-700 text-[13px]">strategy: which replica?</text>
+		<text x="326" y="124" class="fill-slate-700 text-[13px]">health: which are up?</text>
+		<text x="326" y="148" class="fill-slate-700 text-[13px]">TLS: decrypt or pass?</text>
+		<text x="326" y="172" class="fill-slate-700 text-[13px]">weights: old or new version?</text>
+		for i, y := range []int{30, 95, 160} {
+			if i < 2 {
+				<rect x="680" y={ itoa(y) } width="200" height="44" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+				<line x1="560" y1="120" x2="676" y2={ itoa(y + 22) } stroke-width="1.5" marker-end="url(#lb-arrow)" class="stroke-slate-400"></line>
+			} else {
+				<rect x="680" y={ itoa(y) } width="200" height="44" rx="10" stroke-dasharray="5 4" class="fill-white stroke-red-300"></rect>
+			}
+			<text x="696" y={ itoa(y + 27) } class="fill-slate-900 font-mono text-[13px] font-semibold">api-{ itoa(i + 1) }</text>
+		}
+		<text x="866" y="187" text-anchor="end" class="fill-red-700 text-[12px] font-semibold">failing: skipped</text>
+	</svg>
+}
+
+// --- Strategies ----------------------------------------------------------------
+
+const lbWeightsCode = `# HAProxy: weights on servers (1 to 256)
+server api-1 api-1.bb.internal:8443 weight 3 check
+server api-2 api-2.bb.internal:8443 weight 1 check
+
+# NGINX: the same idea in an upstream block
+server api-1.bb.internal:8443 weight=3;
+server api-2.bb.internal:8443 weight=1;`
+
+const lbHashCode = `# Envoy: hash the x-user header onto a ring (or set lb_policy: MAGLEV)
+clusters:
+  - name: cache
+    lb_policy: RING_HASH
+routes:
+  - match: {prefix: /}
+    route:
+      cluster: cache
+      hash_policy:
+        - header: {header_name: x-user}
+
+# HAProxy: the same key, consistent hashing
+balance hdr(x-user)
+hash-type consistent
+
+# NGINX: ketama consistent hashing on the header
+hash $http_x_user consistent;`
+
+const lbStickyCode = `# HAProxy: insert a cookie naming the server; each server has its value
+backend be_api
+    cookie SERVERID insert indirect nocache
+    server api-1 api-1.bb.internal:8443 cookie a1 check
+    server api-2 api-2.bb.internal:8443 cookie a2 check
+
+# Traefik: a sticky cookie on the service's load balancer
+loadBalancer:
+  sticky:
+    cookie: {name: srv, httpOnly: true, secure: true}
+
+# NGINX (open source since 1.29.6)
+sticky cookie srv_id expires=1h;`
+
+templ lbStrategies() {
+	@docLead() {
+		A strategy is the rule a load balancer uses to pick a backend. Each one trades how much it has to know against how well it spreads load, and some trade spreading for keeping a client or a key on one backend.
+	}
+	@docFigure("Round robin hands out requests in turn. Least connections and two choices look at how busy each replica is. Hashing maps a key to a replica, so the same key keeps landing there.") {
+		@lbStrategiesDiagram()
+	}
+	@docH2("round-robin", "Round robin")
+	@docP() {
+		Each backend in turn: 1, 2, 3, 1, 2, 3. It needs no knowledge of the backends beyond the list, and it spreads load evenly when requests cost about the same and the backends are alike. It is every proxy's default and what Breadboard generates for each one: HAProxy @docCodeWord("balance roundrobin"), Envoy @docCodeWord("ROUND_ROBIN"), Traefik @docCodeWord("strategy: wrr") and NGINX's upstream with no method at all.
+	}
+	@docP() {
+		The list itself comes from DNS. Docker answers an app's shared name, such as @docCodeWord("api.bb.internal"), with every replica's address, and the proxies keep asking: HAProxy through @docCodeWord("server-template") and its resolvers, Envoy's strict DNS clusters every 5 seconds, NGINX's @docCodeWord("resolve") servers every 5 seconds. Scale an app from 3 replicas to 5 and the new ones get traffic within seconds. Traefik does not split one name into several servers, so Breadboard lists every replica by its own name.
+	}
+	@docP() {
+		Round robin goes wrong when requests are not alike. If one request in ten takes a second and the rest take a millisecond, a replica that drew two slow ones in a row still receives its next turn while busy.
+	}
+	@docH2("weighted", "Weighted")
+	@docP() {
+		A weight makes a backend receive a larger or smaller share: weight 3 against weight 1 is three requests in four. Weights fit backends of different sizes, and they are how a canary gets 10% of traffic (see @docLink("/docs/load-balancing/deployments", "Deployments through a proxy")).
+	}
+	@docCode("weights", lbWeightsCode)
+	@docP() {
+		Envoy sets a @docCodeWord("load_balancing_weight") per endpoint, or splits a route over clusters with @docCodeWord("weighted_clusters"); Traefik puts a @docCodeWord("weight") on each server, or balances whole services with a @docCodeWord("weighted") service.
+	}
+	@docH2("least", "Least connections")
+	@docP() {
+		Send the next request to the backend with the fewest requests or connections in flight. A slow backend accumulates in-flight work, so it is picked less until it catches up: the balancer adapts to cost without measuring it. HAProxy's @docCodeWord("balance leastconn") and NGINX's @docCodeWord("least_conn") count connections; Envoy's @docCodeWord("LEAST_REQUEST") counts active requests.
+	}
+	@docP() {
+		The count is local. A proxy only knows the work it sent itself, so with several proxies (or NGINX workers) each sees part of the picture. And with long-lived connections, such as HTTP/2 or WebSockets, the connection count says little about the load each one carries.
+	}
+	@docH2("p2c", "Power of two choices")
+	@docP() {
+		Pick two backends at random and send the request to the less loaded of the two. It needs no sorted view of every backend, only two lookups, yet it removes nearly all the imbalance of plain random choice: the busiest backend is rarely in the pair, and when it is, it loses. It also avoids a herd: with many balancers acting on stale counts, “least loaded” sends everyone to the same backend at once, while random pairs spread out.
+	}
+	@docTable([]string{"Proxy", "Setting"},
+		[]string{"Traefik", "strategy: p2c  (fewer active connections of two random servers)"},
+		[]string{"Envoy", "lb_policy: LEAST_REQUEST  (choice_count defaults to 2)"},
+		[]string{"HAProxy", "balance random(2)  (2 draws is the default)"},
+		[]string{"NGINX", "random two least_conn;"},
+	)
+	@docH2("hashing", "Consistent hashing: ring and Maglev")
+	@docP() {
+		Hashing picks the backend from a key: a header, a cookie, the client's address or the URL. The same key always lands on the same backend, which matters when the backend keeps something per key: a cache that stays warm for that user, or a shard of in-memory state.
+	}
+	@docP() {
+		The naive version, hash modulo the number of backends, remaps almost every key when a backend is added or removed. Consistent hashing remaps only a minority. In the ideal scheme, a fixed ring from which the leaving backend's points are simply deleted, exactly that backend's keys move, about one in N, and every other key stays put. Many implementations, Envoy's among them, rebuild their structure on every change and can move some keys between the remaining backends too, so measure before relying on the ideal.
+	}
+	@docList(
+		"Ring hash places each backend at many points on a circle of hash values. A key goes to the first backend point clockwise from its own hash. On a fixed ring, when a backend leaves only the arcs it owned move, to their next neighbours. Envoy rebuilds the ring instead, keeping its size (minimum_ring_size, 1,024 entries by default) and sharing it among the remaining hosts, so each survivor gains points, and those take some keys from other survivors. In the lb/consistent-hashing lab, stopping one of four hosts moved its 49 keys and 22 others: still a minority of 200, but more than one in N.",
+		"Maglev, from Google's load balancer, fills a lookup table (table_size, 65,537 entries by default in Envoy) so that each backend owns an almost equal share. Lookups are a single index. Envoy's docs measure its table build about 10x and its host selection about 5x faster than a ring of 256K entries, and say it is less stable than a ring: their simulations show about twice as many keys moving when hosts are removed, and a larger table reduces the disruption. Those figures depend on the ring and table sizes and the number of hosts. With the lab's four hosts, a 1,024-entry ring and the default table, Maglev moved only the removed host's keys in every run, fewer than the ring.",
+		"Rendezvous hashing (highest random weight) scores every backend against the key and takes the highest. Traefik's hrw strategy uses it with the client's IP as the key.",
+	)
+	@docCode("hashing", lbHashCode)
+	@docP() {
+		With Envoy the cluster's policy alone is not enough: the route's @docCodeWord("hash_policy") says what to hash. A request that produces no key (the header is missing) goes to a random host.
+	}
+	@docH2("sticky", "Sticky sessions")
+	@docP() {
+		Stickiness keeps one client on one backend, usually with a cookie the proxy adds to the first response that names the server. Later requests carry the cookie and go straight there. It exists for apps that keep session state in memory, and it fails the way those apps fail: when the sticky server goes down, the proxy sends the client elsewhere and points the cookie at the new server, and whatever lived only in the old one's memory is gone.
+	}
+	@docCode("stickiness", lbStickyCode)
+	@docP() {
+		Envoy has no sticky cookie of its own: hash on a cookie with @docCodeWord("hash_policy: cookie"), and give it a @docCodeWord("ttl") so Envoy creates the cookie when the client has none. HAProxy's @docCodeWord("option redispatch") lets a request whose sticky server refuses the connection retry on another.
+	}
+	@docH2("choosing", "Which to choose")
+	@docList(
+		"Requests cost about the same: round robin. It is the default for a reason.",
+		"Request cost varies, or some backends are slower: least connections, or power of two choices with many proxies.",
+		"Backends of different sizes, or a canary: weights.",
+		"Per-key locality (caches, shards): consistent hashing. Envoy's docs favour a ring for stability and Maglev for cheap lookups and rebuilds; how many keys actually move depends on your sizes and host count, so measure it.",
+		"Legacy session state in memory: stickiness, while you move the state into a store.",
+	)
+	@docH2("try", "Try them")
+	@docStarters(stRoundRobin, stLeastConn, stP2C, stHashing, stSticky)
+	@docTerminal("bb starter lb/least-connections", "bb up", "bb status")
+}
+
+templ lbStrategiesDiagram() {
+	<svg viewBox="0 0 900 220" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Three panels: round robin sends requests 1, 2, 3 in turn; least connections sends to the replica with the fewest in flight; a hash ring maps keys to the next replica clockwise">
+		<text x="20" y="24" class="fill-slate-900 text-[13px] font-semibold">round robin</text>
+		for i, y := range []int{44, 104, 164} {
+			<rect x="20" y={ itoa(y) } width="240" height="40" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="34" y={ itoa(y + 25) } class="fill-slate-900 font-mono text-[13px]">api-{ itoa(i + 1) }</text>
+			<text x="246" y={ itoa(y + 25) } text-anchor="end" class="fill-slate-500 text-[12px]">req { itoa(i + 1) }, { itoa(i + 4) }, { itoa(i + 7) }</text>
+		}
+		<text x="320" y="24" class="fill-slate-900 text-[13px] font-semibold">least connections</text>
+		for i, y := range []int{44, 104, 164} {
+			<rect x="320" y={ itoa(y) } width="240" height="40" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="334" y={ itoa(y + 25) } class="fill-slate-900 font-mono text-[13px]">api-{ itoa(i + 1) }</text>
+			for j := range lbInFlight[i] {
+				<rect x={ itoa(420 + j*16) } y={ itoa(y + 12) } width="10" height="16" rx="2" class="fill-slate-300"></rect>
+			}
+		}
+		<text x="546" y="129" text-anchor="end" class="fill-indigo-700 text-[12px] font-semibold">← next</text>
+		<text x="620" y="24" class="fill-slate-900 text-[13px] font-semibold">hash ring</text>
+		<circle cx="750" cy="120" r="70" fill="none" stroke-width="2" class="stroke-slate-300"></circle>
+		<circle cx="750" cy="50" r="7" class="fill-indigo-400"></circle>
+		<text x="762" y="44" class="fill-slate-700 font-mono text-[12px]">api-1</text>
+		<circle cx="811" cy="155" r="7" class="fill-indigo-400"></circle>
+		<text x="822" y="172" class="fill-slate-700 font-mono text-[12px]">api-2</text>
+		<circle cx="689" cy="155" r="7" class="fill-indigo-400"></circle>
+		<text x="626" y="180" class="fill-slate-700 font-mono text-[12px]">api-3</text>
+		<circle cx="815" cy="96" r="4" class="fill-slate-500"></circle>
+		<text x="826" y="94" class="fill-slate-500 text-[11px]">key a → api-2</text>
+		<circle cx="750" cy="190" r="4" class="fill-slate-500"></circle>
+		<text x="734" y="210" text-anchor="end" class="fill-slate-500 text-[11px]">key b → api-3</text>
+	</svg>
+}
+
+// --- Health checks ---------------------------------------------------------------
+
+const lbActiveCode = `# HAProxy: an HTTP check of /healthz every 2s; down after 3 failures, up after 2
+backend be_api
+    option httpchk
+    http-check send meth GET uri /healthz
+    http-check expect status 200
+    default-server inter 2s fall 3 rise 2
+    server-template api 3 api.plain.bb.internal:8080 check`
+
+const lbPassiveCode = `# Envoy: eject a host after 3 consecutive 5xx (the default is 5)
+outlier_detection:
+  consecutive_5xx: 3
+  interval: 5s
+  base_ejection_time: 30s
+  max_ejection_percent: 50
+
+# NGINX: 3 failed attempts within 10s and the address rests for 10s.
+# By default only connection errors and timeouts count; add statuses
+# such as http_500 to proxy_next_upstream to count those too.
+server api.bb.internal:8443 resolve max_fails=3 fail_timeout=10s;
+
+# HAProxy: count real responses as checks, and mark down after 3 errors
+server-template api 3 api.bb.internal:8443 check observe layer7 error-limit 3 on-error mark-down`
+
+templ lbHealth() {
+	@docLead() {
+		A load balancer is only as good as its list of healthy backends. It can find out by asking each backend on a timer (active checks) or by watching how the requests it sends turn out (passive checks).
+	}
+	@docFigure("Active: the proxy probes every backend on a timer, traffic or not. Passive: it counts errors on real requests and ejects a backend that keeps failing.") {
+		@lbHealthDiagram()
+	}
+	@docH2("why", "Why check at all")
+	@docP() {
+		Without checks a proxy keeps sending a share of requests to a backend that is down, and that share fails. A container that stopped leaves Docker's DNS, so a proxy that re-resolves drops it within seconds. A container that is running but broken (deadlocked, out of database connections, answering 500) stays in DNS: Docker's own health check marks it unhealthy in @docCodeWord("bb status"), but Docker's DNS keeps returning its address. Only the proxy's checks take it out of the rotation.
+	}
+	@docH2("active", "Active checks")
+	@docP() {
+		The proxy sends its own probe to every backend every interval: a TCP connect, a TLS handshake, or an HTTP request whose status it checks. After @docCodeWord("fall") failures in a row the backend is down; after @docCodeWord("rise") successes it is back.
+	}
+	@docCode("haproxy.cfg", lbActiveCode)
+	@docList(
+		"They find a dead backend before any user request does, and they bring it back without a user request as the guinea pig.",
+		"They test only what the probe touches. A TCP connect proves the port is open, not that the app works; an HTTP check proves what its endpoint checks.",
+		"Every proxy instance probes every backend, so many proxies against many backends add up.",
+		"Open-source NGINX has none: active health_check is NGINX Plus.",
+	)
+	@docH2("passive", "Passive checks")
+	@docP() {
+		The proxy watches real responses and connection failures. A backend that produces too many errors is ejected for a while, then tried again. Envoy calls this outlier detection; NGINX's @docCodeWord("max_fails") and @docCodeWord("fail_timeout") are the same idea, though by default they count only connection errors and timeouts, not 5xx answers; listing statuses in @docCodeWord("proxy_next_upstream") adds them; HAProxy can feed real traffic into its checks with @docCodeWord("observe"); Traefik 3.7 has a @docCodeWord("passiveHealthCheck") on its load balancer.
+	}
+	@docCode("passive", lbPassiveCode)
+	@docList(
+		"No probe traffic, and they judge what users actually get: a backend that answers its health endpoint but fails real requests is caught.",
+		"Users pay for detection: the failures that trigger an ejection are real requests (retries can hide them).",
+		"With no traffic there is no signal, so an ejected backend comes back on a timer, not on proof.",
+		"Envoy never ejects more than max_ejection_percent of a cluster, 10% by default, so with three hosts the default ejects none; set it higher in a small lab.",
+	)
+	@docH2("timing", "Time to eject, time to recover")
+	@docP() {
+		For active checks, detection takes about interval × fall, plus a timeout for each probe that hangs; recovery takes interval × rise. Breadboard's generated HAProxy and Envoy configs check every 2 seconds, down after 3 and up after 2: about 6 seconds to eject a dead backend and 4 to bring it back. For passive checks, detection takes as many failed requests as the threshold, however long they take to arrive, and recovery is the ejection time: 10 seconds for NGINX's @docCodeWord("fail_timeout"), 30 seconds times the number of consecutive ejections for Envoy.
+	}
+	@docP() {
+		Using both is common: active checks for dead backends and recovery, passive checks for the backend that passes its probe and fails real work. Envoy also has a safety net: when fewer than half of a cluster's hosts are healthy (the panic threshold), it ignores health and balances across all of them, on the theory that some answers beat none.
+	}
+	@docH2("endpoint", "What a health endpoint should say")
+	@docList(
+		"Ready means “send me traffic”. It should fail while the app is starting, and while it is shutting down (see draining in Deployments through a proxy).",
+		"Keep it cheap: it runs every couple of seconds from every proxy.",
+		"Be careful with dependencies. If every replica's health check queries the database, a database blip takes every replica out at once and the proxy has nothing left; Envoy's panic mode exists for exactly this.",
+	)
+	@docH2("generated", "What Breadboard generates")
+	@docTable([]string{"Proxy", "Checks in the generated config"},
+		[]string{"HAProxy", "active: TCP connect (a verified TLS handshake for re-encrypt), inter 2s fall 3 rise 2"},
+		[]string{"Envoy", "active: GET / every 2s, any status below 500 healthy, 3 down, 2 up; TCP for passthrough"},
+		[]string{"Traefik", "active: GET / every 2s on app upstreams, 2xx or 3xx healthy; TCP for passthrough"},
+		[]string{"NGINX", "passive only: max_fails=3 fail_timeout=10s, counting connection errors and timeouts (proxy_next_upstream error timeout), not HTTP 5xx"},
+	)
+	@docP() {
+		They probe @docCodeWord("/") because Breadboard cannot know your app's health endpoint. In your own copy of the config, set with @docCodeWord("file:"), point the check at a real endpoint and narrow the statuses it accepts.
+	}
+	@docH2("try", "Try it")
+	@docStarters(stHealth, stRoundRobin)
+}
+
+templ lbHealthDiagram() {
+	<svg viewBox="0 0 900 200" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Left: the proxy sends a probe to each backend every 2 seconds. Right: the proxy counts errors on real requests and ejects the backend after three in a row">
+		<defs>
+			<marker id="hc-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<text x="20" y="24" class="fill-slate-900 text-[13px] font-semibold">active</text>
+		<rect x="20" y="70" width="120" height="60" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="36" y="105" class="fill-indigo-800 font-mono text-[13px] font-semibold">proxy</text>
+		for i, y := range []int{40, 110} {
+			<rect x="270" y={ itoa(y) } width="160" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="284" y={ itoa(y + 27) } class="fill-slate-900 font-mono text-[13px]">api-{ itoa(i + 1) }</text>
+			<line x1="140" y1="100" x2="266" y2={ itoa(y + 22) } stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#hc-arrow)" class="stroke-indigo-400"></line>
+		}
+		<text x="200" y="176" text-anchor="middle" class="fill-slate-500 text-[12px]">GET /healthz every 2 s, traffic or not</text>
+		<text x="480" y="24" class="fill-slate-900 text-[13px] font-semibold">passive</text>
+		<rect x="480" y="70" width="120" height="60" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="496" y="105" class="fill-indigo-800 font-mono text-[13px] font-semibold">proxy</text>
+		<rect x="720" y="40" width="160" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="734" y="67" class="fill-slate-900 font-mono text-[13px]">api-1</text>
+		<line x1="600" y1="92" x2="716" y2="62" stroke-width="1.5" marker-end="url(#hc-arrow)" class="stroke-slate-400"></line>
+		<text x="650" y="64" text-anchor="middle" class="fill-slate-500 text-[11px]">200 200 200</text>
+		<rect x="720" y="110" width="160" height="44" rx="8" stroke-dasharray="5 4" class="fill-white stroke-red-300"></rect>
+		<text x="734" y="137" class="fill-slate-900 font-mono text-[13px]">api-2</text>
+		<line x1="600" y1="108" x2="716" y2="132" stroke-width="1.5" marker-end="url(#hc-arrow)" class="stroke-red-300"></line>
+		<text x="652" y="140" text-anchor="middle" class="fill-red-700 text-[11px]">503 503 503</text>
+		<text x="866" y="176" text-anchor="end" class="fill-red-700 text-[12px] font-semibold">ejected, retried later</text>
+	</svg>
+}
+
+// --- L4 vs L7 ----------------------------------------------------------------------
+
+const lbLayersCode = `# HAProxy: the same backend reached two ways
+frontend l7
+    mode http                       # parse requests: paths, headers, cookies
+    bind :8443 ssl crt /etc/bb/tls/keystore.pem
+    use_backend be_admin if { path_beg /admin/ }
+    default_backend be_api
+
+frontend l4
+    mode tcp                        # bytes only: route on the connection
+    bind :9443
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req.ssl_hello_type 1 }
+    use_backend be_tls_api if { req.ssl_sni -i api.bb.internal }`
+
+templ lbLayers() {
+	@docLead() {
+		A proxy works either on connections (layer 4, TCP) or on requests (layer 7, HTTP). The layer decides what it can see, what it can route on, and how finely it can spread load.
+	}
+	@docFigure("An L4 proxy sees addresses, ports and, for TLS, the server name in the ClientHello. An L7 proxy decrypts and sees every request: method, path, headers.") {
+		@lbLayersDiagram()
+	}
+	@docH2("layers", "What each layer sees")
+	@docTable([]string{"", "L4 (TCP)", "L7 (HTTP)"},
+		[]string{"Sees", "client IP and port, bytes", "method, path, headers, cookies, body"},
+		[]string{"Over TLS", "the SNI in the ClientHello", "everything, after decrypting"},
+		[]string{"Routes on", "port, SNI", "host, path, header, cookie, weight"},
+		[]string{"Balances", "each connection", "each request"},
+		[]string{"Can also", "forward any protocol", "rewrite, retry, add headers, mirror"},
+	)
+	@docH2("l4", "L4: connections")
+	@docP() {
+		An L4 proxy accepts a TCP connection, picks a backend once, and copies bytes in both directions until either side closes. It never parses them, so it works for any protocol: Postgres, Redis, Kafka, or TLS it cannot decrypt. For TLS it can still read one thing: the server name the client puts in its ClientHello, which is sent before encryption starts. That is how passthrough routes several TLS services on one port.
+	}
+	@docTable([]string{"Proxy", "L4", "L7"},
+		[]string{"HAProxy", "mode tcp", "mode http"},
+		[]string{"NGINX", "stream { … }", "http { … }"},
+		[]string{"Envoy", "envoy.filters.network.tcp_proxy", "envoy.filters.network.http_connection_manager"},
+		[]string{"Traefik", "tcp: routers with HostSNI", "http: routers with PathPrefix, Host, …"},
+	)
+	@docH2("l7", "L7: requests")
+	@docP() {
+		An L7 proxy terminates the client's connection, parses each HTTP request, and decides per request. It can send @docCodeWord("/admin/") to one backend and everything else to another, retry a failed idempotent request elsewhere, add @docCodeWord("X-Forwarded-For"), split traffic by weight, or copy requests to a shadow. For HTTPS it needs the certificate and key, because it has to decrypt to see any of this.
+	}
+	@docCode("haproxy.cfg", lbLayersCode)
+	@docH2("per", "Per connection or per request")
+	@docP() {
+		Clients reuse connections. With HTTP keep-alive, and even more with HTTP/2 and gRPC, which multiplex many requests on one connection, a client may send thousands of requests over a single connection. An L4 balancer pins all of them to the backend it picked when the connection opened: three clients against three backends may land on two, and one busy client keeps one backend hot while the others idle. An L7 balancer spreads the requests themselves. This is why gRPC traffic needs an L7 proxy (or client-side balancing).
+	}
+	@docH2("cost", "What L7 costs")
+	@docList(
+		"The proxy holds the TLS key and sees plaintext: it is inside the trust boundary.",
+		"Parsing and re-encrypting cost CPU and add a little latency per request.",
+		"The backend sees the proxy's address, not the client's; X-Forwarded-For carries the client's, and the backend must trust it only from the proxy. At L4 the PROXY protocol does the same job.",
+		"Only HTTP (and protocols the proxy knows) can be handled; anything else must stay at L4.",
+	)
+	@docH2("breadboard", "Both in Breadboard")
+	@docP() {
+		Every Breadboard HTTP proxy has both. Port 8443 is L7: it decrypts with the proxy's certificate, routes @docCodeWord("/<route>/") prefixes and balances per request; apps reach it at @docCodeWord("<NAME>_URL")&#46; Port 9443 is L4: it exists when an upstream is @docCodeWord("passthrough"), and routes by SNI to backends that keep their own TLS, at @docCodeWord("<NAME>_PASSTHROUGH_ADDR")&#46; See @docLink("/docs/load-balancing/tls-at-the-proxy", "TLS at the proxy")&#46;
+	}
+	@docH2("try", "Try it")
+	@docStarters(stL4L7, stTLSModes)
+}
+
+templ lbLayersDiagram() {
+	<svg viewBox="0 0 900 210" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Two lanes. L4: a TCP connection whose bytes stay opaque except the server name. L7: a decrypted HTTP request whose method, path and headers the proxy reads">
+		<defs>
+			<marker id="ly-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<text x="20" y="30" class="fill-slate-900 text-[13px] font-semibold">L4</text>
+		<rect x="60" y="12" width="500" height="64" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="76" y="38" class="fill-slate-700 font-mono text-[12px]">10.213.0.7:51244 → :9443</text>
+		<text x="76" y="60" class="fill-indigo-700 font-mono text-[12px]">SNI api.bb.internal</text>
+		<text x="260" y="60" class="fill-slate-400 font-mono text-[12px]">▓▓▓▓ encrypted ▓▓▓▓▓▓▓▓▓▓▓▓</text>
+		<line x1="560" y1="44" x2="676" y2="44" stroke-width="1.5" marker-end="url(#ly-arrow)" class="stroke-slate-400"></line>
+		<text x="618" y="36" text-anchor="middle" class="fill-slate-500 text-[11px]">whole connection</text>
+		<rect x="680" y="22" width="200" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="696" y="49" class="fill-slate-900 font-mono text-[13px]">one backend</text>
+		<text x="20" y="128" class="fill-slate-900 text-[13px] font-semibold">L7</text>
+		<rect x="60" y="100" width="500" height="96" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="76" y="126" class="fill-slate-700 font-mono text-[12px]">10.213.0.7:51244 → :8443  (decrypted)</text>
+		<text x="76" y="148" class="fill-indigo-700 font-mono text-[12px]">GET /admin/users HTTP/2</text>
+		<text x="76" y="168" class="fill-indigo-700 font-mono text-[12px]">cookie: srv=a2   x-user: 42</text>
+		<text x="76" y="188" class="fill-slate-400 font-mono text-[12px]">body …</text>
+		<line x1="560" y1="130" x2="676" y2="118" stroke-width="1.5" marker-end="url(#ly-arrow)" class="stroke-slate-400"></line>
+		<line x1="560" y1="160" x2="676" y2="172" stroke-width="1.5" marker-end="url(#ly-arrow)" class="stroke-slate-400"></line>
+		<text x="618" y="148" text-anchor="middle" class="fill-slate-500 text-[11px]">each request</text>
+		<rect x="680" y="96" width="200" height="40" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="696" y="121" class="fill-slate-900 font-mono text-[13px]">admin</text>
+		<rect x="680" y="152" width="200" height="40" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="696" y="177" class="fill-slate-900 font-mono text-[13px]">api</text>
+	</svg>
+}
+
+// --- TLS ---------------------------------------------------------------------------
+
+const lbTLSSpec = `services:
+  edge:
+    type: haproxy                  # or envoy, traefik, nginx
+    upstreams:
+      - web                        # re-encrypt (tls.mode: on, the default)
+      - service: api
+        tls:
+          mode: off                # terminate: plaintext on a private segment
+          reason: practice TLS termination
+      - service: payments
+        tls: {mode: passthrough}   # L4 on :9443, routed by SNI
+apps:
+  client:
+    path: ./client
+    uses: [edge]   # EDGE_URL=https://edge.bb.internal:8443
+                   # EDGE_PASSTHROUGH_ADDR=edge.bb.internal:9443`
+
+templ lbTLS() {
+	@docLead() {
+		A proxy in front of TLS services can decrypt and encrypt again, decrypt and send plaintext, or not decrypt at all. Breadboard supports all three on every HTTP proxy, per upstream, and every hop that is not encrypted has to say why.
+	}
+	@docFigure("Re-encrypt: two TLS sessions, the proxy's and the backend's. Terminate: TLS to the proxy, plaintext on a private segment. Passthrough: one TLS session from client to backend; the proxy only reads the server name.") {
+		@lbTLSDiagram()
+	}
+	@docH2("modes", "Three modes")
+	@docP() {
+		The question is who holds the session keys. With re-encrypt and terminate the proxy decrypts, so it sees every request and can do anything an L7 proxy does. With passthrough the client's TLS session runs all the way to the backend, the proxy sees only encrypted bytes, and the client verifies the backend's certificate, not the proxy's.
+	}
+	@docH2("reencrypt", "Re-encrypt")
+	@docP() {
+		The client's TLS session ends at the proxy, with the proxy's certificate. The proxy then opens a second TLS session to the backend, verifies the backend's certificate against the lab CA, and sends the backend's name as SNI. Nothing travels in plaintext, and the proxy can still route by path. This is @docCodeWord("tls.mode: on"), the default.
+	}
+	@docCallout("Verify the backend by name") {
+		Encrypting to the backend without verifying it only protects against passive eavesdropping. Breadboard's configs verify the chain and the name: HAProxy @docCodeWord("verify required") with @docCodeWord("verifyhost"), Envoy a SAN match, NGINX @docCodeWord("proxy_ssl_verify on") with @docCodeWord("proxy_ssl_name"), Traefik a serversTransport with @docCodeWord("serverName")&#46; HAProxy 3.4 needs the explicit @docCodeWord("sni"): its automatic SNI would send the client's Host, which is the proxy's own name.
+	}
+	@docH2("terminate", "Terminate")
+	@docP() {
+		The proxy decrypts and sends plain HTTP to the backend. It saves the backend a handshake per connection, and it is the classic edge setup. It also means anyone on that network can read the traffic, so Breadboard confines it. @docCodeWord("tls.mode: off") requires a @docCodeWord("reason"); the hop runs on a private segment, @docCodeWord("plain-<app>"), that only the app's replicas and the proxies terminating to it join; each replica gets @docCodeWord("BB_PLAIN_LISTEN_ADDR") to bind its plaintext listener, and an init container drops that port on every other address. @docCodeWord("bb status") reports the hop as a plaintext warning.
+	}
+	@docH2("passthrough", "Passthrough")
+	@docP() {
+		The proxy listens on 9443 at L4, reads the SNI from the client's ClientHello, and forwards the connection to the backend that owns that name, still encrypted. The client must connect to @docCodeWord("<NAME>_PASSTHROUGH_ADDR") and send the backend's name, @docCodeWord("<target>.<domain>"), as SNI; it then sees and verifies the backend's own certificate. The proxy cannot route on paths, add headers or balance per request. A name no upstream claims is closed.
+	}
+	@docP() {
+		Passthrough needs a protocol that starts with a TLS ClientHello: HTTPS, Kafka, Redis, Consul. Postgres first sends a plaintext request to switch to TLS, so a Postgres client has to use direct TLS, @docCodeWord("sslnegotiation=direct") with libpq 17 and later, to pass through.
+	}
+	@docH2("compare", "Side by side")
+	@docTable([]string{"", "Re-encrypt", "Terminate", "Passthrough"},
+		[]string{"tls.mode", "on (default)", "off + reason", "passthrough"},
+		[]string{"Client sees", "proxy's certificate", "proxy's certificate", "backend's certificate"},
+		[]string{"Proxy reads requests", "yes", "yes", "no, only SNI"},
+		[]string{"Proxy → backend", "TLS, verified", "plaintext, private segment", "the client's TLS"},
+		[]string{"Proxy port", "8443", "8443", "9443"},
+		[]string{"Routes on", "path prefix", "path prefix", "server name"},
+	)
+	@docH2("declare", "Declaring the mode")
+	@docCode("experiment.yaml", lbTLSSpec)
+	@docP() {
+		Each proxy's “in Breadboard” guide shows the directives its generated config uses for each mode: @docLink("/docs/haproxy/in-breadboard", "HAProxy"), @docLink("/docs/envoy/in-breadboard", "Envoy"), @docLink("/docs/traefik/in-breadboard", "Traefik"), @docLink("/docs/nginx/in-breadboard", "NGINX")&#46;
+	}
+	@docH2("check", "Checking which one you got")
+	@docP() {
+		Ask for the certificate each address presents. Through 8443 the subject is the proxy; through 9443 with a backend's name, it is the backend:
+	}
+	@docTerminal(
+		"openssl s_client -connect edge.bb.internal:8443 -servername edge.bb.internal -CAfile /etc/bb/ca.pem </dev/null 2>/dev/null | grep subject=",
+		"openssl s_client -connect edge.bb.internal:9443 -servername payments.bb.internal -CAfile /etc/bb/ca.pem </dev/null 2>/dev/null | grep subject=",
+	)
+	@docStarters(stTLSModes)
+}
+
+templ lbTLSDiagram() {
+	<svg viewBox="0 0 900 220" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Three rows. Re-encrypt: client to proxy TLS, proxy to backend TLS. Terminate: client to proxy TLS, proxy to backend plaintext on a private segment. Passthrough: one TLS session from client through the proxy to the backend">
+		<defs>
+			<marker id="tm-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		for i, y := range []int{20, 90, 160} {
+			<text x="20" y={ itoa(y + 26) } class="fill-slate-900 text-[13px] font-semibold">{ lbTLSRows[i] }</text>
+			<rect x="140" y={ itoa(y) } width="110" height="40" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="156" y={ itoa(y + 25) } class="fill-slate-700 text-[13px]">client</text>
+			<rect x="420" y={ itoa(y) } width="140" height="40" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+			<text x="436" y={ itoa(y + 25) } class="fill-indigo-800 font-mono text-[13px] font-semibold">proxy { lbTLSPorts[i] }</text>
+			<rect x="730" y={ itoa(y) } width="150" height="40" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="746" y={ itoa(y + 25) } class="fill-slate-700 text-[13px]">backend</text>
+		}
+		<line x1="250" y1="40" x2="416" y2="40" stroke-width="2" marker-end="url(#tm-arrow)" class="stroke-indigo-400"></line>
+		<text x="333" y="32" text-anchor="middle" class="fill-slate-500 text-[11px]">TLS, proxy's cert</text>
+		<line x1="560" y1="40" x2="726" y2="40" stroke-width="2" marker-end="url(#tm-arrow)" class="stroke-indigo-400"></line>
+		<text x="643" y="32" text-anchor="middle" class="fill-slate-500 text-[11px]">TLS, verified as backend</text>
+		<line x1="250" y1="110" x2="416" y2="110" stroke-width="2" marker-end="url(#tm-arrow)" class="stroke-indigo-400"></line>
+		<text x="333" y="102" text-anchor="middle" class="fill-slate-500 text-[11px]">TLS, proxy's cert</text>
+		<line x1="560" y1="110" x2="726" y2="110" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#tm-arrow)" class="stroke-red-400"></line>
+		<text x="643" y="102" text-anchor="middle" class="fill-red-700 text-[11px]">plaintext, plain-api segment</text>
+		<line x1="250" y1="180" x2="416" y2="180" stroke-width="2" marker-end="url(#tm-arrow)" class="stroke-indigo-400"></line>
+		<line x1="560" y1="180" x2="726" y2="180" stroke-width="2" marker-end="url(#tm-arrow)" class="stroke-indigo-400"></line>
+		<text x="333" y="172" text-anchor="middle" class="fill-slate-500 text-[11px]">the client's TLS session</text>
+		<text x="643" y="172" text-anchor="middle" class="fill-slate-500 text-[11px]">backend's cert</text>
+		<text x="490" y="214" text-anchor="middle" class="fill-slate-500 text-[11px]">reads only the SNI</text>
+	</svg>
+}
+
+// --- Deployments -------------------------------------------------------------------
+
+const lbCanaryCode = `# Traefik: a weighted service over two services, v1 90%, v2 10%
+http:
+  services:
+    api:
+      weighted:
+        services:
+          - name: api-v1
+            weight: 90
+          - name: api-v2
+            weight: 10
+
+# Envoy: the same split on a route
+route:
+  weighted_clusters:
+    clusters:
+      - name: api-v1
+        weight: 90
+      - name: api-v2
+        weight: 10`
+
+const lbMirrorCode = `# Envoy: copy every request to v2; its responses are never sent to the client
+route:
+  cluster: api-v1
+  request_mirror_policies:
+    - cluster: api-v2
+
+# NGINX: a mirror subrequest per request; its response is ignored
+location / {
+    mirror /mirror;
+    proxy_pass https://api_v1;
+}
+location = /mirror {
+    internal;
+    proxy_pass https://api_v2$request_uri;
+}
+
+# Traefik: a mirroring service sending 10% to v2
+mirrored:
+  mirroring:
+    service: api-v1
+    mirrors:
+      - name: api-v2
+        percent: 10`
+
+const lbDrainCode = `# HAProxy runtime API: stop new traffic to one server, let the rest finish
+set server be_api/api2 state drain
+# ... wait until its current sessions (scur on the stats page) reach 0, then stop it
+set server be_api/api2 state maint`
+
+const lbShutdownCode = `// On SIGTERM: fail readiness first, keep serving, then finish in-flight requests.
+<-ctx.Done()                      // signal.NotifyContext(..., syscall.SIGTERM)
+ready.Store(false)                // /healthz now answers 503
+time.Sleep(6 * time.Second)       // about interval × fall of the proxy's check
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+defer cancel()
+srv.Shutdown(shutdownCtx)         // stops accepting, waits for active requests`
+
+templ lbDeployments() {
+	@docLead() {
+		Because every request passes through it, the proxy decides which version of a service answers. Deployment strategies are different ways of moving that decision from the old version to the new one without users noticing.
+	}
+	@docFigure("Blue-green switches all traffic at once. A canary sends a small share to the new version. Mirroring copies requests to it and discards its answers. Draining stops new requests to an instance and lets the old ones finish.") {
+		@lbDeployDiagram()
+	}
+	@docH2("switch", "The proxy as a switch")
+	@docP() {
+		Two things decide whether a change of backends is invisible. The proxy must apply its new configuration gracefully: NGINX's reload starts new workers and lets the old ones finish their requests, HAProxy's master process does the same for its old worker, Traefik applies a changed dynamic file live, and Envoy takes new clusters and routes from its control plane without a restart. And the backend leaving must finish what it started (draining, below). Recreating the proxy's container is not graceful: it drops every open connection.
+	}
+	@docH2("blue-green", "Blue-green")
+	@docP() {
+		Run two complete copies, blue (live) and green (new). Test green directly, then point the proxy at green in one step. Rolling back is pointing it at blue again, which is still running. The cost is running everything twice during the switch, and anything shared (the database schema) must work with both.
+	}
+	@docStarters(stBlueGreen)
+	@docH2("canary", "Canary")
+	@docP() {
+		Send a small share of real traffic to the new version, compare its errors and latency with the old version's, and raise the share step by step: 1%, 10%, 50%, 100%. A bad version hurts few users, briefly. The comparison is the point: a canary nobody watches is a slow rollout.
+	}
+	@docCode("weights", lbCanaryCode)
+	@docP() {
+		HAProxy and NGINX express the same with weights on servers, and NGINX also with @docCodeWord("split_clients"), which hashes a key (such as a user id) into percentages, so one user stays on one version. Routing by header instead of weight lets testers opt into the canary.
+	}
+	@docStarters(stCanary)
+	@docH2("mirroring", "Mirroring")
+	@docP() {
+		Also called shadowing: the proxy sends a copy of each request (or a share of them) to the new version, and throws its response away. Users only ever see the old version's answers, yet the new version handles real traffic: its logs, errors and latency show how it would behave.
+	}
+	@docCode("mirroring", lbMirrorCode)
+	@docList(
+		"Side effects happen twice. A mirrored POST that writes to a shared database writes twice; mirror to a copy with its own data, or mirror only reads.",
+		"The shadow adds load, so mirror a percentage when traffic is high.",
+		"Envoy appends -shadow to the Host header of mirrored requests, so the backend can tell them apart (disable_shadow_host_suffix_append turns it off).",
+		"HAProxy 3.4 has no built-in mirroring directive.",
+	)
+	@docStarters(stMirroring)
+	@docH2("draining", "Draining")
+	@docP() {
+		Removing a backend loses the requests it is serving unless it is drained first: no new requests, the current ones allowed to finish, then stopped. HAProxy does it through its runtime API: @docCodeWord("state drain") or weight 0, after which only persistent sticky clients still get through. In open-source NGINX, @docCodeWord("drain") on a server (since 1.29.6) applies to sticky clients; otherwise mark it @docCodeWord("down") and reload. Envoy and Traefik drain a backend whose health check fails.
+	}
+	@docCode("haproxy runtime API", lbDrainCode)
+	@docP() {
+		The backend can drain itself. @docCodeWord("docker stop") sends SIGTERM and kills the container 10 seconds later. An app that on SIGTERM fails its health check, keeps serving until the proxy notices, then shuts its server down gracefully loses nothing:
+	}
+	@docCode("main.go", lbShutdownCode)
+	@docStarters(stDraining)
+	@docH2("try", "Try them")
+	@docTerminal("bb starter lb/weighted-canary", "bb up", "bb status")
+}
+
+templ lbDeployDiagram() {
+	<svg viewBox="0 0 900 200" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Four panels: blue-green with all traffic moving from blue to green; canary with 90 percent to v1 and 10 percent to v2; mirroring with a copy to v2 whose responses are dropped; draining with no new requests to one instance">
+		<defs>
+			<marker id="dp-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		for i, title := range []string{"blue-green", "canary", "mirroring", "draining"} {
+			<text x={ itoa(20 + i*225) } y="24" class="fill-slate-900 text-[13px] font-semibold">{ title }</text>
+			<rect x={ itoa(20 + i*225) } y="80" width="60" height="40" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+			<text x={ itoa(30 + i*225) } y="105" class="fill-indigo-800 font-mono text-[12px] font-semibold">proxy</text>
+			<rect x={ itoa(130 + i*225) } y="44" width="70" height="36" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<rect x={ itoa(130 + i*225) } y="124" width="70" height="36" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		}
+		<text x="142" y="67" class="fill-slate-400 font-mono text-[12px]">blue</text>
+		<text x="142" y="147" class="fill-slate-900 font-mono text-[12px]">green</text>
+		<line x1="80" y1="108" x2="126" y2="138" stroke-width="2.5" marker-end="url(#dp-arrow)" class="stroke-indigo-400"></line>
+		<text x="110" y="185" text-anchor="middle" class="fill-slate-500 text-[11px]">100% at once</text>
+		<text x="367" y="67" class="fill-slate-900 font-mono text-[12px]">v1</text>
+		<text x="367" y="147" class="fill-slate-900 font-mono text-[12px]">v2</text>
+		<line x1="305" y1="92" x2="351" y2="64" stroke-width="3" marker-end="url(#dp-arrow)" class="stroke-indigo-400"></line>
+		<line x1="305" y1="108" x2="351" y2="138" stroke-width="1" marker-end="url(#dp-arrow)" class="stroke-indigo-400"></line>
+		<text x="335" y="185" text-anchor="middle" class="fill-slate-500 text-[11px]">90% / 10%</text>
+		<text x="592" y="67" class="fill-slate-900 font-mono text-[12px]">v1</text>
+		<text x="592" y="147" class="fill-slate-900 font-mono text-[12px]">v2</text>
+		<line x1="530" y1="92" x2="576" y2="64" stroke-width="2" marker-end="url(#dp-arrow)" class="stroke-indigo-400"></line>
+		<line x1="530" y1="108" x2="576" y2="138" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#dp-arrow)" class="stroke-slate-400"></line>
+		<text x="560" y="185" text-anchor="middle" class="fill-slate-500 text-[11px]">copy, answer dropped</text>
+		<text x="817" y="67" class="fill-slate-900 font-mono text-[12px]">api-1</text>
+		<text x="817" y="147" class="fill-slate-400 font-mono text-[12px]">api-2</text>
+		<line x1="755" y1="92" x2="801" y2="64" stroke-width="2.5" marker-end="url(#dp-arrow)" class="stroke-indigo-400"></line>
+		<text x="785" y="185" text-anchor="middle" class="fill-slate-500 text-[11px]">api-2: no new, finish old</text>
+	</svg>
+}
+
+// --- Pooling -----------------------------------------------------------------------
+
+const lbKeepaliveCode = `# NGINX: keep idle connections to the backends, per worker
+upstream be_api {
+    zone be_api 64k;
+    server api.bb.internal:8443 resolve;
+    keepalive 16;
+}
+location / {
+    proxy_pass https://be_api;
+    proxy_http_version 1.1;          # keep-alive needs HTTP/1.1
+    proxy_set_header Connection "";  # and no "Connection: close"
+}`
+
+const lbPoolSpec = `services:
+  postgres:
+    type: postgres
+  pool:
+    type: pgbouncer
+    config:
+      pool_mode: transaction   # session, transaction or statement
+      pool_size: 5             # server connections per database and user
+    upstreams: [postgres]
+apps:
+  orders:
+    path: ./orders
+    uses: [pool]   # DATABASE_URL=postgres://app:…@pool.bb.internal:6432/app?sslmode=verify-full`
+
+templ lbPooling() {
+	@docLead() {
+		Opening a connection is expensive and keeping one is not free. A pool keeps a few connections open and lends them out, so many short pieces of work share them. Proxies pool in two places: towards HTTP backends, and in front of databases that can only afford a few connections.
+	}
+	@docFigure("Many client connections reach the pool; it lends a few server connections, each for one transaction in transaction mode. Clients that find none free wait in the pool.") {
+		@lbPoolDiagram()
+	}
+	@docH2("cost", "What a connection costs")
+	@docList(
+		"Setting up: a TCP handshake, then a TLS handshake, each at least a network round trip, plus the TLS key exchange's CPU on both sides.",
+		"Keeping: memory and a file descriptor on both ends. For Postgres, each connection is a separate server process with its own memory, and max_connections is 100 by default.",
+		"Many clients each with their own pool multiply this: 20 replicas × a pool of 20 is 400 connections to one database.",
+	)
+	@docH2("http", "Pooling at an HTTP proxy")
+	@docP() {
+		An HTTP proxy has two sides. Clients keep their connections to it open (keep-alive), and it keeps its own idle connections to the backends, so a new request skips the handshakes on both. HAProxy reuses idle server connections safely by default, @docCodeWord("http-reuse safe"), Envoy keeps a connection pool per cluster, Traefik reuses through Go's HTTP transport, and NGINX needs to be told:
+	}
+	@docCode("nginx.conf", lbKeepaliveCode)
+	@docP() {
+		Breadboard's generated NGINX config has exactly this, @docCodeWord("keepalive 16"), so most re-encrypted requests reuse a TLS session to the backend.
+	}
+	@docH2("postgres", "Pooling Postgres")
+	@docP() {
+		PgBouncer speaks the Postgres protocol on both sides. Apps connect to it as if it were Postgres; it keeps a pool of real server connections per database and user, and lends one to a client while the client needs it. Postgres sees only PgBouncer's connections. In Breadboard it is a service with one Postgres upstream, and apps that use it receive the usual Postgres variables pointing at the pool:
+	}
+	@docCode("experiment.yaml", lbPoolSpec)
+	@docH2("modes", "Session, transaction, statement")
+	@docP() {
+		The pool mode decides when a server connection goes back to the pool.
+	}
+	@docTable([]string{"Mode", "Returned", "Sharing", "Breaks"},
+		[]string{"session", "when the client disconnects", "least", "nothing"},
+		[]string{"transaction", "when a transaction ends", "most useful", "session state: SET, LISTEN, advisory locks, WITH HOLD cursors, SQL PREPARE"},
+		[]string{"statement", "after each statement", "most", "multi-statement transactions too"},
+	)
+	@docP() {
+		Session mode is PgBouncer's own default; Breadboard defaults to transaction mode, because that is where pooling pays off. Its trap is that two transactions from one client may run on different server connections: a @docCodeWord("SET statement_timeout") applies to whichever connection ran it, which may next serve another client. Protocol-level prepared statements, which drivers such as pgx use by default, do work: PgBouncer tracks them per client, up to @docCodeWord("max_prepared_statements") per connection, 200 by default since 1.24. The full list is PgBouncer's @extLink(pgbouncerDocs+"features.html") {
+			feature map
+		}&#46;
+	}
+	@docH2("sizing", "Sizing a pool")
+	@docP() {
+		A connection is busy for as long as each piece of work holds it. By Little's law, the connections needed are about the rate times the hold time: 500 transactions a second at 10 milliseconds each keep 5 connections busy. Add headroom for spikes, and stop there: beyond a few connections per CPU core, Postgres spends its time switching between them and contending for locks, and throughput falls. When the pool is too small, clients wait in PgBouncer instead of failing at Postgres's limit: @docCodeWord("SHOW POOLS") counts them in @docCodeWord("cl_waiting") and @docCodeWord("maxwait") shows the longest wait.
+	}
+	@docH2("where", "A shared pool or a sidecar")
+	@docTable([]string{"", "Shared pool (service)", "Sidecar (per instance)"},
+		[]string{"Server connections", "pool_size per database and user, for every app together", "pool_size per instance: replicas × pool_size"},
+		[]string{"Hop to the pool", "TLS over the network", "loopback in the pod"},
+		[]string{"Failure", "one pool for everyone: run more than one in production", "fails with its instance"},
+		[]string{"In Breadboard", "type: pgbouncer with upstreams: [postgres]", "sidecars: - type: pgbouncer"},
+	)
+	@docP() {
+		A shared pool caps the total the database sees, whatever the number of replicas; a sidecar keeps the pool close and independent, but the total grows with every instance. See @docLink("/docs/pgbouncer", "PgBouncer") and the sidecar's @docLink("/docs/sidecars/connection-pooling", "Connection pooling with PgBouncer")&#46;
+	}
+	@docH2("try", "Try it")
+	@docStarters(stPoolModes, stPoolSidecar)
+}
+
+templ lbPoolDiagram() {
+	<svg viewBox="0 0 900 200" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Three apps with many client connections reach a shared PgBouncer on port 6432; it keeps five server connections to Postgres and queues the rest">
+		<defs>
+			<marker id="pl-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		for i, y := range []int{20, 80, 140} {
+			<rect x="20" y={ itoa(y) } width="170" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="34" y={ itoa(y + 27) } class="fill-slate-900 font-mono text-[13px]">orders-{ itoa(i + 1) }</text>
+			for j := range 4 {
+				<rect x={ itoa(120 + j*14) } y={ itoa(y + 12) } width="9" height="20" rx="2" class="fill-slate-300"></rect>
+			}
+			<line x1="190" y1={ itoa(y + 22) } x2="346" y2="100" stroke-width="2" marker-end="url(#pl-arrow)" class="stroke-slate-300"></line>
+		}
+		<text x="268" y="40" text-anchor="middle" class="fill-slate-500 text-[11px]">12 client connections, TLS</text>
+		<rect x="350" y="50" width="220" height="100" rx="12" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="366" y="76" class="fill-indigo-800 font-mono text-[13px] font-semibold">pool :6432</text>
+		<text x="366" y="100" class="fill-indigo-800 text-[12px]">transaction mode</text>
+		<text x="366" y="120" class="fill-indigo-800 text-[12px]">waiting clients queue here</text>
+		<rect x="700" y="70" width="180" height="60" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="716" y="98" class="fill-slate-900 font-mono text-[13px] font-semibold">postgres</text>
+		<text x="716" y="118" class="fill-slate-500 text-[11px]">sees 5 connections</text>
+		<line x1="570" y1="100" x2="696" y2="100" stroke-width="2" marker-end="url(#pl-arrow)" class="stroke-slate-400"></line>
+		<text x="633" y="90" text-anchor="middle" class="fill-slate-500 text-[12px]">5 × TLS :5432</text>
+	</svg>
+}

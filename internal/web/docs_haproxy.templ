@@ -1,0 +1,254 @@
+package web
+
+// HAProxy docs (Phase 5, wave C; D-157, D-158). Config excerpts are the
+// generated haproxy.cfg (internal/catalog/haproxy.go, compose golden
+// haproxy.golden); directives follow the HAProxy 3.4 manual.
+
+func init() {
+	registerTech(tech{
+		ID:      "haproxy",
+		Name:    "HAProxy",
+		Tagline: "A fast, focused load balancer for TCP and HTTP, configured in one file of frontends and backends.",
+		Order:   71,
+		Intro:   haproxyIntro(),
+		GoodFit: []string{"A dedicated load balancer in front of a fleet", "TCP and HTTP balancing in one process", "Many balancing algorithms and cookie stickiness", "Draining and weighting servers at runtime", "Detailed per-server statistics"},
+		PoorFit: []string{"Config pushed per route by a control plane (Envoy)", "Routes discovered from container labels (Traefik)", "Serving static files (NGINX)"},
+		Diagram: proxyDiagram(proxyFig{ID: "hp", Name: "HAProxy", L7: "frontend https → be_<route>", L4: "frontend passthrough → be_tls_<route>"}),
+		Official: []link{
+			{"HAProxy 3.4 configuration manual", haproxyDocs},
+			{"HAProxy 3.4 management guide (runtime API)", haproxyMgmt},
+			{"HAProxy 3.4: balance algorithms", haproxyDocs + "#4.2-balance"},
+			{"HAProxy 3.4: server options", haproxyDocs + "#5.2"},
+		},
+		Starters: []string{stLeastConn.URL, stSticky.URL, stHealth.URL, stL4L7.URL, stTLSModes.URL, stDraining.URL},
+		Guides: []guide{
+			{
+				Slug: "config-anatomy", Title: "Anatomy of haproxy.cfg", Summary: "global, defaults, frontends and backends, block by block.",
+				Starter:  stLeastConn.URL,
+				Sections: []docSection{{"sections", "Four kinds of section"}, {"global", "global and resolvers"}, {"defaults", "defaults"}, {"frontends", "Frontends"}, {"backends", "Backends and servers"}, {"change", "Changing it"}, {"validate", "Checking a config"}},
+				Body:     haproxyAnatomy(),
+			},
+			{
+				Slug: "in-breadboard", Title: "HAProxy in Breadboard", Summary: "The image, 8443 and 9443, upstreams and modes, file:, the stats tab.",
+				Sections: []docSection{{"image", "Image and limits"}, {"upstreams", "Upstreams and routes"}, {"modes", "The three TLS modes"}, {"health", "Health checks"}, {"env", "What your app receives"}, {"see", "Seeing it work"}, {"own", "Owning the config"}},
+				Body:     haproxyInBreadboard(),
+			},
+		},
+	})
+}
+
+const haproxyGlobalCode = `global
+    # Logs go to the container's stdout: bb logs edge.
+    log stdout format raw local0
+    maxconn 256
+    nbthread 1
+    # TLS 1.2 or newer, towards clients and towards servers.
+    ssl-default-bind-options ssl-min-ver TLSv1.2
+    ssl-default-server-options ssl-min-ver TLSv1.2
+
+# Docker's embedded DNS. server-template lines keep resolving their name
+# here, so HAProxy follows replicas as they start and stop.
+resolvers docker
+    nameserver dns 127.0.0.11:53
+    accepted_payload_size 8192
+    resolve_retries 3
+    timeout resolve 1s
+    timeout retry 1s`
+
+const haproxyDefaultsCode = `defaults
+    log global
+    mode http
+    option httplog
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+    timeout check 5s
+    default-server inter 2s fall 3 rise 2 resolvers docker resolve-prefer ipv4 init-addr none`
+
+const haproxyFrontendCode = `# Loopback only: the health check and the stats page (/stats;csv for CSV).
+frontend monitor
+    bind 127.0.0.1:8404
+    monitor-uri /healthz
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats show-legends
+
+frontend https
+    bind :8443 ssl crt /etc/bb/tls/keystore.pem alpn h2,http/1.1
+    # Tell servers the client spoke HTTPS, and who the client was.
+    http-request set-header X-Forwarded-Proto https
+    option forwardfor
+    use_backend be_web if { path_beg /web/ }
+    use_backend be_v1 if { path_beg /v1/ }
+    default_backend be_web`
+
+const haproxyBackendCode = `backend be_web
+    # re-encrypt: TLS to every replica of web, verified against the lab CA as web.bb.internal.
+    balance roundrobin
+    http-request replace-path /web/(.*) /\1 if { path_beg /web/ }
+    server-template web 3 web.bb.internal:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(web.bb.internal) verifyhost web.bb.internal check check-sni web.bb.internal
+
+backend be_v1
+    # terminate: plaintext HTTP to every replica of api on its private segment. Reason: ...
+    balance roundrobin
+    http-request replace-path /v1/(.*) /\1 if { path_beg /v1/ }
+    server-template v1 2 api.plain.bb.internal:9090 check`
+
+const haproxyPassthroughCode = `frontend passthrough
+    bind :9443
+    mode tcp
+    option tcplog
+    # Wait for the ClientHello, then route on its SNI. Unknown names are closed.
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req.ssl_hello_type 1 }
+    use_backend be_tls_payments if { req.ssl_sni -i payments.bb.internal }
+
+backend be_tls_payments
+    mode tcp
+    balance roundrobin
+    server-template payments 1 payments.bb.internal:8443 check`
+
+const haproxyChangeCode = `backend be_web
+    # Fewest connections instead of turns (or: random(2), source, hdr(x-user)).
+    balance leastconn
+    # Check a real endpoint over HTTP instead of a TCP connect.
+    option httpchk
+    http-check send meth GET uri /healthz
+    http-check expect status 200
+    # Ramp a recovered server's weight up over 10s instead of all at once.
+    default-server slowstart 10s
+    server-template web 3 web.bb.internal:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(web.bb.internal) verifyhost web.bb.internal check check-sni web.bb.internal`
+
+templ haproxyIntro() {
+	@docP() {
+		HAProxy is a load balancer and reverse proxy for TCP and HTTP. One event-driven process handles tens of thousands of connections, and it has been the standard open-source load balancer in front of web fleets for two decades.
+	}
+	@docP() {
+		Its configuration is one file of sections. A frontend accepts connections and decides where they go; a backend is a pool of servers with a balancing algorithm and health checks. Each section runs in @docCodeWord("mode http"), where HAProxy parses requests and can route on paths and headers, or @docCodeWord("mode tcp"), where it only moves bytes.
+	}
+	@docP() {
+		Choose it for a dedicated load balancer: it has the widest set of balancing algorithms of the four proxies here, cookie stickiness, active and passive health checks, a runtime API to drain or reweight a server without a reload, and a stats page that shows every server's state, sessions and errors.
+	}
+}
+
+templ haproxyAnatomy() {
+	@docLead() {
+		Breadboard generates a commented @docCodeWord("haproxy.cfg") per HAProxy service. These are its parts, from the example in @docLink("/docs/haproxy/in-breadboard", "HAProxy in Breadboard"): web re-encrypted, api terminated as /v1/, payments passed through.
+	}
+	@docH2("sections", "Four kinds of section")
+	@docList(
+		"global: process-wide settings: logging, limits, threads, TLS defaults.",
+		"defaults: settings every following frontend and backend inherits unless it overrides them.",
+		"frontend: a listener (bind) and rules that pick a backend.",
+		"backend: a pool of servers, how to balance across them and how to check them.",
+	)
+	@docP() {
+		A @docCodeWord("resolvers") section names DNS servers that HAProxy keeps querying at runtime, so server addresses can change without a reload.
+	}
+	@docH2("global", "global and resolvers")
+	@docCode("haproxy.cfg", haproxyGlobalCode)
+	@docList(
+		"maxconn 256 caps concurrent connections. Without it HAProxy sizes its tables from the file-descriptor limit, often a million inside Docker: about 90 MiB of memory before the first request, most of the 128m limit.",
+		"nbthread 1: one thread, so per-server counters are easy to read. Raise both in your own copy for a load test.",
+		"resolvers docker points at Docker's embedded DNS, 127.0.0.11, which answers an app's shared name with every replica's address.",
+	)
+	@docH2("defaults", "defaults")
+	@docCode("haproxy.cfg", haproxyDefaultsCode)
+	@docP() {
+		@docCodeWord("default-server") applies to every server line: an active check every 2 seconds, down after 3 failures, up after 2 successes, addresses from the docker resolvers. @docCodeWord("init-addr none") lets a server whose name does not resolve yet start down instead of stopping HAProxy from starting, which matters because proxies do not wait for their upstreams.
+	}
+	@docH2("frontends", "Frontends")
+	@docCode("haproxy.cfg", haproxyFrontendCode)
+	@docList(
+		"monitor listens on loopback only. monitor-uri /healthz answers 200 for the container's health check; /stats is the stats page the HAProxy stats tab reads (show-legends adds each server's address).",
+		"https decrypts with the service's certificate and keystore (certificate and key in one file), offers HTTP/2 and HTTP/1.1, and sets X-Forwarded-Proto and X-Forwarded-For for the backends.",
+		"use_backend picks a backend by an ACL, here { path_beg /web/ }; the first match wins and default_backend takes the rest.",
+	)
+	@docH2("backends", "Backends and servers")
+	@docCode("haproxy.cfg", haproxyBackendCode)
+	@docList(
+		"balance roundrobin: each server in turn, with weights that can change at runtime.",
+		"replace-path strips the route prefix, so the app sees / instead of /web/.",
+		"server-template web 3 web.bb.internal:8443 creates three server slots, web1 to web3, filled from the DNS answers for the shared name. Slot numbers are not replica numbers: the stats tab maps each slot's address to its replica.",
+		"Re-encrypt: ssl verify required ca-file checks the backend's chain against the lab CA; sni str(…) sends its name, verifyhost checks the certificate carries it, and check-sni does the same for health checks. The explicit sni matters: HAProxy 3.4's default would send the client's Host, the proxy's own name.",
+		"Terminate: no ssl, and the address is the segment alias api.plain.bb.internal.",
+	)
+	@docCode("haproxy.cfg", haproxyPassthroughCode)
+	@docP() {
+		Passthrough is a TCP frontend. @docCodeWord("tcp-request inspect-delay") holds the connection for up to 5 seconds until the ClientHello arrives, @docCodeWord("req.ssl_sni") reads its server name, and the connection goes to the matching backend still encrypted. A name nothing matches has no backend, and HAProxy closes the connection.
+	}
+	@docH2("change", "Changing it")
+	@docP() {
+		In your own copy (see @docLink("/docs/haproxy/in-breadboard", "Owning the config")) the common edits are in the backend:
+	}
+	@docCode("haproxy.cfg", haproxyChangeCode)
+	@docList(
+		"balance: roundrobin, static-rr, leastconn, first, random(<draws>), source, uri, url_param, hdr(<name>), rdp-cookie, hash. With hash-type consistent, hashing algorithms move few keys when servers change.",
+		"Stickiness: cookie SERVERID insert indirect nocache in the backend and cookie <value> on each server.",
+		"Passive checks: observe layer7 error-limit 3 on-error mark-down on a server marks it down after three bad responses.",
+		"weight on a server (1 to 256) sets its share; weight 0 sends it nothing new.",
+	)
+	@docP() {
+		See @docLink("/docs/load-balancing/strategies", "Load-balancing strategies") and @docLink("/docs/load-balancing/health-checks", "Health checks") explain when to use which.
+	}
+	@docH2("validate", "Checking a config")
+	@docP() {
+		HAProxy checks a file without starting: @docCodeWord("-c")&#46; Run it in the image Breadboard uses, against your copy:
+	}
+	@docTerminal("docker run --rm -v \"$PWD/edge:/cfg:ro\" haproxy:3.4.7 haproxy -c -f /cfg/haproxy.cfg")
+	@docP() {
+		Outside Breadboard the certificate paths do not exist, so the check reports them; inside the running service, @docCodeWord("docker exec") the same command against @docCodeWord("/etc/bb/config/haproxy.cfg")&#46;
+	}
+}
+
+templ haproxyInBreadboard() {
+	@docLead() {
+		What Breadboard runs for @docCodeWord("type: haproxy"), and how its upstreams, TLS modes and health checks are wired.
+	}
+	@docH2("image", "Image and limits")
+	@docList(
+		"Image haproxy:3.4.7 (Debian: bash and openssl, no curl), 128m of memory and 0.25 CPU.",
+		"The container runs haproxy -f /etc/bb/config/haproxy.cfg; the image's entrypoint adds master-worker mode in the foreground. Logs go to stdout: bb logs <name>.",
+		"Listeners: 8443 for TLS at L7 with the service's certificate; 9443 for SNI passthrough, only when an upstream is passthrough; 127.0.0.1:8404 for the monitor and stats, unreachable from other containers.",
+		"Proxies do not wait for their upstreams to be healthy: HAProxy finds them through DNS and its checks.",
+	)
+	@docH2("upstreams", "Upstreams and routes")
+	@docCode("experiment.yaml", proxyExampleSpec("haproxy", "haproxy.cfg"))
+	@proxyRoutes()
+	@docP() {
+		Each upstream becomes a backend named after its route: decrypted upstreams get @docCodeWord("be_<route>") and passthrough upstreams @docCodeWord("be_tls_<route>")&#46;
+	}
+	@docH2("modes", "The three TLS modes")
+	@docTable([]string{"Mode", "What the generated config does"},
+		[]string{"re-encrypt (on)", "server-template <route> <replicas> <app>.<domain>:<port> ssl verify required ca-file /etc/bb/ca.pem sni str(<target>) verifyhost <target> check check-sni <target>"},
+		[]string{"terminate (off)", "server-template <route> <replicas> <app>.plain.<domain>:<port> check, on the app's private segment"},
+		[]string{"passthrough", "frontend passthrough on :9443, mode tcp, use_backend on req.ssl_sni -i <target>.<domain>"},
+	)
+	@docP() {
+		See @docLink("/docs/load-balancing/tls-at-the-proxy", "TLS at the proxy") explains what each mode means for the client and the backend.
+	}
+	@docH2("health", "Health checks")
+	@docList(
+		"HAProxy checks every server every 2 seconds: a TCP connect, with a verified TLS handshake for re-encrypt. Down after 3 failures, up after 2 successes.",
+		"The container's own health check asks the loopback monitor for /healthz and completes a TLS handshake on 8443 verified against the lab CA, so it also proves the certificate works.",
+	)
+	@docH2("env", "What your app receives")
+	@proxyEnv()
+	@docH2("see", "Seeing it work")
+	@docList(
+		"bb status lists the proxy with its upstream edges and each edge's mode; a terminate hop is a plaintext warning.",
+		"In bb serve, the service's HAProxy stats tab reads /stats;csv: per backend, each server slot with the replica at its address, status, last check, sessions, picks, bytes and errors. MCP clients use haproxy_stats.",
+		"bb logs <name> shows HAProxy's HTTP log: one line per request with the backend and server that took it.",
+	)
+	@docTerminal(`docker exec bb-lab-edge-1 bash -c "exec 3<>/dev/tcp/127.0.0.1/8404; printf 'GET /stats;csv HTTP/1.0\r\n\r\n' >&3; cat <&3"`)
+	@docH2("own", "Owning the config")
+	@docP() {
+		The generated file is at @docCodeWord(".bb/runtime/config/<name>/haproxy.cfg")&#46; Copy it next to @docCodeWord("experiment.yaml"), edit it, and set @docCodeWord("file:") on the service. It is copied in at every @docCodeWord("bb up"), and an edit changes the config hash, so the service is recreated with it. From then on your file wins: upstream changes in the spec still change the apps' variables and the networks, but no longer the config.
+	}
+	@docList(
+		"Keep the monitor frontend on 127.0.0.1:8404 with monitor-uri /healthz: the health check reads it. Keep /stats there for the stats tab.",
+		"Keep a TLS listener on 8443 with /etc/bb/tls/keystore.pem.",
+		"The lab CA (/etc/bb/ca.pem) and the trust bundle stay mounted.",
+	)
+}

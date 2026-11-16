@@ -386,6 +386,47 @@ templ extLink(href string) {
 	</a>
 }
 
+// docTable is a small table: a header row and rows of plain-text cells. The
+// first column names the row; the others are set in monospace, for directives.
+templ docTable(head []string, rows ...[]string) {
+	<div class="my-5 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+		<table class="w-full text-left text-[14px] leading-6">
+			<thead class="border-b border-slate-200 bg-slate-50 text-slate-600">
+				<tr>
+					for _, h := range head {
+						<th class="px-4 py-2 font-semibold">{ h }</th>
+					}
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-slate-100 text-slate-700">
+				for _, r := range rows {
+					<tr>
+						for i, c := range r {
+							if i == 0 {
+								<td class="px-4 py-2 align-top font-medium text-slate-900">{ c }</td>
+							} else {
+								<td class="px-4 py-2 align-top font-mono text-[13px]">{ c }</td>
+							}
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+// docStarters links starters by id, each with what it shows.
+templ docStarters(items ...link) {
+	<ul class="my-4 flex flex-col gap-2.5 text-[16px] leading-7 text-slate-700">
+		for _, it := range items {
+			<li class="flex flex-wrap items-baseline gap-x-3">
+				<a href={ templ.SafeURL("/starters/" + it.URL) } class="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[13px] text-slate-700 hover:border-slate-300">{ it.URL }</a>
+				<span>{ it.Title }</span>
+			</li>
+		}
+	</ul>
+}
+
 // docLink links within the site.
 templ docLink(href, text string) {
 	<a href={ templ.SafeURL(href) } class="text-indigo-600 hover:text-indigo-800">{ text }</a>

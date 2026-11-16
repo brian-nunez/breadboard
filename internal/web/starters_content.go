@@ -183,6 +183,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "nginx.conf", KeyTitle: "The upstream block",
 		Covers: []string{"Round robin", "DNS re-resolution", "Scaling replicas", "Passive health checks"},
+		Guide:  "/docs/load-balancing/strategies",
 	},
 	"lb/least-connections": {
 		Area:  "haproxy",
@@ -195,6 +196,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "haproxy.cfg", KeyTitle: "Two backends, two algorithms",
 		Covers: []string{"Least connections", "Round robin under uneven cost", "Tail latency", "server-template and DNS"},
+		Guide:  "/docs/load-balancing/strategies",
 	},
 	"lb/power-of-two-choices": {
 		Area:  "traefik",
@@ -207,6 +209,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "dynamic.yml", KeyTitle: "Services p2c and wrr",
 		Covers: []string{"Power of two choices", "Weighted round robin", "Traefik load-balancing strategies", "Health checks"},
+		Guide:  "/docs/load-balancing/strategies",
 	},
 	"lb/consistent-hashing": {
 		Area:  "envoy",
@@ -219,6 +222,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "envoy.yaml", KeyTitle: "Two hashing clusters",
 		Covers: []string{"Consistent hashing", "Ring hash vs Maglev", "Cache locality", "Remapping when a replica leaves"},
+		Guide:  "/docs/load-balancing/strategies",
 	},
 	"lb/sticky-sessions": {
 		Area:  "haproxy",
@@ -231,6 +235,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "haproxy.cfg", KeyTitle: "Cookie persistence in the backend",
 		Covers: []string{"Session persistence with cookies", "insert, indirect and nocache", "option redispatch", "Why sticky state is lost on failure"},
+		Guide:  "/docs/load-balancing/strategies",
 	},
 	"lb/weighted-canary": {
 		Area:  "traefik",
@@ -243,6 +248,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "dynamic.yml", KeyTitle: "The weighted service",
 		Covers: []string{"Canary releases", "Weighted round robin", "Weights per service vs per server", "Header-based opt-in routing"},
+		Guide:  "/docs/load-balancing/deployments",
 	},
 	"lb/blue-green": {
 		Area:  "nginx",
@@ -255,6 +261,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "switch.sh", KeyTitle: "The cutover, step by step",
 		Covers: []string{"Blue-green deployments", "Graceful reload vs restart", "Smoke testing the idle environment", "Instant rollback"},
+		Guide:  "/docs/load-balancing/deployments",
 	},
 	"lb/health-checks": {
 		Area:  "haproxy",
@@ -267,6 +274,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "cmd/hc-client/main.go", KeyTitle: "Timing ejection and recovery",
 		Covers: []string{"Active health checks", "Passive health checks (outlier detection)", "Time to eject and time to recover", "max_ejection_percent"},
+		Guide:  "/docs/load-balancing/health-checks",
 	},
 	"proxy/l4-vs-l7": {
 		Area:  "haproxy",
@@ -279,6 +287,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "haproxy.cfg", KeyTitle: "mode http and mode tcp in one config",
 		Covers: []string{"Layer 4 vs layer 7", "Per-request vs per-connection balancing", "Content-based routing", "TLS offload without HTTP"},
+		Guide:  "/docs/load-balancing/l4-vs-l7",
 	},
 	"proxy/tls-modes": {
 		Area:  "haproxy",
@@ -291,6 +300,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "haproxy.cfg", KeyTitle: "Three modes, three server lines",
 		Covers: []string{"Re-encrypt", "TLS termination", "TLS passthrough and SNI routing", "Private segments for plaintext hops"},
+		Guide:  "/docs/load-balancing/tls-at-the-proxy",
 	},
 	"proxy/request-mirroring": {
 		Area:  "envoy",
@@ -303,6 +313,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "envoy.yaml", KeyTitle: "The route with a mirror policy",
 		Covers: []string{"Request mirroring", "Shadow traffic", "Testing in production safely", "Side effects of mirrored requests"},
+		Guide:  "/docs/load-balancing/deployments",
 	},
 	"proxy/connection-draining": {
 		Area:  "haproxy",
@@ -315,6 +326,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "cmd/drain-backend/main.go", KeyTitle: "A replica that drains itself",
 		Covers: []string{"Connection draining", "HAProxy runtime API", "Graceful shutdown on SIGTERM", "Health checks as a drain signal"},
+		Guide:  "/docs/load-balancing/deployments",
 	},
 	"pgbouncer/pooling-modes": {
 		Area:  "pgbouncer",
@@ -327,5 +339,6 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "cmd/pool-modes/main.go", KeyTitle: "Load and traps in both modes",
 		Covers: []string{"Session vs transaction pooling", "pool_size vs client count", "Session state in transaction mode", "Central pool vs sidecar"},
+		Guide:  "/docs/load-balancing/connection-pooling",
 	},
 }

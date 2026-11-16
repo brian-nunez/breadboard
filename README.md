@@ -38,7 +38,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Breadboard is early.** Phases 1 to 4 work: the core engine and CLI, five services including S3 Compatible, Compose export, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`). Phase 5 has begun: reverse proxies and load balancers as services (Envoy, Traefik, HAProxy, NGINX, PgBouncer) with re-encrypt, terminate and passthrough per upstream; sidecars (Envoy, PgBouncer, Fluent Bit) that share an app's network namespace, with transparent proxying and egress policy; and app replicas. Load-balancing and gateway examples, mTLS and other exporters are next. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
+> **Breadboard is early.** Phases 1 to 4 work: the core engine and CLI, five services including S3 Compatible, Compose export, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`). Phase 5 has begun: reverse proxies and load balancers as services (Envoy, Traefik, HAProxy, NGINX, PgBouncer) with re-encrypt, terminate and passthrough per upstream; sidecars (Envoy, PgBouncer, Fluent Bit) that share an app's network namespace, with transparent proxying and egress policy; and app replicas; and thirteen load-balancing and reverse-proxy starters (round robin, least connections, power of two choices, consistent hashing, sticky sessions, canary, blue-green, health checks, L4 vs L7, TLS modes, mirroring, draining, connection pooling) with docs for each proxy. Gateway examples, mTLS and other exporters are next. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
 
 <p align="center">
   <a href="#why-breadboard">Why Breadboard</a> ·
@@ -122,6 +122,24 @@ Each catalog entry pins an exact image version, configures TLS, sets resource li
 | **sidecar/circuit-breaking** | Envoy outlier detection ejecting a flaky replica and letting it back in. | 5 |
 | **sidecar/pgbouncer-pool** | Fifty clients sharing ten Postgres connections through a PgBouncer sidecar. | 5 |
 | **sidecar/log-shipper** | The adapter pattern: a Fluent Bit sidecar shipping app log files to S3 Compatible storage. | 5 |
+| **lb/round-robin** | Round robin across replicas with NGINX, following them through DNS as they scale. | 5 |
+| **lb/least-connections** | HAProxy `leastconn` vs `roundrobin` when one replica is ten times slower. | 5 |
+| **lb/power-of-two-choices** | Traefik `p2c` vs `wrr`: load-aware choice with little state. | 5 |
+| **lb/consistent-hashing** | Envoy ring hash vs Maglev by a key header: cache locality, and how few keys move when a replica leaves. | 5 |
+| **lb/sticky-sessions** | HAProxy cookie stickiness, and what happens when the sticky server dies. | 5 |
+| **lb/weighted-canary** | A Traefik weighted 90/10 canary, and shifting traffic between versions. | 5 |
+| **lb/blue-green** | Cutting over from blue to green with NGINX, without a failed request. | 5 |
+| **lb/health-checks** | Active (HAProxy) vs passive (Envoy outlier) health checks: time to eject and recover. | 5 |
+| **proxy/l4-vs-l7** | HAProxy `mode tcp` vs `mode http`: what each layer can see and route on. | 5 |
+| **proxy/tls-modes** | Re-encrypt, terminate and passthrough side by side in HAProxy, and whose certificate the client sees. | 5 |
+| **proxy/request-mirroring** | Shadow traffic to v2 with Envoy, its responses discarded. | 5 |
+| **proxy/connection-draining** | Draining a backend under load in HAProxy without a failed request. | 5 |
+| **pgbouncer/pooling-modes** | A shared PgBouncer in session and transaction pooling, and the session-state traps of transaction mode. | 5 |
+| **proxy/l4-vs-l7** | HAProxy in `mode http` and `mode tcp`: routing per request vs balancing per connection. | 5 |
+| **proxy/tls-modes** | Re-encrypt, terminate and passthrough at one HAProxy, and the certificate a client sees on each. | 5 |
+| **proxy/request-mirroring** | Shadow traffic to a new version with Envoy, its answers discarded. | 5 |
+| **proxy/connection-draining** | Taking replicas out of HAProxy under load with zero failed requests. | 5 |
+| **pgbouncer/pooling-modes** | Session vs transaction pooling in a shared PgBouncer, and the session-state traps of transaction mode. | 5 |
 
 Starters are Go 1.27.4 projects with a multi-stage Dockerfile and a README with exercises to try and things to break. See [starters](docs/design/starters.md).
 

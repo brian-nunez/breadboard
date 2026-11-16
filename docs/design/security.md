@@ -82,6 +82,7 @@ These are designed into v1 so later phases add policy, not rework:
   - `dotenv`: a `.env` (mode `0600`) beside the compose file, referenced as `${<SERVICE>__<KEY>}` (for example `${POSTGRES__PASSWORD}`); the export adds `.env` to a generated `.gitignore`.
 - Exporters add their own materializers later: Kubernetes Secrets, Terraform sensitive variables and cloud secret managers, Ansible Vault ([`exporters.md`](exporters.md)).
 - Secrets never appear in `experiment.yaml`, logs, or error messages.
+- Who sees them: `bb creds` prints them, and the MCP `creds` tool returns them so an agent can debug connections (D-071); they then reach the agent's model provider, which is acceptable because they are generated per experiment and valid only on its local network. The web UI never shows them (D-065).
 
 ## Out of scope for v1
 

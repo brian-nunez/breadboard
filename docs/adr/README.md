@@ -17,3 +17,4 @@ Decisions that shape this project, in [MADR](https://adr.github.io/madr/) format
 | [0011](0011-fill-bkit-gaps-with-the-standard-library.md) | Fill bkit gaps with the standard library | accepted | 2026-11-15 |
 | [0012](0012-read-service-data-for-the-web-ui-through-docker.md) | Read service data for the web UI through Docker | accepted | 2026-11-16 |
 | [0013](0013-build-web-ui-components-in-repo-with-templ-and-tailwind.md) | Build web UI components in-repo with templ and Tailwind | accepted | 2026-11-16 |
+| [0014](0014-serve-mcp-with-the-official-go-sdk.md) | Serve MCP with the official Go SDK | accepted | 2026-11-16 |

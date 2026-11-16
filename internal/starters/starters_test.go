@@ -27,7 +27,7 @@ func TestEveryStarterRenders(t *testing.T) {
 			t.Errorf("%s go.mod does not target Go %s", s.ID, GoVersion)
 		}
 		df := have["Dockerfile"]
-		for _, want := range []string{"AS dev", "AS prod", "USER ", "golang:" + GoImage, "LABEL maintainer="} {
+		for _, want := range []string{"AS dev", "AS prod", "USER ", "golang:" + GoImage, "LABEL maintainer=", "go build -o /usr/local/bin/ ./cmd/..."} {
 			if !strings.Contains(df, want) {
 				t.Errorf("%s Dockerfile lacks %q", s.ID, want)
 			}
@@ -105,6 +105,29 @@ func TestStarterAppNamesAreUnique(t *testing.T) {
 				t.Errorf("app %q is in both %s and %s", a.Name, prev, s.ID)
 			}
 			owner[a.Name] = s.ID
+		}
+	}
+}
+
+// Each app runs the binary the dev stage built from cmd/<app>, so the program
+// is the container's main process.
+func TestStarterAppsRunTheirBuiltBinary(t *testing.T) {
+	for _, s := range All() {
+		files, err := Render(s, "lab")
+		if err != nil {
+			t.Fatal(err)
+		}
+		have := map[string]bool{}
+		for _, f := range files {
+			have[f.Path] = true
+		}
+		for _, a := range s.Apps {
+			if len(a.Command) != 1 || a.Command[0] != a.Name {
+				t.Errorf("%s app %s command = %v, want [%s]", s.ID, a.Name, a.Command, a.Name)
+			}
+			if !have["cmd/"+a.Name+"/main.go"] {
+				t.Errorf("%s app %s has no cmd/%s/main.go", s.ID, a.Name, a.Name)
+			}
 		}
 	}
 }

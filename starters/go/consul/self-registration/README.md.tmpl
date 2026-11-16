@@ -16,7 +16,7 @@ What the service now owns, compared with the sidecar:
 
 - **Registration code** in every service, in every language you use.
 - **Cleanup.** Deregistering on shutdown is the service's job. A crash skips it, so the registration sets `DeregisterCriticalServiceAfter` as a safety net.
-- **Signals.** The service must receive SIGTERM to clean up. `go run` does not pass it on, so this app's `command` builds the binary and `exec`s it instead.
+- **Signals.** The service must receive SIGTERM to clean up, so it has to be the container's main process. Breadboard starters compile in the image and run the binary directly, which is what makes this work.
 - **Which agent.** With no local agent, the service registers with the Consul server, so its entry lives on the server's node rather than its own.
 
 ## Try this
@@ -28,5 +28,5 @@ What the service now owns, compared with the sidecar:
 ## Break this
 
 - **Crash instead of stopping.** `docker kill -s KILL bb-{{.Experiment}}-self-greeter-1`. No deregistration runs: the entry stays, its check fails, and Consul removes it after a minute.
-- **Skip the signal.** Change the `command` back to `go run ./cmd/self-greeter` and stop the container. `deregistered` never prints.
+- **Skip the signal.** Set the `command` to `[go, run, ./cmd/self-greeter]` and stop the container: `go run` does not pass SIGTERM on, so `deregistered` never prints.
 - **Register a wrong address.** Register `localhost` instead of `BB_FQDN`. The check fails and callers that do get the address cannot verify its certificate.

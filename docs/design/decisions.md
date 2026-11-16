@@ -63,6 +63,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-053 | 2026-11-15 | Apps register with Consul through a Breadboard-managed sidecar, declared with `register` (`port`, optional `name` and `check`) in `experiment.yaml`. The sidecar `<app>-agent` is a Consul client agent sharing the app's network namespace and certificate; its default check is TCP with a verified TLS handshake, so the app logs no aborted connections. Recommended over self-registration, which is kept as a labeled alternative starter. (Brian's direction: both, sidecar advertised.) |
 | D-054 | 2026-11-15 | Every app gets `BB_FQDN`, its own address (the name on its certificate), and the Consul server runs TLS health checks against the lab CA (`enable_agent_tls_for_checks`), so an app that registers itself can advertise a verifiable address. |
 | D-055 | 2026-11-15 | `consul/self-registration` ships as a clearly labeled alternative to `consul/service-discovery`: its title says "alternative", its summary and README name the sidecar starter as recommended. Its greeter is built and exec'd so it receives SIGTERM and deregisters. (Brian's direction.) |
+| D-056 | 2026-11-16 | Starter apps are compiled in the image's `dev` stage (`go build -o /usr/local/bin/ ./cmd/...` with a BuildKit build-cache mount) and each app's `command` is its binary. The program is PID 1, so it receives SIGTERM and runs its shutdown code, and a passing process check means the program itself is running. Replaces `go run` at container start. (Brian's direction.) |
 
 ## Open questions
 

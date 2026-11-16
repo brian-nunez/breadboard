@@ -15,7 +15,8 @@ import (
 )
 
 // starterLab creates an experiment with the given starters applied, runs up,
-// and requires every service to be healthy.
+// and requires every service to be healthy. Apps are compiled while their
+// images build, so callers can expect real work within a minute of up.
 func starterLab(t *testing.T, prefix string, ids ...string) (*Engine, string, string) {
 	t.Helper()
 	eng := realEngine(t)
@@ -89,7 +90,7 @@ func TestIntegrationSinkToPostgres(t *testing.T) {
 	stored := regexp.MustCompile(`stored id=(\S+)`)
 	produced := regexp.MustCompile(`produced id=(\S+)`)
 
-	eventually(t, 2*time.Minute, "5 stored orders", func() bool {
+	eventually(t, time.Minute, "5 stored orders", func() bool {
 		return len(matches(logsOf(t, eng, dir, "sink"), stored)) >= 5
 	})
 	// Kill the sink between writes and commits, then bring it back.
@@ -126,10 +127,10 @@ func TestIntegrationCacheInvalidation(t *testing.T) {
 
 	// Healthy means the processes run; go run may still be compiling. Wait
 	// until the reader reads and the invalidator has caught up with a change.
-	eventually(t, 3*time.Minute, "the reader to read", func() bool {
+	eventually(t, time.Minute, "the reader to read", func() bool {
 		return len(matches(logsOf(t, eng, dir, "cache-reader"), read)) > 0
 	})
-	eventually(t, 3*time.Minute, "the invalidator to invalidate", func() bool {
+	eventually(t, time.Minute, "the invalidator to invalidate", func() bool {
 		return len(matches(logsOf(t, eng, dir, "cache-invalidator"), invalidated)) > 0
 	})
 	n := len(matches(logsOf(t, eng, dir, "cache-writer"), updated))
@@ -236,7 +237,7 @@ func TestIntegrationS3Compatible(t *testing.T) {
 func TestIntegrationS3ObjectsBasics(t *testing.T) {
 	eng, dir, _ := starterLab(t, "objs", "s3/objects-basics")
 	var lines []string
-	eventually(t, 4*time.Minute, "the walkthrough to finish", func() bool {
+	eventually(t, time.Minute, "the walkthrough to finish", func() bool {
 		lines = logsOf(t, eng, dir, "objects")
 		return slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "done;") })
 	})
@@ -300,7 +301,7 @@ func TestIntegrationConsulServiceDiscovery(t *testing.T) {
 		t.Fatalf("experiment.yaml has no register block:\n%s", spec)
 	}
 	called := regexp.MustCompile(`(called greeter at greeter\.bb\.internal:8443 \(1 healthy\): hello from greeter)`)
-	eventually(t, 4*time.Minute, "the caller to reach the greeter through Consul", func() bool {
+	eventually(t, time.Minute, "the caller to reach the greeter through Consul", func() bool {
 		return len(matches(logsOf(t, eng, dir, "caller"), called)) > 0
 	})
 	docker(t, "stop", containerOf(t, name, "greeter"))
@@ -325,7 +326,7 @@ func readFile(t *testing.T, path string) string {
 func TestIntegrationConsulSelfRegistration(t *testing.T) {
 	eng, dir, name := starterLab(t, "selfreg", "consul/self-registration")
 	called := regexp.MustCompile(`(called self-greeter at self-greeter\.bb\.internal:8443 \(1 healthy\): hello from self-greeter)`)
-	eventually(t, 4*time.Minute, "the caller to reach the self-registered greeter", func() bool {
+	eventually(t, time.Minute, "the caller to reach the self-registered greeter", func() bool {
 		return len(matches(logsOf(t, eng, dir, "self-caller"), called)) > 0
 	})
 	docker(t, "stop", containerOf(t, name, "self-greeter"))

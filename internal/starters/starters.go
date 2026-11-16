@@ -40,7 +40,9 @@ type Starter struct {
 
 // App is an app service the starter adds.
 type App struct {
-	Name    string
+	Name string
+	// Command runs the app: the binary the Dockerfile's dev stage built
+	// from cmd/<name> into /usr/local/bin.
 	Command []string
 	// Uses lists catalog types; each resolves to the experiment's service of that type.
 	Uses []string
@@ -58,8 +60,8 @@ var all = []Starter{
 		Dir:      "producer-consumer",
 		Requires: []string{"kafka"},
 		Apps: []App{
-			{Name: "producer", Command: []string{"go", "run", "./cmd/producer"}, Uses: []string{"kafka"}},
-			{Name: "consumer", Command: []string{"go", "run", "./cmd/consumer"}, Uses: []string{"kafka"}},
+			{Name: "producer", Command: []string{"producer"}, Uses: []string{"kafka"}},
+			{Name: "consumer", Command: []string{"consumer"}, Uses: []string{"kafka"}},
 		},
 	},
 	{
@@ -71,8 +73,8 @@ var all = []Starter{
 		Dir:      "sink-to-postgres",
 		Requires: []string{"kafka", "postgres"},
 		Apps: []App{
-			{Name: "sink-producer", Command: []string{"go", "run", "./cmd/sink-producer"}, Uses: []string{"kafka"}},
-			{Name: "sink", Command: []string{"go", "run", "./cmd/sink"}, Uses: []string{"kafka", "postgres"}},
+			{Name: "sink-producer", Command: []string{"sink-producer"}, Uses: []string{"kafka"}},
+			{Name: "sink", Command: []string{"sink"}, Uses: []string{"kafka", "postgres"}},
 		},
 	},
 	{
@@ -84,9 +86,9 @@ var all = []Starter{
 		Dir:      "cache-invalidation",
 		Requires: []string{"kafka", "postgres", "redis"},
 		Apps: []App{
-			{Name: "cache-writer", Command: []string{"go", "run", "./cmd/cache-writer"}, Uses: []string{"postgres", "kafka"}},
-			{Name: "cache-reader", Command: []string{"go", "run", "./cmd/cache-reader"}, Uses: []string{"postgres", "redis"}},
-			{Name: "cache-invalidator", Command: []string{"go", "run", "./cmd/cache-invalidator"}, Uses: []string{"kafka", "redis"}},
+			{Name: "cache-writer", Command: []string{"cache-writer"}, Uses: []string{"postgres", "kafka"}},
+			{Name: "cache-reader", Command: []string{"cache-reader"}, Uses: []string{"postgres", "redis"}},
+			{Name: "cache-invalidator", Command: []string{"cache-invalidator"}, Uses: []string{"kafka", "redis"}},
 		},
 	},
 	{
@@ -98,7 +100,7 @@ var all = []Starter{
 		Dir:      "objects-basics",
 		Requires: []string{"s3-compatible"},
 		Apps: []App{
-			{Name: "objects", Command: []string{"go", "run", "./cmd/objects"}, Uses: []string{"s3-compatible"}},
+			{Name: "objects", Command: []string{"objects"}, Uses: []string{"s3-compatible"}},
 		},
 	},
 	{
@@ -110,8 +112,8 @@ var all = []Starter{
 		Dir:      "service-discovery",
 		Requires: []string{"consul"},
 		Apps: []App{
-			{Name: "greeter", Command: []string{"go", "run", "./cmd/greeter"}, Uses: []string{"consul"}, Register: &spec.Register{Port: 8443}},
-			{Name: "caller", Command: []string{"go", "run", "./cmd/caller"}, Uses: []string{"consul"}},
+			{Name: "greeter", Command: []string{"greeter"}, Uses: []string{"consul"}, Register: &spec.Register{Port: 8443}},
+			{Name: "caller", Command: []string{"caller"}, Uses: []string{"consul"}},
 		},
 	},
 	{
@@ -123,10 +125,8 @@ var all = []Starter{
 		Dir:      "self-registration",
 		Requires: []string{"consul"},
 		Apps: []App{
-			// Built and exec'd rather than go run: go run does not pass SIGTERM on,
-			// and deregistering on SIGTERM is the point of this app.
-			{Name: "self-greeter", Command: []string{"sh", "-c", "go build -o /tmp/self-greeter ./cmd/self-greeter && exec /tmp/self-greeter"}, Uses: []string{"consul"}},
-			{Name: "self-caller", Command: []string{"go", "run", "./cmd/self-caller"}, Uses: []string{"consul"}},
+			{Name: "self-greeter", Command: []string{"self-greeter"}, Uses: []string{"consul"}},
+			{Name: "self-caller", Command: []string{"self-caller"}, Uses: []string{"consul"}},
 		},
 	},
 }

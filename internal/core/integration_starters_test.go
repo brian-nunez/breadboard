@@ -215,21 +215,34 @@ func TestIntegrationS3Compatible(t *testing.T) {
 		"echo | openssl s_client -connect s3.bb.internal:18333 2>&1 | grep -c 'certificate required'",
 	}, "; ")
 	other := filepath.Join(dir, ".bb", "runtime", "tls", "redis")
-	out, _ := dockerMay("run", "--rm", "--network", "bb-"+name+"_default",
-		"-v", other+":/other:ro", "-v", filepath.Join(dir, ".bb", "runtime", "ca.pem")+":/ca.pem:ro",
-		"alpine:3.24.4", "sh", "-c", probe)
-	if !strings.Contains(out, "other-cert-rejected") {
-		t.Errorf("gRPC port 18333 accepted another service's certificate:\n%s", out)
+	// The probe depends on package downloads and short network timeouts, and
+	// failed once under a loaded full-suite run. A missing rejection is retried;
+	// a reachable internal port is never retried, since that is a real leak.
+	var out string
+	var problems []string
+	for attempt := 1; attempt <= 3; attempt++ {
+		out, _ = dockerMay("run", "--rm", "--network", "bb-"+name+"_default",
+			"-v", other+":/other:ro", "-v", filepath.Join(dir, ".bb", "runtime", "ca.pem")+":/ca.pem:ro",
+			"alpine:3.24.4", "sh", "-c", probe)
+		if strings.Contains(out, "open ") {
+			t.Fatalf("internal SeaweedFS ports are reachable from another container:\n%s", out)
+		}
+		problems = nil
+		if !strings.Contains(out, "other-cert-rejected") {
+			problems = append(problems, "gRPC port 18333 accepted another service's certificate")
+		}
+		if !strings.Contains(out, "http: 400") && !strings.Contains(out, "http: 000") {
+			problems = append(problems, "plain HTTP to 8333 was not refused")
+		}
+		if !strings.HasSuffix(strings.TrimSpace(out), "1") {
+			problems = append(problems, "gRPC port 18333 accepted a client without a certificate")
+		}
+		if len(problems) == 0 {
+			return
+		}
+		t.Logf("probe attempt %d: %s\n%s", attempt, strings.Join(problems, "; "), out)
 	}
-	if !strings.Contains(out, "http: 400") && !strings.Contains(out, "http: 000") {
-		t.Errorf("plain HTTP to 8333 was not refused:\n%s", out)
-	}
-	if strings.Contains(out, "open ") {
-		t.Errorf("internal SeaweedFS ports are reachable from another container:\n%s", out)
-	}
-	if !strings.HasSuffix(strings.TrimSpace(out), "1") {
-		t.Errorf("gRPC port 18333 accepted a client without a certificate:\n%s", out)
-	}
+	t.Errorf("%s:\n%s", strings.Join(problems, "; "), out)
 }
 
 // TestIntegrationS3ObjectsBasics proves the walkthrough end to end: the

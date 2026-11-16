@@ -104,8 +104,8 @@ Created by `bb init` next to `experiment.yaml`, directory mode `0700`.
   state.json          format version, bb version that last wrote it, experiment id
   secrets.json        generated secrets (0600)
   certs/<service>/    leaf certificate and key per service (key 0600)
-  runtime/            the generated compose project: docker-compose.yml, docker-compose.dev.yml,
-                      ca.pem, trust-bundle.pem, tls/<service>/, config/<service>/
+  runtime/            the generated compose project: docker-compose.yml, ca.pem,
+                      trust-bundle.pem, tls/<service>/, config/<service>/
   lock                advisory file lock
 ```
 
@@ -130,8 +130,8 @@ Every file Breadboard owns carries a format version, and every format only moves
 ## Runtime layout
 
 - Compose project name: `bb-<experiment>`.
-- `docker-compose.yml` is the whole stack: infra services and app services built from their `dev` stage with the spec's `command`. `docker-compose.dev.yml` adds the development loop: each app's source bind-mounted at `/src` (relative to the generated file) and named volumes for the Go module and build caches. `bb up` uses both files. The `prod` stage is for building release images by hand.
-- App containers also get `BB_SERVICE` (their name). Their health check is that the main process is running, unless the spec's `health` opts into an HTTP check (then `BB_HEALTH_PORT` is set too).
+- `docker-compose.yml` is the whole stack: infra services and app services built from their `dev` stage with the spec's `command`. Apps are compiled while the image builds and run as their container's main process; after an edit, `bb up` rebuilds the image (incrementally, through a BuildKit cache mount) and recreates the container. There is no source mount or development overlay. The `prod` stage is for building release images by hand.
+- App containers also get `BB_SERVICE` (their name), `BB_FQDN` (their address), `TLS_CERT_FILE` and `TLS_KEY_FILE`. Their health check is that the main process is running, unless the spec's `health` opts into an HTTP check (then `BB_HEALTH_PORT` is set too).
 - `bb up` waits up to 5 minutes (`--timeout`) for every container to be running and healthy, and fails fast when one exits, keeps restarting, or reports unhealthy.
 - Labels on every service: `breadboard.experiment=<name>`, `breadboard.experiment-id=<id from state.json>`, `breadboard.service=<name>`, `breadboard.kind=infra|app`, and `breadboard.config-hash`, a hash of the service's mounted certificates and configuration files. A new hash changes the service's config, so `docker compose up` recreates it and reissued certificates take effect. Networks and volumes carry the experiment labels too. The engine finds its containers by label, never by name parsing.
 - Compose projects are named after the experiment, so two directories with the same experiment name would share one project. `bb up` and `bb down` refuse to run when Docker holds containers, networks, or volumes labeled with the same name but another experiment id.

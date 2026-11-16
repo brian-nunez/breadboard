@@ -170,7 +170,7 @@ services:
       breadboard.service: greeter
       breadboard.kind: app
       breadboard.config-hash: d00dc9202d936259
-    mem_limit: 2g
+    mem_limit: 256m
     cpus: 0.5
     restart: unless-stopped
   greeter-agent:
@@ -217,32 +217,6 @@ networks:
       breadboard.experiment-id: 0123456789abcdef
 volumes:
   consul-data:
-    labels:
-      breadboard.experiment: lab
-      breadboard.experiment-id: 0123456789abcdef
---- docker-compose.dev.yml (644)
-# Generated for a golden test.
-# Development overrides: live source and Go caches for app services.
-services:
-  greeter:
-    volumes:
-      - ../../greeter:/src
-      - type: volume
-        source: go-mod-cache
-        target: /go/pkg/mod
-        volume:
-          nocopy: true
-      - type: volume
-        source: go-build-cache
-        target: /root/.cache/go-build
-        volume:
-          nocopy: true
-volumes:
-  go-mod-cache:
-    labels:
-      breadboard.experiment: lab
-      breadboard.experiment-id: 0123456789abcdef
-  go-build-cache:
     labels:
       breadboard.experiment: lab
       breadboard.experiment-id: 0123456789abcdef

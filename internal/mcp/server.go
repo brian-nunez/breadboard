@@ -65,6 +65,7 @@ func New(eng *core.Engine, opts Options) (*Server, error) {
 		Capabilities: &sdk.ServerCapabilities{},
 	})
 	s.addInfoTools()
+	s.addExperimentTools()
 	s.addSpecTools()
 	s.addRunTools()
 	return s, nil

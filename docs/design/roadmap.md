@@ -107,14 +107,14 @@ Tools that mirror the CLI (create experiment, add service, apply starter, up/dow
 
 **Completion criteria:**
 
-- [ ] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift.
-- [ ] `bb mcp` answers both a 2026-07-28 client (`server/discover`, per-request version) and a legacy client (`initialize`) over stdio, and writes nothing to stdout but protocol messages (tested; checked against the built binary).
-- [ ] Every tool in D-072 is listed with a description, derived input and output schemas, and annotations; `--read-only` drops exactly the tools that change experiment.yaml, project files, settings or containers (tested).
-- [ ] Tools refuse a `dir` or `out` outside the root, including through a symlink (tested).
-- [ ] `up`, `down`, `apply_starter` and `export_compose` send progress notifications and return their events; cancelling `up` stops it and releases the lock (tested).
-- [ ] An agent flow over stdio against real Docker passes: `init` → `apply_starter` → `up` → `redis_keys` → `creds` → `logs` → `down` with volumes, leaving no labelled Docker resources (integration test).
-- [ ] The full integration suite passes on the top of the Phase 4 stack.
-- [ ] Docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated (D-070 to D-073, ADR-0014).
+- [x] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift.
+- [x] `bb mcp` answers both a 2026-07-28 client (`server/discover`, per-request version) and a legacy client (`initialize`) over stdio, and writes nothing to stdout but protocol messages (tested; checked against the built binary).
+- [x] Every tool in D-072 is listed with a description, derived input and output schemas, and annotations; `--read-only` drops exactly the tools that change experiment.yaml, project files, settings or containers (tested).
+- [x] Tools refuse a `dir` or `out` outside the root, including through a symlink (tested).
+- [x] `up`, `down`, `apply_starter` and `export_compose` send progress notifications and return their events; cancelling `up` stops it and releases the lock (tested).
+- [x] An agent flow over stdio against real Docker passes: `init` → `apply_starter` → `up` → `redis_keys` → `creds` → `logs` → `down` with volumes, leaving no labelled Docker resources (integration test).
+- [x] The full integration suite passes on the top of the Phase 4 stack.
+- [x] Docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated (D-070 to D-073, ADR-0014).
 
 ## Phase 5: Proxies and relays
 

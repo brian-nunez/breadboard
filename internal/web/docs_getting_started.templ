@@ -192,7 +192,7 @@ templ gettingStartedHowItWorks() {
 	}
 	@docH2("engine", "One engine, thin wrappers")
 	@docP() {
-		Every capability lives in one core engine. The command line, the web UI (started with @docCodeWord("bb serve")) and a planned MCP server are thin wrappers: each turns its input into a call to the engine and renders the result. A wrapper holds no logic of its own, so anything the CLI can do, the other front ends get by calling the same operation.
+		Every capability lives in one core engine. The command line, the web UI (started with @docCodeWord("bb serve")) and the MCP server for AI agents (started with @docCodeWord("bb mcp")) are thin wrappers: each turns its input into a call to the engine and renders the result. A wrapper holds no logic of its own, so anything the CLI can do, the other front ends get by calling the same operation.
 	}
 	@docP() {
 		All of this is one Go binary on your machine. Breadboard itself never runs in a container. The web UI only reads: it shows topology, health, logs and what each service holds, and gives you the @docCodeWord("bb") command to run when you want to change something.

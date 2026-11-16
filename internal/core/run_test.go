@@ -50,7 +50,7 @@ func TestUp(t *testing.T) {
 		t.Errorf("runtime calls = %v", h.rt.calls)
 	}
 	p := h.rt.projects[0]
-	if p.Name != "bb-lab" || len(p.Files) != 2 {
+	if p.Name != "bb-lab" || len(p.Files) != 1 {
 		t.Fatalf("project = %+v", p)
 	}
 	compose := string(h.rt.filesSeen["docker-compose.yml"])
@@ -58,9 +58,6 @@ func TestUp(t *testing.T) {
 		if !strings.Contains(compose, want) {
 			t.Errorf("compose lacks %q", want)
 		}
-	}
-	if !strings.Contains(string(h.rt.filesSeen["docker-compose.dev.yml"]), "../../producer-consumer:/src") {
-		t.Error("dev compose lacks the source bind mount")
 	}
 	if !slices.ContainsFunc(events, func(e Event) bool { return e.Kind == EventHealth && e.Service == "kafka" && e.Health == HealthHealthy }) {
 		t.Error("no health event for kafka")

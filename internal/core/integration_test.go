@@ -181,14 +181,14 @@ func TestIntegrationPhaseOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = dockerMay("compose", "--project-directory", out, "-f", filepath.Join(out, "docker-compose.yml"), "-f", filepath.Join(out, "docker-compose.dev.yml"), "down", "--volumes")
+		_, _ = dockerMay("compose", "--project-directory", out, "-f", filepath.Join(out, "docker-compose.yml"), "down", "--volumes")
 	})
-	cmd := exec.Command("docker", "compose", "-f", "docker-compose.yml", "-f", "docker-compose.dev.yml", "up", "-d", "--wait", "--wait-timeout", "600")
+	cmd := exec.Command("docker", "compose", "up", "-d", "--wait", "--wait-timeout", "600")
 	cmd.Dir = out
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("exported stack did not reach healthy: %v\n%s", err, b)
 	}
-	down := exec.Command("docker", "compose", "-f", "docker-compose.yml", "-f", "docker-compose.dev.yml", "down", "--volumes")
+	down := exec.Command("docker", "compose", "down", "--volumes")
 	down.Dir = out
 	if b, err := down.CombinedOutput(); err != nil {
 		t.Fatalf("export down: %v\n%s", err, b)

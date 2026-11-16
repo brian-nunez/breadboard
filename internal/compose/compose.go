@@ -1,5 +1,5 @@
 // Package compose materializes a resolved model into a Docker Compose
-// project: docker-compose.yml, docker-compose.dev.yml, the certificate and
+// project: docker-compose.yml, the certificate and
 // configuration files they mount, and a .env file in dotenv mode.
 //
 // The same bundle drives `bb up` (written to .bb/runtime/) and `bb export
@@ -28,9 +28,8 @@ import (
 
 // File names inside a bundle.
 const (
-	ComposeFile    = "docker-compose.yml"
-	DevComposeFile = "docker-compose.dev.yml"
-	EnvFile        = ".env"
+	ComposeFile = "docker-compose.yml"
+	EnvFile     = ".env"
 )
 
 // Labels set on every container, network, and volume.
@@ -44,10 +43,6 @@ const (
 	// compose recreates the container and it reads the new files.
 	LabelConfigHash = "breadboard.config-hash"
 )
-
-// AppWorkdir is where an app's dev stage keeps its source. The dev compose
-// file bind-mounts the source directory here.
-const AppWorkdir = "/src"
 
 // Cert is a service's certificate and key, PEM.
 type Cert struct {
@@ -115,10 +110,7 @@ func Render(in Input) (*Bundle, error) {
 	add("trust-bundle.pem", in.TrustBundle, 0o644)
 
 	services := mapping()
-	dev := mapping()
 	volumes := mapping()
-	devVolumes := mapping()
-	hasApps := false
 
 	for _, svc := range m.Services {
 		// A sidecar shares its app's network identity, so it mounts the app's
@@ -172,16 +164,7 @@ func Render(in Input) (*Bundle, error) {
 				add(p, data, mode)
 			})
 		case model.App:
-			hasApps = true
 			def = appService(in, svc)
-			src := in.AppDir(svc.Name)
-			dev.Content = append(dev.Content, str(svc.Name), mapping(
-				str("volumes"), seq(
-					str(escape(src)+":"+AppWorkdir),
-					cacheMount("go-mod-cache", "/go/pkg/mod"),
-					cacheMount("go-build-cache", "/root/.cache/go-build"),
-				),
-			))
 		}
 		def.Content = append(def.Content, str("volumes"), seq(strs(mounts...)...))
 		if svc.Kind == model.Sidecar {
@@ -225,22 +208,6 @@ func Render(in Input) (*Bundle, error) {
 		return nil, err
 	}
 	add(ComposeFile, data, 0o644)
-
-	devTop := mapping(str("services"), dev)
-	if hasApps {
-		for _, v := range []string{"go-mod-cache", "go-build-cache"} {
-			devVolumes.Content = append(devVolumes.Content, str(v), mapping(str("labels"), in.labels("", "")))
-		}
-		devTop.Content = append(devTop.Content, str("volumes"), devVolumes)
-	} else {
-		dev.Style = yaml.FlowStyle
-	}
-	devTop.HeadComment = in.Header + "\nDevelopment overrides: live source and Go caches for app services."
-	data, err = encode(devTop)
-	if err != nil {
-		return nil, err
-	}
-	add(DevComposeFile, data, 0o644)
 
 	if env := in.Secrets.Dotenv(); env != nil {
 		add(EnvFile, env, 0o600)
@@ -510,19 +477,6 @@ func dur(d time.Duration) string {
 		return strconv.Itoa(int(d/time.Minute)) + "m"
 	}
 	return strconv.Itoa(int(d/time.Second)) + "s"
-}
-
-// cacheMount mounts a Go cache volume that every app shares. nocopy stops
-// Docker from copying the image's files into the empty volume on first use:
-// apps start together, and concurrent copies into one new volume fail with
-// "mkdir ...: file exists". Go fills the cache itself and locks it safely.
-func cacheMount(volume, target string) *yaml.Node {
-	return mapping(
-		str("type"), str("volume"),
-		str("source"), str(volume),
-		str("target"), str(target),
-		str("volume"), mapping(str("nocopy"), boolean(true)),
-	)
 }
 
 func mapping(kv ...*yaml.Node) *yaml.Node {

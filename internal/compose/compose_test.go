@@ -112,7 +112,7 @@ func golden(t *testing.T, name string, b *Bundle) {
 
 func checkCompose(t *testing.T, b *Bundle) {
 	t.Helper()
-	for _, name := range []string{ComposeFile, DevComposeFile} {
+	for _, name := range []string{ComposeFile} {
 		f, ok := b.File(name)
 		if !ok {
 			t.Fatalf("%s missing", name)
@@ -283,45 +283,20 @@ func TestRelPath(t *testing.T) {
 	}
 }
 
-// Apps start together and share the Go cache volumes. Without nocopy, Docker
-// copies the image's module cache into the new volume once per container at
-// the same time, and the losers fail with "mkdir ...: file exists".
-func TestSharedGoCachesAreNotCopiedFromTheImage(t *testing.T) {
+// Apps run binaries compiled into their images, so the bundle has one
+// compose file: no source mounts or Go cache volumes.
+func TestBundleHasOneComposeFile(t *testing.T) {
 	s := &spec.Spec{Version: 1, Name: "lab", Services: allServices(), Apps: []spec.App{
 		{Name: "producer", Path: "./orders", Uses: uses("kafka")},
-		{Name: "consumer", Path: "./orders", Uses: uses("kafka")},
 	}}
 	b := render(t, s, secrets.Inline)
-	f, ok := b.File(DevComposeFile)
-	if !ok {
-		t.Fatal("no dev compose file")
+	if _, ok := b.File("docker-compose.dev.yml"); ok {
+		t.Error("the bundle still has a dev compose file")
 	}
-	var doc struct {
-		Services map[string]struct {
-			Volumes []any `yaml:"volumes"`
-		} `yaml:"services"`
-	}
-	if err := yaml.Unmarshal(f.Data, &doc); err != nil {
-		t.Fatal(err)
-	}
-	for _, app := range []string{"producer", "consumer"} {
-		caches := 0
-		for _, v := range doc.Services[app].Volumes {
-			m, ok := v.(map[string]any)
-			if !ok {
-				if str, _ := v.(string); strings.Contains(str, "cache") {
-					t.Errorf("%s mounts %q in short form, which cannot set nocopy", app, str)
-				}
-				continue
-			}
-			caches++
-			opts, _ := m["volume"].(map[string]any)
-			if m["type"] != "volume" || opts["nocopy"] != true {
-				t.Errorf("%s cache mount %v lacks volume.nocopy", app, m)
-			}
-		}
-		if caches != 2 {
-			t.Errorf("%s has %d Go cache mounts, want 2", app, caches)
+	f, _ := b.File(ComposeFile)
+	for _, gone := range []string{"go-mod-cache", "go-build-cache", ":/src"} {
+		if strings.Contains(string(f.Data), gone) {
+			t.Errorf("docker-compose.yml still mentions %s", gone)
 		}
 	}
 }

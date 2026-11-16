@@ -51,7 +51,7 @@ func TestExportCompose(t *testing.T) {
 		t.Fatalf("files = %v", res.Files)
 	}
 	compose, _ := os.ReadFile(filepath.Join(out, "docker-compose.yml"))
-	if !strings.Contains(string(compose), "docker compose -f docker-compose.yml") {
+	if !strings.Contains(string(compose), "docker compose up -d --wait") {
 		t.Error("export header lacks the run command")
 	}
 	rel, _ := filepath.Rel(out, filepath.Join(h.dir, "producer-consumer"))

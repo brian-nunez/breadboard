@@ -448,7 +448,7 @@ func (c *cli) export(args []string) error {
 	}
 	fmt.Fprintf(c.out, "Exported %d files to %s\n", len(res.Files), res.Dir)
 	fmt.Fprintln(c.out, "Run it without bb:")
-	fmt.Fprintf(c.out, "  cd %q && docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait\n", res.Dir)
+	fmt.Fprintf(c.out, "  cd %q && docker compose up -d --wait\n", res.Dir)
 	return nil
 }
 

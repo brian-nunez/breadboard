@@ -472,7 +472,7 @@ func runtimeProject(p state.Project, name string) runtime.Project {
 		dir = p.Dir
 	}
 	rp := runtime.Project{Name: "bb-" + name, Dir: dir}
-	for _, f := range []string{compose.ComposeFile, compose.DevComposeFile} {
+	for _, f := range []string{compose.ComposeFile} {
 		path := filepath.Join(dir, f)
 		if _, err := os.Stat(path); err == nil {
 			rp.Files = append(rp.Files, path)

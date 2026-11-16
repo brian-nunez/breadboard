@@ -254,7 +254,7 @@ func (e *Engine) ExportCompose(ctx context.Context, req ExportComposeRequest) (*
 		return nil, err
 	}
 	req.Events.step("Writing the compose stack")
-	header := fmt.Sprintf("Exported by bb %s from experiment.yaml (%s). Runs without bb:\n  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d", e.version, p.spec.Name)
+	header := fmt.Sprintf("Exported by bb %s from experiment.yaml (%s). Runs without bb:\n  docker compose up -d --wait", e.version, p.spec.Name)
 	b, err := e.render(p, pr, out, mode, header)
 	if err != nil {
 		return nil, err
@@ -303,9 +303,8 @@ func checkExportDir(out, projectDir string) error {
 func exportReadme(name string, m *model.Model, mode secrets.Mode) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s (compose export)\n\nExported by Breadboard. This stack runs with plain Docker Compose; bb is not needed.\n\n", name)
-	b.WriteString("```sh\ndocker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --wait\n```\n\n")
+	b.WriteString("```sh\ndocker compose up -d --wait\n```\n\n")
 	b.WriteString("- `docker-compose.yml`: every service with its image, health check, limits, and TLS files.\n")
-	b.WriteString("- `docker-compose.dev.yml`: live source mounts and Go caches for app services.\n")
 	b.WriteString("- `tls/`, `ca.pem`, `trust-bundle.pem`: certificates from the Breadboard CA. Leaf certificates expire after 90 days; export again to renew them.\n")
 	if mode == secrets.Dotenv {
 		b.WriteString("- `.env`: generated secrets, read by compose. It is git-ignored.\n")

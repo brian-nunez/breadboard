@@ -25,3 +25,17 @@ for (const el of document.querySelectorAll("[data-live]")) {
     el.innerHTML = e.data;
   });
 }
+
+// <pre data-logs="/path"> appends each "line" event, keeping the newest
+// 2000 lines, and follows the end unless the reader scrolled up.
+for (const pre of document.querySelectorAll("[data-logs]")) {
+  const source = new EventSource(pre.dataset.logs);
+  source.addEventListener("line", (e) => {
+    const atEnd = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+    const line = document.createElement("div");
+    line.textContent = e.data;
+    pre.appendChild(line);
+    while (pre.childElementCount > 2000) pre.firstElementChild.remove();
+    if (atEnd) pre.scrollTop = pre.scrollHeight;
+  });
+}

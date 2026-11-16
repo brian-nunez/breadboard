@@ -5,6 +5,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"embed"
@@ -14,7 +15,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/a-h/templ"
@@ -123,6 +126,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /live/overview", s.overviewLive)
 	mux.HandleFunc("GET /architecture", s.architecture)
 	mux.HandleFunc("GET /live/architecture", s.architectureLive)
+	mux.HandleFunc("GET /services/{name}", s.service)
+	mux.HandleFunc("GET /live/logs/{name}", s.logs)
 	return s.guard(mux)
 }
 
@@ -151,6 +156,73 @@ func (s *Server) architectureLive(w http.ResponseWriter, r *http.Request) {
 		d := s.dashboard(ctx)
 		return architectureBody(d, selectedNode(d, want))
 	})
+}
+
+// service is one service's page; ?tab= picks the tab.
+func (s *Server) service(w http.ResponseWriter, r *http.Request) {
+	p := s.servicePage(r.Context(), r.PathValue("name"), r.URL.Query().Get("tab"))
+	if p.Row.Name == "" && p.Problem == "" {
+		http.NotFound(w, r)
+		return
+	}
+	render(w, r, serviceView(p))
+}
+
+func (s *Server) servicePage(ctx context.Context, name, tab string) servicePage {
+	p := servicePage{Dash: s.dashboard(ctx), Tab: tab}
+	if p.Dash.Problem != "" || p.Dash.NoExperiment {
+		p.Problem = cmp.Or(p.Dash.Problem, "There is no experiment in this directory.")
+		return p
+	}
+	r, ok := find(p.Dash.Services, name)
+	if !ok {
+		return p
+	}
+	p.Row = r
+	d, err := s.eng.ServiceDetails(ctx, core.ServiceDetailsRequest{Dir: s.dir, Name: name})
+	if err != nil {
+		p.Problem = err.Error()
+		return p
+	}
+	p.Details = d
+	if d.Type != "" {
+		if l, err := s.eng.Learn(ctx, core.LearnRequest{Type: d.Type}); err == nil {
+			// Notes are written for any experiment; this page knows which one.
+			p.Notes = parseNotes(strings.ReplaceAll(l.Notes, "<experiment>", p.Dash.Experiment))
+		}
+	}
+	if !slices.ContainsFunc(p.tabs(), func(t [2]string) bool { return t[0] == p.Tab }) {
+		p.Tab = "overview"
+	}
+	return p
+}
+
+// logs streams a service's log lines as "line" events, starting with the
+// last 200.
+func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	lines, err := s.eng.Logs(r.Context(), core.LogsRequest{Dir: s.dir, Service: r.PathValue("name"), Follow: true, Tail: 200})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	flusher.Flush()
+	for l, err := range lines {
+		text := l.Text
+		if err != nil {
+			text = "bb: " + err.Error()
+		}
+		if _, err := fmt.Fprintf(w, "event: line\ndata: %s\n\n", strings.ReplaceAll(text, "\n", " ")); err != nil {
+			return
+		}
+		flusher.Flush()
+	}
 }
 
 // selectedNode is the requested service if it exists, else the first app,

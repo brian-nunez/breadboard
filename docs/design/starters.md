@@ -44,6 +44,8 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 
 `redis/cache-invalidation` pins `github.com/redis/go-redis/v9 v9.23.0` with the same pgx and franz-go modules. Its apps are `cache-writer` (updates Postgres, then announces on `product-updates`), `cache-reader` (cache-aside with a 30-second TTL) and `cache-invalidator` (deletes the changed key).
 
+`s3/objects-basics` pins `github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10` and `github.com/aws/aws-sdk-go-v2/config v1.33.18`. Its one app, `objects`, runs the walkthrough once (bucket, prefix listing, multipart upload, presigned GET) and then waits so its logs stay readable. Path-style addressing is the only S3 setting in code.
+
 ## Starter list
 
 | Id | Phase | Teaches |

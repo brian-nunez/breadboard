@@ -1,0 +1,29 @@
+# s3/objects-basics
+
+The S3 basics against Breadboard's S3 Compatible service, using the official [AWS SDK for Go v2](https://github.com/aws/aws-sdk-go-v2).
+
+`cmd/objects` runs once, then waits:
+
+1. Creates the `objects-basics` bucket.
+2. Writes three keys under `notes/` and lists them with a prefix and a `/` delimiter, which shows one "folder" level.
+3. Uploads 11 MiB as a multipart upload in 5 MiB parts.
+4. Presigns a GET URL for that object and downloads it with a plain HTTP client that has no credentials.
+
+Breadboard sets `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `SSL_CERT_FILE`. The SDK reads them itself; the only S3 setting in code is path-style addressing.
+
+```sh
+bb up
+bb logs objects
+```
+
+## Try this
+
+- **Go one level deeper.** Change the list prefix to `notes/2026/` and run `bb up`. The common prefix disappears and the two month files appear.
+- **Fetch the presigned URL yourself.** Copy the `presigned url=` line from the logs and run `docker exec bb-{{.Experiment}}-objects-1 wget -qO- "<url>" | wc -c`.
+- **Shorten the expiry.** Set `s3.WithPresignExpires(10*time.Second)`, run `bb up`, wait 15 seconds, and fetch the URL again.
+
+## Break this
+
+- **Tamper with a signature.** Change one character of the `X-Amz-Signature` value in the URL and fetch it: `SignatureDoesNotMatch`.
+- **Make a part too small.** Change the part size to `1<<20`. `CompleteMultipartUpload` rejects every part but the last for being under 5 MiB.
+- **Abandon an upload.** Remove the `CompleteMultipartUpload` call. The parts stay stored, but no object appears until you complete or abort the upload.

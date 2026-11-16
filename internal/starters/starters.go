@@ -86,6 +86,18 @@ var all = []Starter{
 			{Name: "cache-invalidator", Command: []string{"go", "run", "./cmd/cache-invalidator"}, Uses: []string{"kafka", "redis"}},
 		},
 	},
+	{
+		ID:       "s3/objects-basics",
+		Title:    "S3 objects basics",
+		Summary:  "Buckets, keys and prefixes, multipart upload, presigned URLs against S3 Compatible storage.",
+		Language: "go",
+		Template: "go/s3/objects-basics",
+		Dir:      "objects-basics",
+		Requires: []string{"s3-compatible"},
+		Apps: []App{
+			{Name: "objects", Command: []string{"go", "run", "./cmd/objects"}, Uses: []string{"s3-compatible"}},
+		},
+	},
 }
 
 // All returns every starter.

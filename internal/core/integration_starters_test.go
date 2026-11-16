@@ -229,3 +229,29 @@ func TestIntegrationS3Compatible(t *testing.T) {
 		t.Errorf("gRPC port 18333 accepted a client without a certificate:\n%s", out)
 	}
 }
+
+// TestIntegrationS3ObjectsBasics proves the walkthrough end to end: the
+// delimiter listing shows one level, the multipart upload completes, and a
+// credential-free client downloads the exact bytes through a presigned URL.
+func TestIntegrationS3ObjectsBasics(t *testing.T) {
+	eng, dir, _ := starterLab(t, "objs", "s3/objects-basics")
+	var lines []string
+	eventually(t, 4*time.Minute, "the walkthrough to finish", func() bool {
+		lines = logsOf(t, eng, dir, "objects")
+		return slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "done;") })
+	})
+	text := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"listed key=notes/readme.txt",
+		"listed prefix=notes/2026/",
+		"uploaded part=3 bytes=1048576",
+		"presigned GET status=200 bytes=11534336 matches=true",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("objects log lacks %q", want)
+		}
+	}
+	if strings.Contains(text, "listed key=notes/2026/") {
+		t.Error("the delimiter listing descended into notes/2026/")
+	}
+}

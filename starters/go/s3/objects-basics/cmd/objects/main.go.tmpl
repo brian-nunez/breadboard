@@ -1,0 +1,103 @@
+// Command objects walks through the S3 basics once: a bucket, keys and
+// prefixes, a multipart upload, and a presigned download URL.
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"errors"
+	"io"
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+)
+
+const bucket = "objects-basics"
+
+func main() {
+	ctx := context.Background()
+	// Credentials, region and endpoint come from AWS_* variables.
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Path-style puts the bucket in the URL path. Virtual-hosted style would need
+	// DNS for objects-basics.<endpoint host>, which the lab does not have.
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) { o.UsePathStyle = true })
+
+	_, err = client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(bucket)})
+	var owned *types.BucketAlreadyOwnedByYou
+	if err != nil && !errors.As(err, &owned) {
+		log.Fatal(err)
+	}
+	log.Printf("bucket %s ready", bucket)
+
+	// Keys are flat names. The slashes only look like folders.
+	for _, key := range []string{"notes/readme.txt", "notes/2026/jan.txt", "notes/2026/feb.txt"} {
+		if _, err := client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(bucket), Key: aws.String(key), Body: bytes.NewReader([]byte("hello from " + key))}); err != nil {
+			log.Fatal(err)
+		}
+	}
+	// A prefix plus a delimiter lists one "level": objects directly under
+	// notes/, and the common prefixes that stand in for subfolders.
+	list, err := client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(bucket), Prefix: aws.String("notes/"), Delimiter: aws.String("/")})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, o := range list.Contents {
+		log.Printf("listed key=%s size=%d", aws.ToString(o.Key), aws.ToInt64(o.Size))
+	}
+	for _, p := range list.CommonPrefixes {
+		log.Printf("listed prefix=%s", aws.ToString(p.Prefix))
+	}
+
+	// Multipart upload: every part but the last must be at least 5 MiB. Parts
+	// upload (and retry) independently; Complete stitches them in order.
+	data := make([]byte, 11<<20)
+	rand.Read(data)
+	key := aws.String("big/random.bin")
+	mp, err := client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{Bucket: aws.String(bucket), Key: key})
+	if err != nil {
+		log.Fatal(err)
+	}
+	var parts []types.CompletedPart
+	for i, off := int32(1), 0; off < len(data); i, off = i+1, off+5<<20 {
+		chunk := data[off:min(off+5<<20, len(data))]
+		part, err := client.UploadPart(ctx, &s3.UploadPartInput{Bucket: aws.String(bucket), Key: key, UploadId: mp.UploadId, PartNumber: aws.Int32(i), Body: bytes.NewReader(chunk)})
+		if err != nil {
+			log.Fatal(err)
+		}
+		parts = append(parts, types.CompletedPart{ETag: part.ETag, PartNumber: aws.Int32(i)})
+		log.Printf("uploaded part=%d bytes=%d", i, len(chunk))
+	}
+	if _, err := client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{Bucket: aws.String(bucket), Key: key, UploadId: mp.UploadId, MultipartUpload: &types.CompletedMultipartUpload{Parts: parts}}); err != nil {
+		log.Fatal(err)
+	}
+
+	// A presigned URL carries a signature and an expiry, so a plain HTTP client
+	// with no credentials can download this one object until it expires.
+	signed, err := s3.NewPresignClient(client).PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: key}, s3.WithPresignExpires(5*time.Minute))
+	if err != nil {
+		log.Fatal(err)
+	}
+	resp, err := http.Get(signed.URL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	got, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("presigned GET status=%d bytes=%d matches=%t", resp.StatusCode, len(got), bytes.Equal(got, data))
+	log.Printf("presigned url=%s", signed.URL)
+
+	log.Print("done; edit cmd/objects and run bb up to try again")
+	select {} // keep the container running so its logs stay readable
+}

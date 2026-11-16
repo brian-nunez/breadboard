@@ -12,6 +12,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/brian-nunez/breadboard/internal/spec"
 	templates "github.com/brian-nunez/breadboard/starters"
 )
 
@@ -43,6 +44,8 @@ type App struct {
 	Command []string
 	// Uses lists catalog types; each resolves to the experiment's service of that type.
 	Uses []string
+	// Register, when set, registers the app in the registry it uses through a sidecar.
+	Register *spec.Register
 }
 
 var all = []Starter{
@@ -96,6 +99,19 @@ var all = []Starter{
 		Requires: []string{"s3-compatible"},
 		Apps: []App{
 			{Name: "objects", Command: []string{"go", "run", "./cmd/objects"}, Uses: []string{"s3-compatible"}},
+		},
+	},
+	{
+		ID:       "consul/service-discovery",
+		Title:    "Consul service discovery (recommended)",
+		Summary:  "Registration by a Consul sidecar agent, a health-checked catalog, resolving services by name.",
+		Language: "go",
+		Template: "go/consul/service-discovery",
+		Dir:      "service-discovery",
+		Requires: []string{"consul"},
+		Apps: []App{
+			{Name: "greeter", Command: []string{"go", "run", "./cmd/greeter"}, Uses: []string{"consul"}, Register: &spec.Register{Port: 8443}},
+			{Name: "caller", Command: []string{"go", "run", "./cmd/caller"}, Uses: []string{"consul"}},
 		},
 	},
 }

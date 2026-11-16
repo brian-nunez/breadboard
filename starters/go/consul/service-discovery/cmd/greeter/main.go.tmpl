@@ -1,0 +1,19 @@
+// Command greeter is an HTTPS service. It does not know Consul exists: a
+// sidecar agent registers it, health-checks it, and deregisters it when it stops.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "hello from %s\n", os.Getenv("BB_SERVICE"))
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Print("greeter listening on :8443")
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

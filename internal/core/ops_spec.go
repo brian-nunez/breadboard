@@ -403,7 +403,7 @@ func (e *Engine) ApplyStarter(ctx context.Context, req ApplyStarterRequest) (*Ap
 			}
 			return nil, fmt.Errorf("starter %s needs an app named %q, but experiment.yaml already uses that name for something else; rename it there, then apply the starter again: %w", st.ID, a.Name, ErrExists)
 		}
-		app := spec.App{Name: a.Name, Path: res.Dir, Command: a.Command}
+		app := spec.App{Name: a.Name, Path: res.Dir, Command: a.Command, Register: a.Register}
 		for _, typ := range a.Uses {
 			app.Uses = append(app.Uses, spec.Use{Service: typeService(typ)})
 		}

@@ -289,3 +289,33 @@ func TestIntegrationSecondUpKeepsMounts(t *testing.T) {
 		t.Errorf("TLS ping after a second up failed: %v %s", err, out)
 	}
 }
+
+// TestIntegrationConsulServiceDiscovery proves sidecar registration end to
+// end: the caller finds the greeter by name and reaches it over verified
+// TLS, and once the greeter stops, its failing check removes it from the
+// healthy instances the caller sees.
+func TestIntegrationConsulServiceDiscovery(t *testing.T) {
+	eng, dir, name := starterLab(t, "sd", "consul/service-discovery")
+	if spec := readFile(t, filepath.Join(dir, "experiment.yaml")); !strings.Contains(spec, "register:") {
+		t.Fatalf("experiment.yaml has no register block:\n%s", spec)
+	}
+	called := regexp.MustCompile(`(called greeter at greeter\.bb\.internal:8443 \(1 healthy\): hello from greeter)`)
+	eventually(t, 4*time.Minute, "the caller to reach the greeter through Consul", func() bool {
+		return len(matches(logsOf(t, eng, dir, "caller"), called)) > 0
+	})
+	docker(t, "stop", containerOf(t, name, "greeter"))
+	skip := len(logsOf(t, eng, dir, "caller"))
+	eventually(t, time.Minute, "Consul to stop returning the stopped greeter", func() bool {
+		lines := logsOf(t, eng, dir, "caller")
+		return slices.ContainsFunc(lines[min(skip, len(lines)):], func(l string) bool { return strings.Contains(l, "no healthy greeter instances") })
+	})
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}

@@ -1,0 +1,158 @@
+package web
+
+import "fmt"
+
+templ architecturePage(d dashboardData, selected string) {
+	@dashboardShell(pageTitle(d, "Architecture"), d, "architecture") {
+		<div data-live={ "/live/architecture?node=" + selected }>
+			@architectureBody(d, selected)
+		</div>
+	}
+}
+
+templ architectureBody(d dashboardData, selected string) {
+	switch {
+		case d.NoExperiment:
+			@noExperiment()
+		case d.Problem != "":
+			@problem(d.Problem)
+		default:
+			<div class="flex items-end justify-between">
+				<h1 class="text-[28px] font-semibold leading-tight">Architecture</h1>
+				<span class="flex items-center gap-2 text-sm text-slate-500">
+					@dot("green")
+					Live
+				</span>
+			</div>
+			<div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+				@card() {
+					<div class="overflow-x-auto p-4">
+						@graphSVG(layout(d.Services, selected), true)
+					</div>
+					@legend()
+				}
+				if r, ok := find(d.Services, selected); ok {
+					@inspector(d, r)
+				}
+			</div>
+	}
+}
+
+func find(rows []row, name string) (row, bool) {
+	for _, r := range rows {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return row{}, false
+}
+
+// graphSVG draws the laid-out graph. Nodes link to themselves on the
+// architecture page (selecting them for the inspector).
+templ graphSVG(g graph, labels bool) {
+	<svg viewBox={ fmt.Sprintf("0 0 %d %d", g.Width, g.Height) } width={ itoa(g.Width) } class="mx-auto block h-auto max-w-full" role="img" aria-label="Architecture of the experiment">
+		<defs>
+			<marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto">
+				<path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path>
+			</marker>
+			<marker id="arrow-plain" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto">
+				<path d="M0 0 L8 4 L0 8 z" class="fill-red-600"></path>
+			</marker>
+		</defs>
+		<text x={ itoa(g.CodeX) } y="36" class="fill-slate-500 text-[11px] font-semibold tracking-wider">YOUR CODE</text>
+		<text x={ itoa(g.InfraX) } y="36" class="fill-slate-500 text-[11px] font-semibold tracking-wider">INFRASTRUCTURE</text>
+		for _, e := range g.Edges {
+			if e.Plaintext {
+				<path d={ e.Path } fill="none" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrow-plain)" class="stroke-red-600"></path>
+			} else if e.Registering {
+				<path d={ e.Path } fill="none" stroke-width="1.5" stroke-dasharray="2 3" marker-end="url(#arrow)" class="stroke-slate-400"></path>
+			} else {
+				<path d={ e.Path } fill="none" stroke-width="1.5" marker-end="url(#arrow)" class="stroke-slate-400"></path>
+			}
+		}
+		if labels {
+			for _, e := range g.Edges {
+				<g>
+					<rect x={ itoa(e.LabelX - labelWidth(e.Label)/2) } y={ itoa(e.LabelY - 9) } width={ itoa(labelWidth(e.Label)) } height="18" rx="4" class={ templ.KV("fill-red-50 stroke-red-300", e.Plaintext), templ.KV("fill-white stroke-slate-300", !e.Plaintext) }></rect>
+					<text x={ itoa(e.LabelX) } y={ itoa(e.LabelY + 4) } text-anchor="middle" class={ "font-mono text-[11px]", templ.KV("fill-red-700", e.Plaintext), templ.KV("fill-slate-600", !e.Plaintext) }>{ e.Label }</text>
+				</g>
+			}
+		}
+		for _, n := range g.Nodes {
+			<a href={ templ.SafeURL("/architecture?node=" + n.Name) }>
+				<rect x={ itoa(n.X) } y={ itoa(n.Y) } width="176" height="56" rx="10" stroke-width={ strokeWidth(n.Selected) } class={ templ.KV("fill-white stroke-indigo-600", n.Selected), templ.KV("fill-white stroke-slate-200 hover:stroke-slate-400", !n.Selected) }></rect>
+				if n.Kind == "infra" {
+					<rect x={ itoa(n.X + 14) } y={ itoa(n.Y + 14) } width="28" height="28" rx="6" class="fill-slate-100"></rect>
+				} else {
+					<circle cx={ itoa(n.X + 28) } cy={ itoa(n.Y + 28) } r="14" class="fill-indigo-50"></circle>
+				}
+				<text x={ itoa(n.X + 28) } y={ itoa(n.Y + 32) } text-anchor="middle" class={ "text-[12px] font-semibold", templ.KV("fill-slate-700", n.Kind == "infra"), templ.KV("fill-indigo-700", n.Kind != "infra") }>{ n.Initial() }</text>
+				<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 33) } class="fill-slate-900 text-[14px] font-semibold">{ n.Name }</text>
+				<circle cx={ itoa(n.X + 158) } cy={ itoa(n.Y + 28) } r="4" class={ dotClass(n.Status().Color) }></circle>
+			</a>
+		}
+	</svg>
+}
+
+func strokeWidth(selected bool) string {
+	if selected {
+		return "2"
+	}
+	return "1"
+}
+
+templ legend() {
+	<div class="mx-4 mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-200 px-4 py-2.5 text-xs text-slate-600">
+		<span class="flex items-center gap-2"><svg viewBox="0 0 24 4" class="h-1 w-6"><line x1="0" y1="2" x2="24" y2="2" stroke-width="1.5" class="stroke-slate-400"></line></svg>TLS, verified</span>
+		<span class="flex items-center gap-2"><svg viewBox="0 0 24 4" class="h-1 w-6"><line x1="0" y1="2" x2="24" y2="2" stroke-width="1.5" stroke-dasharray="6 4" class="stroke-red-600"></line></svg>Plaintext (intentional)</span>
+		<span class="flex items-center gap-2"><span class="flex size-4 items-center justify-center rounded bg-slate-100 text-[9px] font-semibold text-slate-700">K</span>infrastructure</span>
+		<span class="flex items-center gap-2"><span class="flex size-4 items-center justify-center rounded-full bg-indigo-50 text-[9px] font-semibold text-indigo-700">A</span>your code</span>
+	</div>
+}
+
+templ inspector(d dashboardData, r row) {
+	<aside class="h-fit rounded-xl border border-slate-200 bg-white p-5">
+		<div class="flex items-center gap-3">
+			@badge(r)
+			<div class="min-w-0">
+				<div class="font-semibold">{ r.Name }</div>
+				<div class="truncate text-xs text-slate-500">{ r.Kind } · { r.Subtitle() }</div>
+			</div>
+		</div>
+		<div class="mt-4">
+			@statusWord(r.Status())
+		</div>
+		if len(r.Uses) > 0 {
+			<div class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Connects to</div>
+			<div class="mt-2 flex flex-col gap-2">
+				for _, e := range r.Uses {
+					<a href={ templ.SafeURL("/architecture?node=" + e.To) } class={ "flex items-center justify-between rounded-lg border px-3 py-2 text-sm", templ.KV("border-red-200 bg-red-50", !e.TLS), templ.KV("border-slate-200", e.TLS) }>
+						<span class="font-semibold">{ e.To }</span>
+						<span class={ "font-mono text-xs", templ.KV("text-red-700", !e.TLS), templ.KV("text-slate-600", e.TLS) }>{ edgeLabel(e.TLS, e.Port) }</span>
+					</a>
+					if !e.TLS && e.Reason != "" {
+						<p class="text-xs text-red-700">Reason: { e.Reason }</p>
+					}
+				}
+			</div>
+		}
+		if users := inbound(d.Services, r.Name); len(users) > 0 {
+			<div class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Used by</div>
+			<div class="mt-2 flex flex-wrap gap-2 text-sm">
+				for _, u := range users {
+					<a href={ templ.SafeURL("/architecture?node=" + u) } class="rounded-lg border border-slate-200 px-3 py-1.5">{ u }</a>
+				}
+			</div>
+		}
+		<div class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Resources</div>
+		<div class="mt-2 grid grid-cols-[64px_1fr_auto] items-center gap-x-3 gap-y-2 text-sm text-slate-600">
+			<span>CPU</span>
+			@bar(r.CPUUsed, r.CPULimit, false)
+			<span>{ fmt.Sprintf("%.2f / %.2f", r.CPUUsed, r.CPULimit) }</span>
+			<span>Memory</span>
+			@bar(r.MemUsed, r.MemLimit, r.Status().Color == "amber")
+			<span>{ fmt.Sprintf("%.0f / %.0f MiB", r.MemUsed, r.MemLimit) }</span>
+		</div>
+		<a href={ templ.SafeURL("/services/" + r.Name) } class="mt-5 inline-block text-sm text-indigo-600 hover:text-indigo-800">Open service page →</a>
+	</aside>
+}

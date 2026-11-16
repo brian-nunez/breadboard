@@ -260,8 +260,9 @@ type ServiceStatus struct {
 	// Apps only: the source directory and command from experiment.yaml.
 	Path    string
 	Command []string
-	// Sidecars only: the app they register.
-	Parent string
+	// Sidecars only: the app they register and the registry they join.
+	Parent   string
+	Registry string
 }
 
 // Edge is a connection from an app to a service.
@@ -346,7 +347,7 @@ func (e *Engine) status(ctx context.Context, m *model.Model) ([]ServiceStatus, [
 		case model.App:
 			s.Path, s.Command = svc.App.Path, svc.App.Command
 		case model.Sidecar:
-			s.Image, s.Parent = svc.Entry.Image, svc.Parent
+			s.Image, s.Parent, s.Registry = svc.Entry.Image, svc.Parent, svc.Registry
 		}
 		if ok {
 			s.State, s.OOMKilled, s.StartedAt = c.State, c.OOMKilled, c.StartedAt

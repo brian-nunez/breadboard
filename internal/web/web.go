@@ -121,6 +121,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /{$}", s.overview)
 	mux.HandleFunc("GET /live/overview", s.overviewLive)
+	mux.HandleFunc("GET /architecture", s.architecture)
+	mux.HandleFunc("GET /live/architecture", s.architectureLive)
 	return s.guard(mux)
 }
 
@@ -135,6 +137,39 @@ func (s *Server) overviewLive(w http.ResponseWriter, r *http.Request) {
 	s.stream(w, r, func(ctx context.Context) templComponent {
 		return overviewBody(s.dashboard(ctx))
 	})
+}
+
+// architecture shows the graph with one node selected for the inspector.
+func (s *Server) architecture(w http.ResponseWriter, r *http.Request) {
+	d := s.dashboard(r.Context())
+	render(w, r, architecturePage(d, selectedNode(d, r.URL.Query().Get("node"))))
+}
+
+func (s *Server) architectureLive(w http.ResponseWriter, r *http.Request) {
+	want := r.URL.Query().Get("node")
+	s.stream(w, r, func(ctx context.Context) templComponent {
+		d := s.dashboard(ctx)
+		return architectureBody(d, selectedNode(d, want))
+	})
+}
+
+// selectedNode is the requested service if it exists, else the first app,
+// else the first service.
+func selectedNode(d dashboardData, want string) string {
+	for _, r := range d.Services {
+		if r.Name == want {
+			return want
+		}
+	}
+	for _, r := range d.Services {
+		if r.Kind == "app" {
+			return r.Name
+		}
+	}
+	if len(d.Services) > 0 {
+		return d.Services[0].Name
+	}
+	return ""
 }
 
 // dashboard gathers what every dashboard page shows. Failures become a
@@ -153,6 +188,19 @@ func (s *Server) dashboard(ctx context.Context) dashboardData {
 	d.Experiment, d.Domain, d.Warnings = st.Experiment, st.Domain, st.Warnings
 	for _, svc := range st.Services {
 		d.Services = append(d.Services, newRow(svc))
+	}
+	// A plaintext edge makes both of its ends non-TLS in the table.
+	for _, from := range st.Services {
+		for _, e := range from.Uses {
+			if e.TLS {
+				continue
+			}
+			for i := range d.Services {
+				if d.Services[i].Name == e.To {
+					d.Services[i].TLS = false
+				}
+			}
+		}
 	}
 	return d
 }

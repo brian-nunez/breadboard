@@ -255,3 +255,37 @@ func TestIntegrationS3ObjectsBasics(t *testing.T) {
 		t.Error("the delimiter listing descended into notes/2026/")
 	}
 }
+
+// TestIntegrationSecondUpKeepsMounts is a regression test: a second bb up
+// must not orphan the files a running, unchanged container has bind-mounted
+// (on Docker Desktop they vanished, and health checks started failing).
+func TestIntegrationSecondUpKeepsMounts(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := fmt.Sprintf("re-%d", time.Now().Unix()%100000)
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+	})
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.AddService(ctx, AddServiceRequest{Dir: dir, Type: "redis"}); err != nil {
+		t.Fatal(err)
+	}
+	upHealthy(t, eng, dir)
+	id := containerOf(t, name, "redis")
+	upHealthy(t, eng, dir)
+	if again := containerOf(t, name, "redis"); again != id {
+		t.Fatal("the second up recreated an unchanged container; the test needs it kept")
+	}
+	for _, f := range []string{"/etc/bb/ca.pem", "/etc/bb/trust-bundle.pem", "/etc/bb/tls/tls.crt", "/etc/bb/tls/tls.key"} {
+		if out, err := dockerMay("exec", id, "test", "-s", f); err != nil {
+			t.Errorf("%s is missing in the running container after a second up: %v %s", f, err, out)
+		}
+	}
+	// The health check itself reads the CA file.
+	if out, err := dockerMay("exec", id, "sh", "-c", `redis-cli --tls --cacert /etc/bb/ca.pem -h redis.bb.internal -p 6379 --no-auth-warning -a "$REDIS_PASSWORD" ping`); err != nil || !strings.Contains(out, "PONG") {
+		t.Errorf("TLS ping after a second up failed: %v %s", err, out)
+	}
+}

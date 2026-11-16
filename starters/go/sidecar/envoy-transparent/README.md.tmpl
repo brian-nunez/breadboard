@@ -1,0 +1,37 @@
+# sidecar/envoy-transparent
+
+A **transparent proxy**: the app calls `http://transparent-backend.<domain>:8443/` by its real name, in plain HTTP, and the wire is TLS anyway. The same sidecar enforces an **egress policy**, the root of service-to-service access control. Built on [Envoy](https://www.envoyproxy.io/docs/envoy/v1.40.0/) and iptables.
+
+- `cmd/transparent-caller`: every 3 seconds, calls `transparent-backend` (declared), `transparent-stranger` (not declared), and `transparent-backend`'s address with `transparent-stranger` in the `Host` header, and logs the three answers.
+- `cmd/transparent-backend`, `cmd/transparent-stranger`: plain HTTP services behind Envoy sidecars that terminate TLS on 8443. Each says how the request reached its pod.
+
+## How it works
+
+`transparent: {egress: deny}` on the caller's Envoy sidecar changes how its pod starts:
+
+1. **A short-lived init container installs iptables rules** in the pod's network namespace before anything else runs (`transparent-caller-netinit`, the only container with `NET_ADMIN`). Every outgoing TCP connection is redirected to Envoy on port 15001, except Envoy's own (in a transparent pod it runs as the reserved uid 1337, which no app may use: `bb up` refuses an app image that starts as it) and loopback traffic.
+2. **Envoy reads the original destination** of each redirected connection (the `original_dst` listener filter) and looks at the request. A plain HTTP request to a declared service (`Host: transparent-backend.<domain>` on port 8443) goes out over TLS, verified against the lab CA, balanced across that service's addresses.
+3. **Everything else is the egress policy's call.** With `deny`, Envoy allows only the declared services' addresses (every container in the lab has a fixed address) and the infra services in the app's `uses`, each on its own port. A connection to any other address is closed before a single byte of HTTP: the app sees `EOF`. A plain HTTP request that reaches a declared address but names another host in `Host` gets `403` from Envoy itself. With `allow` (the default for `transparent: true`), undeclared traffic passes through untouched to where the app sent it.
+
+The app never sees any of it: no proxy variables, no `127.0.0.1` URLs, no TLS code.
+
+**Ambassador or transparent?** In `sidecar/envoy-ambassador` the app knows about its sidecar and calls `127.0.0.1:9001`. Here the app calls real names and the sidecar captures the traffic. The ambassador is explicit and needs no privileges; transparent mode needs iptables (and an init container with `NET_ADMIN`), but it covers code you cannot change and lets the sidecar enforce a policy on all traffic. The outbound entry still opens `127.0.0.1:9001` (`TRANSPARENT_BACKEND_URL`); this app just does not use it.
+
+```sh
+bb up
+bb logs transparent-caller -f
+docker logs bb-{{.Experiment}}-transparent-caller-netinit-1   # the rules it installed
+```
+
+The caller logs `declared ...: 200 OK: transparent-backend, reached over https`, `undeclared ...: refused: Get "...": EOF` and `wrong-host ...: 403 Forbidden: breadboard: egress denied ...`. In `bb serve`, the caller's **Envoy** tab shows the `outbound_transparent-backend` cluster and the transparent listeners; MCP clients use `envoy_clusters` with `service: transparent-caller`.
+
+## Try this
+
+- **Grant access by declaring it.** Add `- {service: transparent-stranger, port: 9002}` under the caller's `outbound` and run `bb up`. The refused call becomes `200 OK: transparent-stranger, reached over https`, and so does the wrong-host call, now that `Host: transparent-stranger` names a declared service: in this model an ACL is the list of what a service may call.
+- **Allow all egress.** Change the sidecar to `transparent: true` and run `bb up`. The undeclared call now leaves the pod as plain HTTP to the stranger's TLS port, and fails there instead of in your pod: allow mode routes, it does not protect.
+- **Watch Envoy count refusals.** `docker exec bb-{{.Experiment}}-transparent-caller-1 wget -qO- http://127.0.0.1:15000/stats | grep -E 'egress_denied.rbac.denied|transparent_http_8443.downstream_rq_4xx'` shows the connections the sidecar closed (one per undeclared call) and the requests it answered with 403 (one per wrong-host call). Envoy's admin API is on the pod's loopback, so the app container can read it; from other containers it is unreachable.
+
+## Break this
+
+- **Stop Envoy.** `docker stop bb-{{.Experiment}}-transparent-caller-envoy-1`. Both calls fail with `connection refused`: the rules still send every connection to port 15001, where nothing listens now, so there is no way around the sidecar. `bb up` brings it back.
+- **Call the internet.** `docker exec bb-{{.Experiment}}-transparent-caller-1 wget -qO- http://example.com/` is closed by the sidecar (`egress: deny`), even though the container has a route out. With `transparent: true` it would go through.

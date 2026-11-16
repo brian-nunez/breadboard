@@ -1,0 +1,45 @@
+// Command tls-client calls plain-web over verified TLS, and also tries the
+// app's plaintext port directly to show that nothing gets around the sidecar.
+package main
+
+import (
+	"crypto/tls"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	// BB_FQDN is this app's own name, tls-client.<domain>; plain-web lives in
+	// the same domain.
+	_, domain, _ := strings.Cut(os.Getenv("BB_FQDN"), ".")
+	// The default client verifies the server's certificate against the CA
+	// bundle in SSL_CERT_FILE, so there is no TLS setting in this code.
+	client := &http.Client{Timeout: 3 * time.Second}
+	for {
+		resp, err := client.Get(fmt.Sprintf("https://plain-web.%s:8443/", domain))
+		if err != nil {
+			log.Printf("https :8443 failed: %v", err)
+		} else {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			cert := resp.TLS.PeerCertificates[0]
+			log.Printf("https :8443 %s over %s, certificate for %v verified: %s",
+				resp.Status, tls.VersionName(resp.TLS.Version), cert.DNSNames, strings.TrimSpace(string(body)))
+		}
+
+		// The app's own port. It listens on 127.0.0.1 inside its pod, so
+		// from here the connection is refused.
+		if resp, err := client.Get(fmt.Sprintf("http://plain-web.%s:8080/", domain)); err != nil {
+			log.Printf("http :8080 refused, as it should be: %v", err)
+		} else {
+			resp.Body.Close()
+			log.Printf("http :8080 answered %s in plaintext: the app is reachable without TLS", resp.Status)
+		}
+		time.Sleep(3 * time.Second)
+	}
+}

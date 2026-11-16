@@ -1,0 +1,35 @@
+// Command breaker-backend runs as three replicas behind Envoy sidecars. Any
+// replica can be made to fail: POST /fail makes it answer 503 to every
+// request, POST /recover makes it healthy again.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"sync/atomic"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // breaker-backend-1, -2 or -3
+	var failing atomic.Bool
+	http.HandleFunc("POST /fail", func(w http.ResponseWriter, r *http.Request) {
+		failing.Store(true)
+		log.Printf("%s now fails every request", name)
+	})
+	http.HandleFunc("POST /recover", func(w http.ResponseWriter, r *http.Request) {
+		failing.Store(false)
+		log.Printf("%s is healthy again", name)
+	})
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if failing.Load() {
+			http.Error(w, name, http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprintln(w, name)
+	})
+	addr := os.Getenv("BB_LISTEN_ADDR")
+	log.Printf("%s listening on %s", name, addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
+}

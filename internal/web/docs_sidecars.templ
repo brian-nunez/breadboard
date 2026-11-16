@@ -1,0 +1,545 @@
+package web
+
+// Sidecars docs: the pod model and the three sidecar types (Phase 5),
+// written in the Kafka docs' style (D-031, D-061, D-101).
+
+const (
+	envoyDocs     = "https://www.envoyproxy.io/docs/envoy/v1.40.0/"
+	pgbouncerDocs = "https://www.pgbouncer.org/"
+	fluentBitDocs = "https://docs.fluentbit.io/manual/"
+)
+
+func init() {
+	registerTech(tech{
+		ID:      "sidecars",
+		Name:    "Sidecars",
+		Tagline: "Containers that share an app's network and a directory, so TLS, routing, pooling and log shipping leave the app's code.",
+		Order:   60,
+		Intro:   sidecarsIntro(),
+		GoodFit: []string{"TLS termination and origination without app code", "Load balancing, retries and timeouts per call", "Connection pooling next to the app", "Shipping logs the app writes to files", "A policy on what a service may call"},
+		PoorFit: []string{"Logic that belongs to the app's domain", "Work that needs the app's in-memory state", "Labs where one more container per instance costs too much"},
+		Diagram: sidecarsDiagram(),
+		Official: []link{
+			{"Envoy documentation (v1.40)", envoyDocs},
+			{"PgBouncer documentation", pgbouncerDocs},
+			{"Fluent Bit manual", fluentBitDocs},
+			{"Kubernetes: sidecar containers", "https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/"},
+		},
+		Starters: []string{"sidecar/envoy-ambassador", "sidecar/envoy-tls-termination", "sidecar/envoy-transparent", "sidecar/circuit-breaking", "sidecar/pgbouncer-pool", "sidecar/log-shipper"},
+		Guides: []guide{
+			{
+				Slug: "patterns", Title: "Sidecar, ambassador, adapter", Summary: "Three ways a helper container serves the app beside it.",
+				Starter:  "sidecar/envoy-tls-termination",
+				Sections: []docSection{{"pod", "One pod, several containers"}, {"sidecar", "Sidecar: TLS termination"}, {"ambassador", "Ambassador: calls going out"}, {"adapter", "Adapter: logs as files"}, {"cost", "What it costs"}},
+				Body:     sidecarsPatterns(),
+			},
+			{
+				Slug: "transparent-proxy", Title: "Transparent proxy and egress policy", Summary: "Capturing every connection with iptables, and refusing the undeclared ones.",
+				Starter:  "sidecar/envoy-transparent",
+				Sections: []docSection{{"capture", "Capturing traffic"}, {"original", "Where was it going?"}, {"declared", "Declared services get TLS"}, {"egress", "Egress allow and deny"}, {"versus", "Transparent or ambassador"}},
+				Body:     sidecarsTransparent(),
+			},
+			{
+				Slug: "load-balancing", Title: "Load balancing across replicas", Summary: "Policies, retries, timeouts and ejecting a failing replica.",
+				Starter:  "sidecar/envoy-ambassador",
+				Sections: []docSection{{"replicas", "Replicas behind one name"}, {"policies", "Balancing policies"}, {"retries", "Retries and timeouts"}, {"outliers", "Ejecting a failing replica"}, {"watch", "Watching it happen"}},
+				Body:     sidecarsLoadBalancing(),
+			},
+			{
+				Slug: "connection-pooling", Title: "Connection pooling with PgBouncer", Summary: "Many client connections, a few Postgres connections.",
+				Starter:  "sidecar/pgbouncer-pool",
+				Sections: []docSection{{"why", "Why pool"}, {"wiring", "How the sidecar is wired"}, {"modes", "Pool modes"}, {"sizing", "Sizing the pool"}, {"watch", "Watching the pool"}},
+				Body:     sidecarsPooling(),
+			},
+			{
+				Slug: "in-breadboard", Title: "Sidecars in Breadboard", Summary: "The pod, start order, variables, ports and owning a config.",
+				Sections: []docSection{{"declare", "Declaring a sidecar"}, {"pod", "The pod"}, {"env", "What your app receives"}, {"ports", "Ports and images"}, {"own", "Owning the generated config"}, {"see", "Seeing sidecars"}},
+				Body:     sidecarsInBreadboard(),
+			},
+		},
+	})
+}
+
+const sidecarsSpecCode = `apps:
+  api:
+    path: ./api
+    uses: [postgres]
+    replicas: 3
+    sidecars:
+      - type: envoy
+        inbound: {port: 8443, app_port: 8080}   # TLS in, plain HTTP to the app
+      - type: pgbouncer
+        service: postgres                      # pool the app's Postgres connections
+        pool_size: 10`
+
+const sidecarsListenCode = `// BB_LISTEN_ADDR is 127.0.0.1:8080: loopback inside the pod.
+addr := os.Getenv("BB_LISTEN_ADDR")
+log.Fatal(http.ListenAndServe(addr, nil))`
+
+const sidecarsAmbassadorCode = `// http://127.0.0.1:9001: the sidecar's listener for ambassador-backend.
+url := os.Getenv("AMBASSADOR_BACKEND_URL")
+resp, err := http.Get(url)`
+
+const sidecarsAdapterCode = `// BB_LOG_DIR is /var/run/bb/logs, shared with the Fluent Bit sidecar.
+path := filepath.Join(os.Getenv("BB_LOG_DIR"), "app.log")
+f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+logger := slog.New(slog.NewJSONHandler(f, nil))
+logger.Info("order placed", "order", n)`
+
+const sidecarsRulesCode = `# The idea of the rules netinit installs (simplified; the real ones print in its log).
+iptables -t nat -N BB_OUT
+iptables -t nat -A BB_OUT -m owner --uid-owner 1337 -j RETURN  # Envoy's own connections
+iptables -t nat -A BB_OUT -d 127.0.0.0/8 -j RETURN             # loopback stays loopback
+iptables -t nat -A BB_OUT -p tcp -j REDIRECT --to-ports 15001  # everything else: to Envoy
+iptables -t nat -A OUTPUT -p tcp -j BB_OUT`
+
+const sidecarsTransparentSpec = `transparent-caller:
+  sidecars:
+    - type: envoy
+      outbound:
+        - service: transparent-backend   # the declared destinations
+          port: 9001
+      transparent: {egress: deny}         # everything undeclared is refused`
+
+const sidecarsTransparentCode = `// No proxy settings, no 127.0.0.1: the real name, in plain HTTP.
+resp, err := client.Get("http://transparent-backend." + domain + ":8443/")`
+
+const sidecarsOutboundSpec = `- type: envoy
+  outbound:
+    - service: breaker-backend   # an app with replicas: 3
+      port: 9001                 # BREAKER_BACKEND_URL=http://127.0.0.1:9001
+      lb: round_robin            # least_request, random, ring_hash, maglev
+      timeout: 2s                # the whole call, retries included
+      retries: 0                 # 2 by default
+      outlier: {consecutive_5xx: 3, ejection: 30s, max_ejection_percent: 50, interval: 5s}`
+
+const sidecarsOutlierCode = `outlier:
+  consecutive_5xx: 3         # eject after three 5xx in a row
+  ejection: 30s              # base ejection time
+  max_ejection_percent: 50   # Envoy's default is 10
+  interval: 5s               # analysis sweep; Envoy's default is 10s`
+
+const sidecarsPoolSpec = `pool-client:
+  uses: [postgres]
+  sidecars:
+    - type: pgbouncer
+      service: postgres
+      pool_mode: transaction   # session, transaction or statement
+      pool_size: 10            # server connections per database and user`
+
+const sidecarsPoolCode = `// DATABASE_URL points at PgBouncer on 127.0.0.1:6432.
+cfg, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
+cfg.MaxConns, cfg.MinConns = 50, 50   // 50 client connections
+pool, err := pgxpool.NewWithConfig(ctx, cfg)`
+
+templ sidecarsIntro() {
+	@docP() {
+		A sidecar is a second container that runs next to an app and shares its network namespace: the same IP address, the same @docCodeWord("localhost"), the same ports. The app and its sidecar talk over 127.0.0.1, so the sidecar can stand in front of the app, behind it, or beside it without the app knowing much about it.
+	}
+	@docP() {
+		That lets work every service needs leave the service's code: terminating and originating TLS, balancing calls across replicas, retrying, pooling database connections, shipping logs. The app stays small; the sidecar is configured, upgraded and replaced on its own.
+	}
+	@docP() {
+		In Breadboard an app with sidecars becomes a pod, as in Kubernetes: a small holder container owns the network, and the app and each sidecar join it. Three types are available. Envoy is a proxy for TLS, routing, load balancing and transparent capture. PgBouncer pools Postgres connections. Fluent Bit ships the log files the app writes.
+	}
+}
+
+templ sidecarsDiagram() {
+	<svg viewBox="0 0 900 250" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="An app's pod: Envoy terminates TLS in front of the app, PgBouncer pools its Postgres connections, Fluent Bit ships its log files to S3 Compatible storage; between containers everything is TLS">
+		<defs>
+			<marker id="sc-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<text x="40" y="38" class="fill-slate-500 text-[12px]">other apps</text>
+		<line x1="70" y1="50" x2="70" y2="90" stroke-width="1.5" marker-end="url(#sc-arrow)" class="stroke-slate-400"></line>
+		<text x="80" y="76" class="fill-slate-500 text-[12px]">TLS :8443</text>
+		<rect x="20" y="96" width="560" height="140" rx="12" stroke-dasharray="5 4" class="fill-white stroke-indigo-400"></rect>
+		<text x="36" y="226" class="fill-indigo-800 font-mono text-[12px] font-semibold">pod: one network namespace, one /var/run/bb</text>
+		<rect x="36" y="110" width="120" height="44" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="50" y="137" class="fill-indigo-800 text-[13px] font-semibold">envoy</text>
+		<rect x="230" y="110" width="140" height="92" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="246" y="136" class="fill-slate-900 font-mono text-[13px] font-semibold">app</text>
+		<text x="246" y="158" class="fill-slate-500 text-[12px]">127.0.0.1:8080</text>
+		<text x="246" y="178" class="fill-slate-500 text-[12px]">writes logs/*.log</text>
+		<line x1="156" y1="132" x2="226" y2="132" stroke-width="1.5" marker-end="url(#sc-arrow)" class="stroke-slate-400"></line>
+		<text x="191" y="124" text-anchor="middle" class="fill-slate-500 text-[11px]">loopback</text>
+		<rect x="440" y="110" width="124" height="40" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="454" y="135" class="fill-indigo-800 text-[13px] font-semibold">pgbouncer</text>
+		<rect x="440" y="162" width="124" height="40" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="454" y="187" class="fill-indigo-800 text-[13px] font-semibold">fluent-bit</text>
+		<line x1="370" y1="130" x2="436" y2="130" stroke-width="1.5" marker-end="url(#sc-arrow)" class="stroke-slate-400"></line>
+		<text x="403" y="122" text-anchor="middle" class="fill-slate-500 text-[11px]">:6432</text>
+		<line x1="370" y1="182" x2="436" y2="182" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#sc-arrow)" class="stroke-slate-400"></line>
+		<text x="403" y="174" text-anchor="middle" class="fill-slate-500 text-[11px]">tails</text>
+		<rect x="700" y="96" width="180" height="50" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="716" y="126" class="fill-slate-900 font-mono text-[13px] font-semibold">postgres</text>
+		<rect x="700" y="166" width="180" height="50" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="716" y="196" class="fill-slate-900 font-mono text-[13px] font-semibold">s3-compatible</text>
+		<line x1="564" y1="130" x2="696" y2="122" stroke-width="1.5" marker-end="url(#sc-arrow)" class="stroke-slate-400"></line>
+		<text x="630" y="116" text-anchor="middle" class="fill-slate-500 text-[12px]">TLS :5432</text>
+		<line x1="564" y1="182" x2="696" y2="190" stroke-width="1.5" marker-end="url(#sc-arrow)" class="stroke-slate-400"></line>
+		<text x="630" y="206" text-anchor="middle" class="fill-slate-500 text-[12px]">TLS :8333</text>
+	</svg>
+}
+
+templ sidecarsPatterns() {
+	@docLead() {
+		A helper container in the app's pod can face inward, outward, or translate what the app produces. The names come from the design-patterns literature on containers: the sidecar, the ambassador and the adapter. In Breadboard all three are sidecar entries in @docCodeWord("experiment.yaml")&#46;
+	}
+	@docFigure("Sidecar: TLS comes in, plain HTTP goes to the app. Ambassador: the app calls loopback, TLS goes out. Adapter: the app writes files, the sidecar ships them.") {
+		@sidecarsPatternsDiagram()
+	}
+	@docH2("pod", "One pod, several containers")
+	@docP() {
+		Containers in one pod share a network namespace and a directory. Sharing the network is what makes the patterns work: a socket on 127.0.0.1 is reachable by the app and its sidecars, and by nothing else. Sharing a directory, @docCodeWord("/var/run/bb"), lets them exchange files and Unix sockets. Breadboard keeps plaintext on that loopback only; every connection between containers is TLS with full verification.
+	}
+	@docH2("sidecar", "Sidecar: TLS termination")
+	@docP() {
+		The narrowest meaning of sidecar is a helper that extends the app in place. An Envoy sidecar with @docCodeWord("inbound") listens on a TLS port with the app's certificate and forwards each request to the app on loopback. The app has no TLS code; it binds the address Breadboard gives it:
+	}
+	@docCode("cmd/plain-web/main.go", sidecarsListenCode)
+	@docP() {
+		Binding loopback matters as much as the sidecar. If the app listened on every address, any container could reach its plaintext port and skip the sidecar. The sidecar/envoy-tls-termination starter's client tries exactly that and is refused.
+	}
+	@docH2("ambassador", "Ambassador: calls going out")
+	@docP() {
+		An ambassador represents remote services to the app. An Envoy sidecar with @docCodeWord("outbound") listens on 127.0.0.1 for each target and does the hard parts of the call: resolving every replica, choosing one, opening verified TLS, timing out, retrying. The app sends plain HTTP to its sidecar:
+	}
+	@docCode("cmd/ambassador-caller/main.go", sidecarsAmbassadorCode)
+	@docP() {
+		The URL is the only thing the app knows. Change the balancing policy or the retry count in @docCodeWord("experiment.yaml") and the next @docCodeWord("bb up") applies it, with no code change and no rebuild of the app.
+	}
+	@docH2("adapter", "Adapter: logs as files")
+	@docP() {
+		An adapter translates what the app produces into what the rest of the system expects. The app writes JSON lines to a file in the shared directory; a Fluent Bit sidecar tails it and uploads the lines to a bucket. Where logs go can change without touching the app.
+	}
+	@docCode("cmd/log-writer/main.go", sidecarsAdapterCode)
+	@docP() {
+		Fluent Bit's @extLink(fluentBitDocs+"pipeline/inputs/tail") {
+			tail input
+		} remembers how far it has read in a small database file, so a restarted sidecar does not ship lines twice and a stopped one catches up: the file is the buffer. Its @extLink(fluentBitDocs+"pipeline/outputs/s3") {
+			S3 output
+		} writes newline-delimited JSON objects.
+	}
+	@docH2("cost", "What it costs")
+	@docList(
+		"One more container per app instance: memory, CPU and start-up time. Breadboard caps an Envoy sidecar at 128m and PgBouncer or Fluent Bit at 64m.",
+		"One more hop on every call, usually well under a millisecond on loopback, but not zero.",
+		"One more thing that can fail: with its sidecar stopped, an app that depends on it is cut off. The starters' Break this sections show it.",
+		"Configuration moves from code to the platform. That is the point, and it is also where mistakes now live.",
+	)
+	@docTerminal("bb starter sidecar/envoy-tls-termination", "bb starter sidecar/envoy-ambassador", "bb starter sidecar/log-shipper", "bb up")
+}
+
+templ sidecarsPatternsDiagram() {
+	<svg viewBox="0 0 900 190" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Three pods: a sidecar terminating TLS in front of an app, an ambassador taking the app's loopback calls out over TLS, an adapter shipping the app's log files">
+		<defs>
+			<marker id="sp-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		for i, label := range []string{"sidecar", "ambassador", "adapter"} {
+			<rect x={ itoa(20 + i*300) } y="40" width="260" height="110" rx="12" stroke-dasharray="5 4" class="fill-white stroke-indigo-400"></rect>
+			<text x={ itoa(36 + i*300) } y="30" class="fill-indigo-800 font-mono text-[13px] font-semibold">{ label }</text>
+		}
+		<rect x="36" y="70" width="90" height="44" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="50" y="97" class="fill-indigo-800 text-[13px]">envoy</text>
+		<rect x="160" y="70" width="104" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="174" y="97" class="fill-slate-900 text-[13px]">app</text>
+		<line x1="126" y1="92" x2="156" y2="92" stroke-width="1.5" marker-end="url(#sp-arrow)" class="stroke-slate-400"></line>
+		<text x="36" y="140" class="fill-slate-500 text-[12px]">TLS in → plain HTTP on loopback</text>
+		<rect x="336" y="70" width="104" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="350" y="97" class="fill-slate-900 text-[13px]">app</text>
+		<rect x="474" y="70" width="90" height="44" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="488" y="97" class="fill-indigo-800 text-[13px]">envoy</text>
+		<line x1="440" y1="92" x2="470" y2="92" stroke-width="1.5" marker-end="url(#sp-arrow)" class="stroke-slate-400"></line>
+		<text x="336" y="140" class="fill-slate-500 text-[12px]">127.0.0.1:9001 → TLS to replicas</text>
+		<rect x="636" y="70" width="104" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="650" y="97" class="fill-slate-900 text-[13px]">app</text>
+		<rect x="774" y="70" width="90" height="44" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="788" y="97" class="fill-indigo-800 text-[13px]">fluent-bit</text>
+		<line x1="740" y1="92" x2="770" y2="92" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#sp-arrow)" class="stroke-slate-400"></line>
+		<text x="636" y="140" class="fill-slate-500 text-[12px]">app.log → objects in a bucket</text>
+	</svg>
+}
+
+templ sidecarsTransparent() {
+	@docLead() {
+		An ambassador needs the app to call 127.0.0.1. A transparent proxy needs nothing: the app calls real names, and the network itself sends every connection through the sidecar. Once all traffic passes one place, that place can refuse some of it.
+	}
+	@docFigure("The rules send the app's connection to Envoy. A declared destination leaves as TLS; an undeclared one is closed by Envoy and never leaves the pod.") {
+		@sidecarsTransparentDiagram()
+	}
+	@docH2("capture", "Capturing traffic")
+	@docP() {
+		Transparent mode is opt-in per Envoy sidecar. Before anything else in the pod starts, a one-shot init container installs iptables rules in the pod's network namespace. It is the only container that gets @docCodeWord("NET_ADMIN"); the app and Envoy never do, and it exits once the rules are in place.
+	}
+	@docCode("netinit", sidecarsRulesCode)
+	@docP() {
+		The exceptions are what keep it working: Envoy runs as the reserved uid 1337 so its own connections are not sent back to itself (bb up refuses an app image that starts as that uid, and the app cannot switch to it), and loopback traffic between the app and its sidecars is left alone. Docker's DNS keeps working. With Envoy stopped, the rules still redirect to 15001, where nothing listens, so the app cannot get around the sidecar.
+	}
+	@docH2("original", "Where was it going?")
+	@docP() {
+		A redirected connection arrives at Envoy with Envoy's own address as its destination. Linux remembers the original one, and Envoy's @extLink(envoyDocs+"configuration/listeners/listener_filters/original_dst_filter") {
+			original_dst listener filter
+		} reads it back through the @docCodeWord("SO_ORIGINAL_DST") socket option. From then on Envoy knows the IP and port the app asked for, and can route on them, and on the HTTP @docCodeWord("Host") header when the request is plain HTTP.
+	}
+	@docH2("declared", "Declared services get TLS")
+	@docP() {
+		The destinations a sidecar may reach are its @docCodeWord("outbound") list. A plain HTTP request to a declared service's TLS port, with that service's name in @docCodeWord("Host"), is sent on over TLS, verified against the lab CA and balanced across the service's replicas, exactly as an ambassador would. The app's code stays naive:
+	}
+	@docCode("cmd/transparent-caller/main.go", sidecarsTransparentCode)
+	@docCode("experiment.yaml", sidecarsTransparentSpec)
+	@docH2("egress", "Egress allow and deny")
+	@docList(
+		"egress: allow, the default for transparent: true, passes every undeclared connection through untouched to where the app sent it. Traffic is captured and observable, not restricted.",
+		"egress: deny refuses what is not declared, by address and port: every container in a lab with a transparent pod has a fixed address. A connection to an undeclared address is closed before any HTTP (the app sees EOF, Envoy counts it in egress_denied.rbac.denied); a plain HTTP request that reaches a declared address with another name in Host gets 403 from Envoy; connections to the infra services in the app's uses (its Postgres, its Kafka) still pass, as the app's own TLS.",
+	)
+	@docP() {
+		Deny is the root of service-to-service access control: the list of what a service may call becomes configuration, enforced next to the caller, the same idea service meshes build on. In the sidecar/envoy-transparent starter, adding the stranger to the caller's outbound list is what turns its closed connection into a 200.
+	}
+	@docCallout("Where this stops") {
+		Breadboard's transparent mode identifies services by name and port inside one lab, and trusts the app not to change the pod's rules (it has no NET_ADMIN). Mutual TLS between sidecars, identities in certificates and central policy are what a full service mesh adds; see security.md in the design docs for the exact rules.
+	}
+	@docH2("versus", "Transparent or ambassador")
+	@docList(
+		"Ambassador: the app knows its sidecar and calls 127.0.0.1. No privileges, easy to reason about, but every client must be written for it.",
+		"Transparent: the app calls real names. It needs iptables and a privileged init container, but it covers code you cannot change and lets the sidecar see, and refuse, everything.",
+		"Both use the same Envoy clusters underneath, so balancing, retries and outlier detection behave the same.",
+	)
+	@docTerminal("bb starter sidecar/envoy-transparent", "bb up", "bb logs transparent-caller -f", "docker logs bb-lab-transparent-caller-netinit-1")
+}
+
+templ sidecarsTransparentDiagram() {
+	<svg viewBox="0 0 900 220" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="The app's plain HTTP call is redirected by iptables to Envoy on 15001; Envoy sends the declared call on over TLS and closes the undeclared one">
+		<defs>
+			<marker id="st-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<rect x="20" y="30" width="480" height="170" rx="12" stroke-dasharray="5 4" class="fill-white stroke-indigo-400"></rect>
+		<text x="36" y="190" class="fill-indigo-800 font-mono text-[12px] font-semibold">transparent-caller pod</text>
+		<rect x="36" y="56" width="150" height="64" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="50" y="82" class="fill-slate-900 font-mono text-[13px] font-semibold">app</text>
+		<text x="50" y="104" class="fill-slate-500 text-[11px]">GET http://…:8443/</text>
+		<rect x="214" y="56" width="90" height="64" rx="8" class="fill-amber-50 stroke-amber-200"></rect>
+		<text x="226" y="82" class="fill-amber-800 text-[13px] font-semibold">iptables</text>
+		<text x="226" y="104" class="fill-amber-800 text-[11px]">REDIRECT</text>
+		<rect x="332" y="56" width="152" height="64" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="346" y="82" class="fill-indigo-800 text-[13px] font-semibold">envoy :15001</text>
+		<text x="346" y="104" class="fill-indigo-800 text-[11px]">original_dst + Host</text>
+		<line x1="186" y1="88" x2="210" y2="88" stroke-width="1.5" marker-end="url(#st-arrow)" class="stroke-slate-400"></line>
+		<line x1="304" y1="88" x2="328" y2="88" stroke-width="1.5" marker-end="url(#st-arrow)" class="stroke-slate-400"></line>
+		<rect x="660" y="40" width="220" height="56" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="676" y="64" class="fill-slate-900 font-mono text-[13px] font-semibold">transparent-backend</text>
+		<text x="676" y="84" class="fill-slate-500 text-[11px]">declared in outbound</text>
+		<line x1="484" y1="76" x2="656" y2="68" stroke-width="1.5" marker-end="url(#st-arrow)" class="stroke-slate-400"></line>
+		<text x="570" y="62" text-anchor="middle" class="fill-slate-500 text-[12px]">TLS, verified</text>
+		<rect x="660" y="130" width="220" height="56" rx="10" stroke-dasharray="5 4" class="fill-white stroke-slate-300"></rect>
+		<text x="676" y="154" class="fill-slate-500 font-mono text-[13px] font-semibold">transparent-stranger</text>
+		<text x="676" y="174" class="fill-slate-400 text-[11px]">not declared</text>
+		<path d="M408 120 C 408 160, 470 160, 520 158" fill="none" stroke-width="1.5" marker-end="url(#st-arrow)" class="stroke-red-300"></path>
+		<text x="526" y="150" class="fill-red-700 text-[12px] font-semibold">closed</text>
+		<text x="526" y="168" class="fill-slate-500 text-[11px]">egress: deny</text>
+	</svg>
+}
+
+templ sidecarsLoadBalancing() {
+	@docLead() {
+		With replicas, one name stands for several instances. The caller's Envoy sidecar turns that name into a pool of hosts, spreads calls over them, retries the ones that fail and stops sending to a replica that keeps failing.
+	}
+	@docFigure("The caller's sidecar balances across three replicas; after consecutive errors it ejects replica 3 for a while.") {
+		@sidecarsLBDiagram()
+	}
+	@docH2("replicas", "Replicas behind one name")
+	@docP() {
+		@docCodeWord("replicas: 3") runs three instances, each with its own pod, its own name, such as @docCodeWord("api-1.bb.internal"), and a certificate valid for that name and the shared one. The shared name, @docCodeWord("api.bb.internal"), resolves to all three addresses.
+	}
+	@docP() {
+		The outbound cluster is @extLink(envoyDocs+"intro/arch_overview/upstream/service_discovery") {
+			strict DNS
+		}: every address the name resolves to is a host, and Envoy re-resolves it every 5 seconds. Scale from 3 to 5 replicas and the new ones receive traffic within seconds, without touching the caller.
+	}
+	@docH2("policies", "Balancing policies")
+	@docCode("experiment.yaml", sidecarsOutboundSpec)
+	@docList(
+		"round_robin (default): each host in turn. Even spread when requests cost about the same.",
+		"least_request: picks the host with fewer active requests among a random few. Better when some requests are slow.",
+		"random: no state at all; fine with many callers.",
+		"ring_hash and maglev: consistent hashing. Breadboard hashes the caller's source address, and since the app is its sidecar's only client, one caller sticks to one replica: the basis of session affinity and of caches that want the same key on the same host.",
+	)
+	@docH2("retries", "Retries and timeouts")
+	@docP() {
+		@docCodeWord("retries") are retried on connection failures, resets, refused streams and any 5xx. A retry usually lands on another host, so one dead replica costs the caller nothing but a little latency. Retries multiply load on a struggling service, which is why Envoy also caps the retries in flight per cluster.
+	}
+	@docP() {
+		@docCodeWord("timeout") bounds the whole call, retries included. When it runs out Envoy answers 504 and does not retry: a slow replica uses up the time a retry would have needed. The sidecar/envoy-ambassador starter's slow-replica exercise shows it.
+	}
+	@docH2("outliers", "Ejecting a failing replica")
+	@docP() {
+		@extLink(envoyDocs+"intro/arch_overview/upstream/outlier") {
+			Outlier detection
+		} counts errors per host. With @docCodeWord("consecutive_5xx: 3") a host that fails three requests in a row is ejected: the balancer skips it. Connection failures count as 5xx too. After the ejection time it is let back in, checked on Envoy's analysis sweep every @docCodeWord("interval"), 10 seconds by default; if it fails again it is ejected for longer, the base time multiplied by how many times in a row it was ejected, up to 300 seconds. That is the circuit-breaker pattern per host: ejected is open, back on probation is half-open.
+	}
+	@docCallout("max_ejection_percent") {
+		Envoy never ejects more than max_ejection_percent of a cluster, 10% by default. One host of three is 33%, so with three replicas nothing is ejected, and Envoy counts each refused ejection as an overflow. Set it in the outbound's outlier block; the sidecar/circuit-breaking starter uses 50, so one host of three may be ejected but not two.
+	}
+	@docCode("experiment.yaml", sidecarsOutlierCode)
+	@docP() {
+		Two more safety nets sit beside it. If more than half of a cluster's hosts are unhealthy, Envoy's @extLink(envoyDocs+"intro/arch_overview/upstream/load_balancing/panic_threshold") {
+			panic threshold
+		} makes it ignore health and balance across all of them. Envoy's @extLink(envoyDocs+"intro/arch_overview/upstream/circuit_breaking") {
+			circuit breakers
+		} are limits for a whole cluster (connections, pending requests, requests, retries) that fail calls fast when it is overloaded.
+	}
+	@docH2("watch", "Watching it happen")
+	@docP() {
+		The caller's Envoy tab in @docCodeWord("bb serve") reads the sidecar's admin API: every host with the replica it belongs to, its requests, errors and health flags, and the cluster's retries, active and overflowed ejections. MCP clients get the same from the @docCodeWord("envoy_clusters") tool.
+	}
+	@docTerminal("bb starter sidecar/circuit-breaking", "bb up", "docker exec bb-lab-breaker-backend-3-1 wget -qO- --post-data= http://127.0.0.1:8080/fail", "bb logs breaker-caller -f")
+}
+
+templ sidecarsLBDiagram() {
+	<svg viewBox="0 0 900 230" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="breaker-caller's Envoy sidecar sends calls to breaker-backend-1 and -2 over TLS; breaker-backend-3 is ejected">
+		<defs>
+			<marker id="sl-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<rect x="20" y="60" width="320" height="110" rx="12" stroke-dasharray="5 4" class="fill-white stroke-indigo-400"></rect>
+		<text x="36" y="160" class="fill-indigo-800 font-mono text-[12px] font-semibold">breaker-caller pod</text>
+		<rect x="36" y="80" width="110" height="50" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="50" y="110" class="fill-slate-900 font-mono text-[13px] font-semibold">app</text>
+		<rect x="190" y="80" width="134" height="50" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="204" y="104" class="fill-indigo-800 text-[13px] font-semibold">envoy</text>
+		<text x="204" y="121" class="fill-indigo-800 text-[11px]">127.0.0.1:9001</text>
+		<line x1="146" y1="105" x2="186" y2="105" stroke-width="1.5" marker-end="url(#sl-arrow)" class="stroke-slate-400"></line>
+		for i, y := range []int{20, 90, 160} {
+			if i < 2 {
+				<rect x="620" y={ itoa(y) } width="250" height="50" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+			} else {
+				<rect x="620" y={ itoa(y) } width="250" height="50" rx="10" stroke-dasharray="5 4" class="fill-white stroke-red-300"></rect>
+			}
+			<text x="636" y={ itoa(y + 30) } class="fill-slate-900 font-mono text-[13px] font-semibold">breaker-backend-{ itoa(i + 1) }</text>
+		}
+		<line x1="324" y1="98" x2="616" y2="48" stroke-width="1.5" marker-end="url(#sl-arrow)" class="stroke-slate-400"></line>
+		<line x1="324" y1="108" x2="616" y2="115" stroke-width="1.5" marker-end="url(#sl-arrow)" class="stroke-slate-400"></line>
+		<text x="470" y="62" text-anchor="middle" class="fill-slate-500 text-[12px]">TLS, round robin</text>
+		<text x="800" y="190" text-anchor="end" class="fill-red-700 text-[12px] font-semibold">ejected for 30 s</text>
+		<text x="470" y="170" text-anchor="middle" class="fill-slate-500 text-[12px]">3 consecutive 5xx → skipped</text>
+	</svg>
+}
+
+templ sidecarsPooling() {
+	@docLead() {
+		PgBouncer sits between the app and Postgres and lends a few real database connections to many client connections. As a sidecar it lives in the app's pod, so the app connects to it on loopback.
+	}
+	@docFigure("50 client connections from the app reach PgBouncer on loopback; it keeps at most 10 TLS connections to Postgres.") {
+		@sidecarsPoolDiagram()
+	}
+	@docH2("why", "Why pool")
+	@docP() {
+		Every Postgres connection is a server process with its own memory, and @docCodeWord("max_connections") is 100 by default. Apps open connections generously (a pool per instance, a connection per worker), most of them idle most of the time. Without a pooler, a handful of instances can exhaust the database; @docCodeWord("sorry, too many clients already") is the result.
+	}
+	@docH2("wiring", "How the sidecar is wired")
+	@docCode("experiment.yaml", sidecarsPoolSpec)
+	@docList(
+		"PgBouncer listens on 127.0.0.1:6432 and Breadboard rewrites the app's DATABASE_URL, PGHOST, PGPORT and PGSSLMODE to point there, with sslmode=disable: that hop never leaves the pod.",
+		"It logs in to Postgres as the app's own role, over TLS verified against the lab CA (server_tls_sslmode = verify-full).",
+		"The password reaches it through its environment; its generated pgbouncer.ini has none.",
+	)
+	@docCode("cmd/pool-client/main.go", sidecarsPoolCode)
+	@docH2("modes", "Pool modes")
+	@docP() {
+		The @extLink(pgbouncerDocs+"config.html") {
+			pool mode
+		} decides when a server connection goes back to the pool:
+	}
+	@docList(
+		"session: when the client disconnects. Safe for everything, but a long-lived client pool holds its server connections forever. PgBouncer's own default.",
+		"transaction: when the transaction ends. Breadboard's default, and what makes 50 clients fit in 10 connections.",
+		"statement: after every statement; multi-statement transactions are refused.",
+	)
+	@docP() {
+		Transaction mode has a price: consecutive transactions of one client can run on different server connections, so session state does not carry over. SET, LISTEN, session-level advisory locks, WITH HOLD cursors and SQL PREPARE do not work as expected (see PgBouncer's @extLink(pgbouncerDocs+"features.html") {
+			feature map
+		}). Protocol-level prepared statements, which pgx uses by default, do work: PgBouncer tracks them, up to @docCodeWord("max_prepared_statements"), 200 by default.
+	}
+	@docH2("sizing", "Sizing the pool")
+	@docList(
+		"pool_size (Breadboard default 10) caps server connections per database and user. More helps until Postgres's CPU or locks are the bottleneck; beyond that it only adds contention.",
+		"max_client_conn is 200 in Breadboard's config: how many clients PgBouncer accepts in total.",
+		"A client that waits longer than query_wait_timeout (120 s) for a server connection is dropped with an error. In session mode that is what happens to the clients that never get one.",
+	)
+	@docH2("watch", "Watching the pool")
+	@docP() {
+		The app's PgBouncer pools tab in @docCodeWord("bb serve") runs SHOW POOLS and SHOW STATS on PgBouncer's admin console: clients active and waiting, server connections active, idle and used, and how long the oldest client has waited. MCP clients use @docCodeWord("pgbouncer_pools")&#46; Postgres sees only PgBouncer's connections: @docCodeWord("pg_stat_activity") counts at most pool_size for the app's role.
+	}
+	@docTerminal("bb starter sidecar/pgbouncer-pool", "bb up", "bb logs pool-client -f")
+}
+
+templ sidecarsPoolDiagram() {
+	<svg viewBox="0 0 900 200" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Fifty client connections from the app go to PgBouncer on loopback; PgBouncer keeps at most ten TLS connections to Postgres">
+		<defs>
+			<marker id="sb-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<rect x="20" y="30" width="470" height="140" rx="12" stroke-dasharray="5 4" class="fill-white stroke-indigo-400"></rect>
+		<text x="36" y="160" class="fill-indigo-800 font-mono text-[12px] font-semibold">pool-client pod</text>
+		<rect x="36" y="50" width="160" height="84" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="50" y="76" class="fill-slate-900 font-mono text-[13px] font-semibold">app</text>
+		for i := range 10 {
+			<rect x={ itoa(50 + i*14) } y="92" width="9" height="24" rx="2" class="fill-slate-300"></rect>
+		}
+		<text x="50" y="130" class="fill-slate-500 text-[11px]">50 client connections</text>
+		<rect x="300" y="50" width="174" height="84" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="314" y="76" class="fill-indigo-800 text-[13px] font-semibold">pgbouncer :6432</text>
+		<text x="314" y="98" class="fill-indigo-800 text-[11px]">transaction mode</text>
+		<text x="314" y="116" class="fill-indigo-800 text-[11px]">waiting clients queue here</text>
+		<line x1="196" y1="92" x2="296" y2="92" stroke-width="6" marker-end="url(#sb-arrow)" class="stroke-slate-300"></line>
+		<text x="246" y="82" text-anchor="middle" class="fill-slate-500 text-[11px]">loopback</text>
+		<rect x="680" y="50" width="200" height="84" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="696" y="80" class="fill-slate-900 font-mono text-[13px] font-semibold">postgres</text>
+		<text x="696" y="104" class="fill-slate-500 text-[11px]">sees ≤ 10 connections</text>
+		<line x1="474" y1="92" x2="676" y2="92" stroke-width="2" marker-end="url(#sb-arrow)" class="stroke-slate-400"></line>
+		<text x="575" y="82" text-anchor="middle" class="fill-slate-500 text-[12px]">10 × TLS :5432</text>
+	</svg>
+}
+
+templ sidecarsInBreadboard() {
+	@docLead() {
+		How Breadboard runs sidecars: the pod, the order things start in, what the app receives, and how to take over a generated config.
+	}
+	@docH2("declare", "Declaring a sidecar")
+	@docP() {
+		Sidecars are a list under an app in @docCodeWord("experiment.yaml")&#46; Each entry has a @docCodeWord("type"), one of envoy, pgbouncer or fluent-bit, and optionally a @docCodeWord("name"), which defaults to the type. The keys allowed depend on the type; @docCodeWord("bb up") refuses a file with mistakes and lists each one with its YAML path.
+	}
+	@docCode("experiment.yaml", sidecarsSpecCode)
+	@docH2("pod", "The pod")
+	@docList(
+		"A small holder container (alpine, sleep, 16m) owns the pod's network: its addresses, DNS names and published ports. The app, each sidecar and transparent mode's init container join it with network_mode: service.",
+		"Start order: holder, then the init container (transparent mode only, must finish successfully), then the sidecars (must be healthy), then the app. The app never sends a packet before its sidecars are ready.",
+		"Every container in the pod mounts /var/run/bb (BB_SHARED_DIR) and presents the app's certificate.",
+		"With replicas, each instance is its own pod: api-1 with api-1-envoy, api-2 with api-2-envoy, and so on.",
+		"The app keeps its name, so bb logs api still works; a sidecar's container is named after the instance and the sidecar, as in bb logs api-envoy.",
+	)
+	@docH2("env", "What your app receives")
+	@docList(
+		"Every pod: BB_SHARED_DIR=/var/run/bb.",
+		"envoy with inbound: BB_LISTEN_ADDR=127.0.0.1:<app_port>, the address to bind.",
+		"envoy with outbound: <TARGET>_URL=http://127.0.0.1:<port> per target, the name upper-cased with - as _ (ambassador-backend gives AMBASSADOR_BACKEND_URL).",
+		"pgbouncer: the pooled service's DATABASE_URL, PGHOST, PGPORT and PGSSLMODE now point at 127.0.0.1:<port> with sslmode=disable; user, password and database are unchanged.",
+		"fluent-bit: BB_LOG_DIR=/var/run/bb/logs. Fluent Bit ships every *.log file in it.",
+	)
+	@docH2("ports", "Ports and images")
+	@docList(
+		"envoy: envoyproxy/envoy:v1.40.2, 128m. Admin API on 127.0.0.1:15000; transparent mode uses 15001 (outbound) and 15006 (inbound). Runs as uid 101, or as the reserved uid 1337 in a transparent pod.",
+		"pgbouncer: edoburu/pgbouncer:v1.26.1-p0, 64m. Listens on 127.0.0.1:6432 by default.",
+		"fluent-bit: fluent/fluent-bit:5.2.0-debug, 64m. Health server on 127.0.0.1:2020.",
+		"Every sidecar has a health check; a pod's app starts only once they pass. Two sidecars cannot claim one port: validation refuses it.",
+	)
+	@docH2("own", "Owning the generated config")
+	@docP() {
+		Breadboard writes each sidecar's config into @docCodeWord(".bb/runtime/config/<app>-<sidecar>/")&#46; When the spec has no knob for what you need, copy the generated file next to @docCodeWord("experiment.yaml"), edit it, and point an Envoy sidecar at it with @docCodeWord("file: ./my-envoy.yaml")&#46; It is copied in at every @docCodeWord("bb up"), so editing it recreates the sidecar. From then on the file wins: @docCodeWord("outbound") changes in the spec still set the app's variables but no longer change Envoy. Keep the admin listener on 127.0.0.1:15000, and with transparent mode the listeners on 15001 and 15006.
+	}
+	@docH2("see", "Seeing sidecars")
+	@docList(
+		"bb status lists each instance with its sidecars under it, and app-to-app edges with the Envoy sidecar that carries them.",
+		"bb logs <app>-envoy shows Envoy's access log; bb logs <app>-pgbouncer and bb logs <app>-fluent-bit their own logs.",
+		"In bb serve, an app's page has a card per sidecar (ports, variables it sets or rewrites, settings) and the Envoy and PgBouncer pools tabs.",
+		"MCP: status and service_details include sidecars and replicas; envoy_clusters and pgbouncer_pools read the running sidecars.",
+	)
+	@docTerminal("bb status", "bb logs api-envoy -f")
+}

@@ -1,0 +1,40 @@
+# sidecar/circuit-breaking
+
+Stop sending traffic to a failing replica, then try it again later, without a line of resilience code. The caller's [Envoy](https://www.envoyproxy.io/docs/envoy/v1.40.0/intro/arch_overview/upstream/outlier) sidecar does it with **outlier detection**.
+
+- `cmd/breaker-backend`: three replicas behind Envoy sidecars that terminate TLS. `POST /fail` makes a replica answer 503 to everything; `POST /recover` heals it.
+- `cmd/breaker-caller`: calls `BREAKER_BACKEND_URL` (its sidecar on `127.0.0.1:9001`) four times a second and logs, every 5 seconds, which replicas answered and which failed.
+
+## How it works
+
+The caller's outbound entry sets `retries: 0` (so you see every failure; retries would hide them) and:
+
+```yaml
+outlier: {consecutive_5xx: 3, ejection: 30s, max_ejection_percent: 50, interval: 5s}
+```
+
+- Envoy counts errors per host. After **3 consecutive 5xx** (connection failures and resets count too) it **ejects** the host at once: the load balancer skips it.
+- An ejected host comes back after the **ejection time** (30 s), checked on Envoy's analysis sweep every `interval` (5 s here, 10 s by default). If it fails again it is ejected for longer: the base time multiplied by how many times in a row it has been ejected, up to 300 s.
+- Envoy never ejects more than `max_ejection_percent` of a cluster. Its default is **10%**, and ejecting one host of three would take 33% out, so with three replicas and the default, Envoy ejects nothing: it counts each refused ejection instead. That limit is a safety valve (a bad config or a real outage should not eject the whole cluster), and it is easy to forget on small clusters. This starter sets it to 50: one host of three may go, two may not.
+
+That is the circuit-breaker pattern applied per host: ejected is *open*, coming back after the ejection time is *half-open* (one more streak of failures re-opens it), healthy is *closed*. Envoy also has settings it calls [circuit breakers](https://www.envoyproxy.io/docs/envoy/v1.40.0/intro/arch_overview/upstream/circuit_breaking): limits on connections, pending requests and retries for a whole cluster, which fail fast when it is overloaded.
+
+```sh
+bb up
+bb logs breaker-caller -f
+```
+
+## Try this
+
+- **Make replica 3 flaky.** `docker exec bb-{{.Experiment}}-breaker-backend-3-1 wget -qO- --post-data= http://127.0.0.1:8080/fail`. The caller logs `failed breaker-backend-3=…` for a moment; within three failures replica 3 is ejected and only `-1` and `-2` answer. In `bb serve`, the caller's **Envoy** tab counts it under *Ejected now* and shows `failed_outlier_check` in the host's health. MCP clients see the same in `envoy_clusters` with `service: breaker-caller`. About 30 seconds later replica 3 gets traffic again, fails three times, and is ejected for 60 seconds.
+- **Heal it.** `docker exec bb-{{.Experiment}}-breaker-backend-3-1 wget -qO- --post-data= http://127.0.0.1:8080/recover`. After its current ejection ends, replica 3 answers again and stays.
+
+## Break this
+
+- **Put Envoy's default limit back.** Set `max_ejection_percent: 10` on the caller's outbound entry, run `bb up` (the caller's sidecar restarts with the new config), and fail replica 3 again. Now it keeps failing: the caller logs `failed breaker-backend-3=…` every 5 seconds. The Envoy tab shows why under *Ejections held back by max_ejection_percent*: each ejection Envoy wanted to make and refused (`ejections_overflow` in `envoy_clusters`), while *Ejected now* stays at 0. Ten percent of three hosts is less than one host. Set it back to 50 when you are done.
+- **Hide the failures with retries.** Set `retries: 2` on the outbound entry, run `bb up`, and fail replica 3 again. The caller sees no failures at all: each 503 is retried on another replica. Retries and ejection work together, but retries alone also multiply the load on a struggling service.
+- **Fail two of three.** Fail replicas 2 and 3 with the limit at 50%. Envoy ejects one; the other keeps failing, because ejecting both would take two thirds of the cluster out. Outlier detection protects you from a bad host, not from a bad service.
+
+## Go further: own the Envoy config
+
+The spec covers the common outlier knobs; Envoy has many more (`always_eject_one_host`, `success_rate_*`, `failure_percentage_*`, `max_ejection_time`). To use them, make the generated config yours. Copy it next to `experiment.yaml`: `cp .bb/runtime/config/breaker-caller-envoy/envoy.yaml breaker-envoy.yaml`, edit `outlier_detection` in the copy (for example, set `max_ejection_percent: 10` and add `always_eject_one_host: true`), then add `file: ./breaker-envoy.yaml` to the caller's envoy sidecar in `experiment.yaml` and run `bb up`. From then on, edits to `outbound` in `experiment.yaml` no longer change Envoy; your file does. Remove `file:` to go back to the generated config.

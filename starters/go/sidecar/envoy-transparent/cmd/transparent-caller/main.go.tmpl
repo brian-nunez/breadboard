@@ -1,0 +1,53 @@
+// Command transparent-caller calls services by their real names in plain HTTP,
+// with no proxy settings and no localhost URLs. Its Envoy sidecar runs in
+// transparent mode: iptables rules in the pod send every outgoing connection
+// to Envoy, which upgrades calls to declared services to verified TLS and
+// refuses everything else (egress: deny): a connection to an undeclared
+// address is closed before any HTTP is exchanged, and a request with an
+// undeclared Host header sent to a declared address gets 403 from Envoy.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	// BB_FQDN is transparent-caller.<domain>; the other services share the domain.
+	_, domain, _ := strings.Cut(os.Getenv("BB_FQDN"), ".")
+	client := &http.Client{Timeout: 3 * time.Second}
+	for {
+		// Declared in the sidecar's outbound list: allowed, and TLS on the wire.
+		call(client, "declared", fmt.Sprintf("http://transparent-backend.%s:8443/", domain), "")
+		// Not declared: the sidecar closes the connection; nothing leaves the pod.
+		call(client, "undeclared", fmt.Sprintf("http://transparent-stranger.%s:8443/", domain), "")
+		// A declared address, but an undeclared name in Host: Envoy routes
+		// plain HTTP by Host, so it answers 403 itself.
+		call(client, "wrong-host", fmt.Sprintf("http://transparent-backend.%s:8443/", domain), fmt.Sprintf("transparent-stranger.%s:8443", domain))
+		time.Sleep(3 * time.Second)
+	}
+}
+
+func call(client *http.Client, kind, url, host string) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		log.Printf("%s %s: %v", kind, url, err)
+		return
+	}
+	if host != "" {
+		req.Host = host
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("%s %s: refused: %v", kind, url, err)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("%s %s: %s: %s", kind, url, resp.Status, strings.TrimSpace(string(body)))
+}

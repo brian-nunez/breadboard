@@ -1,0 +1,23 @@
+// Command plain-web is a plain HTTP server with no TLS code at all. Its Envoy
+// sidecar terminates TLS on port 8443 and forwards each request to the address
+// in BB_LISTEN_ADDR, which is on loopback: no other container can reach it.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// r.TLS is nil: the app received plain HTTP from its sidecar on
+		// 127.0.0.1. The sidecar says what the client used in X-Forwarded-Proto.
+		log.Printf("request from %s, tls=%t, client used %s", r.RemoteAddr, r.TLS != nil, r.Header.Get("X-Forwarded-Proto"))
+		fmt.Fprintf(w, "hello from %s\n", os.Getenv("BB_SERVICE"))
+	})
+	addr := os.Getenv("BB_LISTEN_ADDR") // 127.0.0.1:8080
+	log.Printf("plain-web listening on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
+}

@@ -1,0 +1,22 @@
+// Command ambassador-backend is a plain HTTP service with no TLS code. It runs
+// as three replicas; each one's Envoy sidecar terminates TLS on port 8443 and
+// forwards to the loopback address in BB_LISTEN_ADDR.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	// Each replica has its own name: ambassador-backend-1, -2 or -3.
+	name := os.Getenv("BB_SERVICE")
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, name)
+	})
+	addr := os.Getenv("BB_LISTEN_ADDR")
+	log.Printf("%s listening on %s (plain HTTP, loopback only)", name, addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
+}

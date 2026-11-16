@@ -1,0 +1,35 @@
+# sidecar/log-shipper
+
+The **adapter** pattern: the app writes plain log files, and a [Fluent Bit](https://docs.fluentbit.io/manual/) sidecar adapts them to where logs should go, here a bucket on Breadboard's S3 Compatible service.
+
+- `cmd/log-writer`: writes one JSON log line a second to `$BB_LOG_DIR/app.log` with `log/slog`. It has no S3 code and no idea where the lines end up.
+- `cmd/log-reader`: every 15 seconds, lists the `app-logs` bucket with the official [AWS SDK for Go v2](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/service/s3) and prints the newest object's first record.
+
+## How it works
+
+Every app with sidecars gets a directory shared by the app and its sidecars, `/var/run/bb`. The `fluent-bit` sidecar adds `BB_LOG_DIR=/var/run/bb/logs`:
+
+1. log-writer appends JSON lines to `app.log` in that directory.
+2. Fluent Bit's `tail` input follows every `*.log` file there, remembering how far it has read in a small database in the shared directory, so a restart does not ship lines twice.
+3. Its `s3` output buffers the records and uploads them every 10 seconds as newline-delimited JSON, under keys like `log-writer/2026/11/16/120501-<uuid>.jsonl`, over TLS verified against the lab CA.
+
+Fluent Bit does not parse the line here, so each record wraps it: the original JSON line under `log`, the file it came from under `file`, and Fluent Bit's timestamp under `date`. Breadboard creates the `app-logs` bucket because the sidecar names it.
+
+```sh
+bb up
+bb logs log-reader -f
+bb logs log-writer-fluent-bit -f        # Fluent Bit's own log: uploads and errors
+```
+
+In `bb serve`, open the **s3-compatible** service's explorer to browse `app-logs`. MCP clients use the `s3_buckets` tool.
+
+## Try this
+
+- **Read the raw file.** `docker exec bb-{{.Experiment}}-log-writer-1 tail -n 3 /var/run/bb/logs/app.log`, then compare with what log-reader prints: same line, wrapped.
+- **Add a second log file.** Make log-writer also write `audit.log` in `BB_LOG_DIR`. Fluent Bit picks it up within seconds, and the `file` field tells the two apart in the same objects.
+- **Scale the writer.** Set `replicas: 2` on log-writer and `bb up`. Each instance has its own pod, its own Fluent Bit and its own key prefix (`log-writer-1/`, `log-writer-2/`).
+
+## Break this
+
+- **Stop the shipper.** `docker stop bb-{{.Experiment}}-log-writer-fluent-bit-1` for a minute. log-writer keeps writing; no new objects appear. `bb up` restarts the sidecar, and the lines written meanwhile arrive in the next upload: the file is the buffer.
+- **Lose the store.** `docker stop bb-{{.Experiment}}-s3-compatible-1`. Fluent Bit logs failed uploads and log-reader logs errors, but log-writer does not notice at all: delivery is now the sidecar's problem, not the app's. `bb up` brings the store back.

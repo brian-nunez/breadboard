@@ -50,6 +50,17 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 
 `consul/self-registration` is the labeled alternative, with the same Consul API pin. `self-greeter` registers itself (address from `BB_FQDN`, a TLS check, `DeregisterCriticalServiceAfter` as a crash safety net) and deregisters on SIGTERM; like every starter app it runs its built binary as the main process, which is what lets it receive SIGTERM. Its README points to the recommended starter first.
 
+### Sidecar starters
+
+The `sidecar/*` starters teach the patterns of Phase 5's sidecars (see `catalog.md`, "Sidecar catalog"). A starter app declares replicas and sidecars through `starters.App.Replicas` and `starters.App.Sidecars`; a sidecar's reference to an infra service names its catalog type and resolves to the experiment's service of that type, like `uses`. Apps that must name another app derive the lab domain from `BB_FQDN` (everything after the first dot). No starter app contains TLS code: inbound Envoy sidecars terminate TLS, and calls between apps go through Envoy.
+
+- `sidecar/envoy-ambassador` has no library pins (standard library only). `ambassador-backend` runs 3 replicas behind inbound Envoy sidecars and answers with its instance name; `ambassador-caller` calls `AMBASSADOR_BACKEND_URL` (its outbound sidecar, `lb: round_robin`, `timeout: 2s`, `retries: 2`) and logs a tally.
+- `sidecar/envoy-tls-termination` has no library pins. `plain-web` serves plain HTTP on `BB_LISTEN_ADDR` behind an inbound Envoy sidecar; `tls-client` calls it over verified TLS and shows that the app's port is refused from another container.
+- `sidecar/envoy-transparent` has no library pins. `transparent-caller` has a transparent Envoy sidecar with `egress: deny` and one declared outbound target; it calls `transparent-backend` (declared, TLS on the wire) and `transparent-stranger` (undeclared: the caller's sidecar closes the connection, counted in `egress_denied.rbac.denied`) by name in plain HTTP, and `transparent-backend`'s address with an undeclared `Host` (answered 403 by the sidecar's HTTP route).
+- `sidecar/circuit-breaking` has no library pins. `breaker-backend` runs 3 replicas; `POST /fail` and `POST /recover` on a replica's loopback toggle 503s. `breaker-caller`'s outbound sets `retries: 0` and `outlier: {consecutive_5xx: 3, ejection: 30s, max_ejection_percent: 50, interval: 5s}`. Envoy's default `max_ejection_percent` (10%) would block ejecting one host of three; the README has the learner set it back to 10 to watch ejections overflow, and owning the generated config (`envoy.file`) is an optional exercise.
+- `sidecar/pgbouncer-pool` pins `github.com/jackc/pgx/v5 v5.13.0`. `pool-client` opens 50 client connections (`pgxpool`) through a PgBouncer sidecar in transaction mode with `pool_size: 10`, and logs how many server connections Postgres sees.
+- `sidecar/log-shipper` pins `github.com/aws/aws-sdk-go-v2 v1.48.0`, `github.com/aws/aws-sdk-go-v2/config v1.33.18` and `github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10`. `log-writer` writes JSON lines with `log/slog` to `BB_LOG_DIR` and has no S3 code; its Fluent Bit sidecar ships them to the `app-logs` bucket; `log-reader` lists the bucket with the AWS SDK.
+
 ## Starter list
 
 | Id | Phase | Teaches |
@@ -60,3 +71,9 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 | `consul/service-discovery` (recommended) | 2 | Registration via a Consul sidecar, health-checked catalog, resolving services by name. |
 | `consul/self-registration` (alternative) | 2 | The same lookup, with each service registering and deregistering itself through the Consul API: the plumbing the sidecar removes. |
 | `s3/objects-basics` | 2 | Buckets, keys and prefixes, multipart upload, presigned URLs against S3 Compatible storage. |
+| `sidecar/envoy-ambassador` | 5 | The ambassador pattern: client-side load balancing across replicas, retries and timeouts in an Envoy sidecar instead of app code. |
+| `sidecar/envoy-tls-termination` | 5 | TLS termination at an Envoy sidecar, and why the app binds loopback only. |
+| `sidecar/envoy-transparent` | 5 | Transparent proxying (iptables redirect, original destination), egress policy as the root of service ACLs, and how it differs from the ambassador. |
+| `sidecar/circuit-breaking` | 5 | Envoy outlier detection: ejecting a failing replica, `max_ejection_percent`, ejection time and recovery. |
+| `sidecar/pgbouncer-pool` | 5 | Connection pooling with a PgBouncer sidecar: transaction vs session mode, pool size vs client count. |
+| `sidecar/log-shipper` | 5 | The adapter pattern: logs as files in a shared volume, shipped to S3 Compatible storage by a Fluent Bit sidecar. |

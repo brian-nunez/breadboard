@@ -1,0 +1,66 @@
+// Command pool-client runs 50 workers that query Postgres as fast as they can,
+// each through its own client connection. The connections go to a PgBouncer
+// sidecar on 127.0.0.1, which shares a few real Postgres connections between
+// them. Every 5 seconds it logs how many queries ran and how many server
+// connections Postgres sees.
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"sync/atomic"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const workers = 50
+
+func main() {
+	ctx := context.Background()
+	// DATABASE_URL points at PgBouncer: postgres://...@127.0.0.1:6432/app?sslmode=disable.
+	// Plaintext is fine here: it never leaves this app's pod. PgBouncer talks
+	// to Postgres over verified TLS.
+	cfg, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	// One client connection per worker, opened up front.
+	cfg.MaxConns, cfg.MinConns = workers, workers
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var queries atomic.Int64
+	for range workers {
+		go func() {
+			for {
+				// A short transaction. In transaction mode PgBouncer lends this
+				// client a server connection for exactly this long.
+				if _, err := pool.Exec(ctx, "select pg_sleep(0.01)"); err != nil {
+					log.Print(err)
+					time.Sleep(time.Second)
+					continue
+				}
+				queries.Add(1)
+			}
+		}()
+	}
+
+	for range time.Tick(5 * time.Second) {
+		// Ask Postgres how many connections it has for this role. Through
+		// PgBouncer they are the pool's server connections, not our 50.
+		var servers int
+		qctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err := pool.QueryRow(qctx, "select count(*) from pg_stat_activity where usename = current_user").Scan(&servers)
+		cancel()
+		s := pool.Stat()
+		if err != nil {
+			log.Printf("clients=%d queries=%d in 5s; server count unavailable: %v", s.TotalConns(), queries.Swap(0), err)
+			continue
+		}
+		log.Printf("clients=%d queries=%d in 5s; postgres sees %d server connections", s.TotalConns(), queries.Swap(0), servers)
+	}
+}

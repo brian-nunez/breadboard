@@ -10,8 +10,8 @@ A starter takes the user from intent to running code: it writes a small, working
 - **Configuration from env only.** Code reads the catalog env contract (`KAFKA_BROKERS`, `DATABASE_URL`, …). No Breadboard-specific config files.
 - **Runs without Breadboard.** The project builds and runs anywhere the env vars and a trust bundle exist.
 - **Containerised.** Each starter has a multi-stage `Dockerfile`:
-  - `dev` stage: `golang:<exact>-alpine`, `WORKDIR /src`, dependencies downloaded, source copied so the image runs on its own. `bb up` builds it, runs the app's `command`, and bind-mounts the source over `/src` with named volumes for the Go module and build caches.
-  - `prod` stage: minimal non-root final image, with labels `maintainer`, `version`, `description`, `platform`.
+  - `dev` stage: `golang:<exact>-alpine`, dependencies downloaded, then every app compiled with `go build -o /usr/local/bin/ ./cmd/...` while the image builds (a BuildKit cache mount keeps compiled packages between builds). Each app's `command` is its binary's name, so the program is the container's main process: it receives SIGTERM, and it is running, not compiling, when its health check passes. After editing code, `bb up` rebuilds the image and recreates the container.
+  - `prod` stage: copies one binary from `dev` into a minimal non-root image, with labels `maintainer`, `version`, `description`, `platform`.
 - **No health code.** Breadboard gives every app container a health check that its main process is running, so starters contain no health endpoints. An app that wants a readiness check opts in with `health` in `experiment.yaml`.
 - **TLS through the environment.** Clients use the library's default TLS configuration, which verifies against `SSL_CERT_FILE`; no certificate paths appear in code.
 - **Comments teach the why.** Explain concepts (consumer groups, offsets, at-least-once delivery, why invalidation follows the write), not the syntax.
@@ -48,7 +48,7 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 
 `consul/service-discovery` pins `github.com/hashicorp/consul/api v1.35.0`. Its `greeter` serves HTTPS on 8443 with no Consul code; `register: {port: 8443}` in its spec entry makes Breadboard add the `greeter-agent` sidecar (see `catalog.md`). `caller` resolves healthy `greeter` instances through the Consul API and calls one. A starter app declares `register` through `starters.App.Register`, which `bb starter` writes into `experiment.yaml`.
 
-`consul/self-registration` is the labeled alternative, with the same Consul API pin. `self-greeter` registers itself (address from `BB_FQDN`, a TLS check, `DeregisterCriticalServiceAfter` as a crash safety net) and deregisters on SIGTERM; its `command` builds and `exec`s the binary because `go run` does not pass SIGTERM on. Its README points to the recommended starter first.
+`consul/self-registration` is the labeled alternative, with the same Consul API pin. `self-greeter` registers itself (address from `BB_FQDN`, a TLS check, `DeregisterCriticalServiceAfter` as a crash safety net) and deregisters on SIGTERM; like every starter app it runs its built binary as the main process, which is what lets it receive SIGTERM. Its README points to the recommended starter first.
 
 ## Starter list
 

@@ -32,6 +32,9 @@ These words carry fixed meanings across the docs and the code.
 | **catalog entry** | Breadboard's built-in definition of an infrastructure service type (`kafka`, `postgres`, …): image, config, listeners, health check, env contract, learning notes, exporter mappings. |
 | **infra service** | An instance of a catalog entry inside an experiment. |
 | **app service** | User code in the experiment, built from a directory with a `Dockerfile`, run as a compose service. |
+| **replica** | One of an app's named instances, `<app>-<n>`, when `replicas` is above 1. Each has its own name and certificate; all answer to `<app>.<domain>`. |
+| **sidecar** | A container from the sidecar catalog (Envoy, PgBouncer, Fluent Bit, the Consul agent) that shares one app instance's network namespace and certificate. |
+| **pod** | An app instance with sidecars: a namespace holder (`<app>-pod`) that owns the network, joined by the app and its sidecars, started in order. |
 | **starter** | A template that writes app code into the project and adds app services to `experiment.yaml`. |
 | **listener** | A port an infra service accepts connections on, with a TLS mode. |
 | **edge** | A directed connection from a client (app or infra service) to a listener. Derived from `uses`. TLS policy lives on edges. |

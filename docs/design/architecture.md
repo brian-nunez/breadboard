@@ -44,11 +44,12 @@ Operations (Phase 1):
 | `AddService`, `RemoveService` | Edit `experiment.yaml`. |
 | `Starters`, `ApplyStarter` | List starters; write starter code and update the spec. |
 | `Up`, `Down` | Reconcile, materialize, run, wait for health; stop and optionally delete data. |
-| `Status`, `Logs` | Per-service state, health, resources, TLS warnings; log stream. |
+| `Status`, `Logs` | Per-service state, health, resources, TLS warnings; log stream. Each app instance row carries its app, instance number, replica count and sidecars, and is followed by its sidecars' rows (type, ports, env they give the app, transparent mode); the pod's namespace holder is never a row but decides the instance's state while it is down. Edges carry `Via` and `ToApp` for Envoy outbound targets (Phase 5). |
 | `Creds`, `CA` | Generated credentials and connection strings; CA details. |
 | `PostgresTables`, `RedisKeys`, `ConsulCatalog`, `KafkaTopics`, `S3Buckets` | Read-only explorers for the web UI: each runs the service's own CLI tool with `docker exec` and parses its output (ADR-0012) (Phase 3). |
+| `EnvoyClusters`, `PgBouncerPools` | Read-only sidecar explorers (Phase 5): Envoy's admin API (`/clusters`, `/stats`, `/listeners` over bash `/dev/tcp`, host addresses mapped to replicas with `getent` inside the sidecar) and PgBouncer's `SHOW POOLS` / `SHOW STATS` through `psql` inside the sidecar, both with `docker exec` (ADR-0012). They take an app, an instance, or the sidecar's service name. |
 | `StarterDetails` | A starter's rendered files and apps without writing anything, for the web UI's starter pages (Phase 3). |
-| `ServiceDetails` | Read-only view of one service for the web UI: listeners, who uses it, the env apps receive (secret values never returned), its certificate (Phase 3). |
+| `ServiceDetails` | Read-only view of one service for the web UI: listeners, who uses it, the env apps receive (secret values never returned), its certificate (Phase 3). For an app: its instances and its sidecars (Phase 5); for a sidecar: what it is. |
 | `ConfigGet`, `ConfigSet` | Install settings. |
 | `Migrate` | Upgrade `experiment.yaml` to the current spec version. |
 | `ExportCompose` | Write a standalone compose stack. |
@@ -70,7 +71,7 @@ The web UI and MCP phases add no core logic of their own; if a wrapper needs som
 ## Pipeline
 
 1. **Load** `experiment.yaml` ([`spec.md`](spec.md)), the source of truth for the experiment. Validate with `gate` checks.
-2. **Resolve** the spec against the catalog into the resolved model: defaults applied, edges derived from `uses`, listeners and segments computed, TLS policy evaluated ([`security.md`](security.md)).
+2. **Resolve** the spec against the catalog into the resolved model: defaults applied, edges derived from `uses` (and from Envoy sidecars' outbound targets), listeners and segments computed, TLS policy evaluated ([`security.md`](security.md)), app replicas expanded into instances, sidecars resolved against the sidecar catalog.
 3. **Reconcile state**: ensure the CA, secrets, and leaf certificates exist; issue or reissue as needed.
 4. **Materialize** into a target: the runtime compose project, an export, or (later) another platform.
 5. **Run** (runtime target only): `docker compose -p bb-<experiment> -f … up -d`, then wait for health.
@@ -136,9 +137,25 @@ Every file Breadboard owns carries a format version, and every format only moves
 - `docker-compose.yml` is the whole stack: infra services and app services built from their `dev` stage with the spec's `command`. Apps are compiled while the image builds and run as their container's main process; after an edit, `bb up` rebuilds the image (incrementally, through a BuildKit cache mount) and recreates the container. There is no source mount or development overlay. The `prod` stage is for building release images by hand.
 - App containers also get `BB_SERVICE` (their name), `BB_FQDN` (their address), `TLS_CERT_FILE` and `TLS_KEY_FILE`. Their health check is that the main process is running, unless the spec's `health` opts into an HTTP check (then `BB_HEALTH_PORT` is set too).
 - `bb up` waits up to 5 minutes (`--timeout`) for every container to be running and healthy, then requires all of them to stay healthy for a 5-second settle window. It fails fast when one exits, is restarting, reports unhealthy, or restarted at any point during the wait (its restart count rose or its start time changed), so a program that crashes right after its first health check is reported, not hidden.
-- Labels on every service: `breadboard.experiment=<name>`, `breadboard.experiment-id=<id from state.json>`, `breadboard.service=<name>`, `breadboard.kind=infra|app`, and `breadboard.config-hash`, a hash of the service's mounted certificates and configuration files. A new hash changes the service's config, so `docker compose up` recreates it and reissued certificates take effect. Networks and volumes carry the experiment labels too. The engine finds its containers by label, never by name parsing.
+- Labels on every service: `breadboard.experiment=<name>`, `breadboard.experiment-id=<id from state.json>`, `breadboard.service=<name>`, `breadboard.kind=infra|app|sidecar|pod|init`, and `breadboard.config-hash`, a hash of the service's mounted certificates and configuration files. A new hash changes the service's config, so `docker compose up` recreates it and reissued certificates take effect. Networks and volumes carry the experiment labels too. The engine finds its containers by label, never by name parsing.
 - Compose projects are named after the experiment, so two directories with the same experiment name would share one project. `bb up` and `bb down` refuse to run when Docker holds containers, networks, or volumes labeled with the same name but another experiment id.
 - Ports: nothing is published to the host by default. A port is published only when the spec asks for it, always bound to `127.0.0.1`.
+- Replicas: an app with `replicas: N` renders services `<app>-1` … `<app>-N` (ADR-0016), each with the aliases `<app>-<n>.<domain>` and `<app>.<domain>`.
+
+### Pods
+
+An app with sidecars becomes a pod (ADR-0015). For each instance the compose file has:
+
+| Service | Role |
+|---|---|
+| `<app>-pod` | Namespace holder (`alpine:3.24.4`, `sleep infinity` with `init: true`, health check `true`, `16m`). Owns the networks, aliases and published ports that the app container owns outside a pod. Label `breadboard.kind=pod`. |
+| `<app>-netinit` | Transparent mode only: one-shot init container built from a generated Dockerfile (`build/<app>-netinit/` in the bundle), the only holder of `NET_ADMIN`, `restart: "no"`. Label `breadboard.kind=init`. |
+| `<app>-<sidecar>` | Each sidecar, from its type's `Render` hook, with the app's certificate. |
+| `<app>` | The app, name unchanged, so `bb logs <app>` keeps working. |
+
+All but the holder use `network_mode: service:<app>-pod`. Start order is pod (healthy) → netinit (`service_completed_successfully`) → sidecars (healthy) → app, through `depends_on`. The app and every sidecar mount the named volume `<app>-shared` at `/var/run/bb` (`BB_SHARED_DIR`). With replicas each instance is its own pod (`<app>-<n>-pod`, `<app>-<n>`, `<app>-<n>-envoy`, …). An app with only `register` is not a pod: its agent `<app>-agent` keeps `network_mode: service:<app>`, so its compose output is unchanged.
+
+The holder is an implementation detail: `bb status`, the web UI and MCP list the app and its sidecars, never the holder, but the holder's state counts toward the app's: while it is missing, stopped or unhealthy, the app reports that state, and a holder restart fails `bb up` like an app restart.
 
 ## Web UI and MCP (Phases 3 and 4)
 
@@ -156,7 +173,7 @@ Not part of Phase 1. Both are wrappers over the core API above.
   | Kind | Tools |
   |---|---|
   | About bb | `guide` (embedded agent guide), `version`, `catalog`, `learn`, `starters`, `starter_details` (every file's content), `ca`, `config_get` |
-  | Inspect | `status`, `logs` (no follow; default 200, at most 2,000 lines per service), `creds` (with values, D-071), `service_details`, `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets` |
+  | Inspect | `status`, `logs` (no follow; default 200, at most 2,000 lines per service), `creds` (with values, D-071), `service_details`, `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets`, `envoy_clusters`, `pgbouncer_pools` |
   | Change | `init`, `add_service`, `apply_starter`, `migrate`, `config_set`, `export_compose`, `up` |
   | Destructive | `remove_service`, `down` (with `volumes`, deletes data) |
 
@@ -207,6 +224,7 @@ internal/
   spec/                 experiment.yaml types, parse, validate, version upgrades
   model/                resolved model and resolver
   catalog/              one file per catalog entry + embedded learning notes
+    sidecar/            sidecar catalog: types that run in an app's pod (Phase 5)
   pki/                  CA and leaf issuance (crypto/x509, stdlib only)
   state/                BB_HOME and .bb/ files: atomic writes, locking, format upgrades
   config/               install settings via bkit settings

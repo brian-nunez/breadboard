@@ -47,9 +47,11 @@ apps:                        # user code; one compose service each
 | `apps.<name>.ports` | no | Container ports to publish on `127.0.0.1`. |
 | `apps.<name>.health` | no | Opt into an HTTP health check (`path`, default `/healthz`; `port`, default 8080; the port is injected as `BB_HEALTH_PORT`). Without it, the check is that the container's main process is running, so app code needs no health endpoint. |
 | `apps.<name>.register` | no | Register the app in a service registry (Consul) through a sidecar agent, so app code does not register itself. `port` (required): the port the app serves TLS on. `name`: the registered service name, default the app's name. `check`: a path for an HTTPS health check; without it the check is a TCP connection that completes a TLS handshake. Requires a registry service in `uses`; the sidecar is a service named `<app>-agent`, which takes that name in the namespace. |
+| `apps.<name>.replicas` | no | Number of instances, 1 to 10 (default 1). With more than one, the app runs as `<app>-1` … `<app>-N`, each reachable as `<app>-<n>.<domain>` and all of them as `<app>.<domain>` (a DNS alias on every instance). Such an app cannot publish `ports`. See [Replicas](#replicas). |
+| `apps.<name>.sidecars` | no | Containers that share the app's network namespace and a directory with it; the app becomes a pod. See [Sidecars](#sidecars). |
 | `apps.<name>.resources` | no | As for services. Default `256m` and `0.5` cpus: room for a running Go app. Compiling happens while the image builds, outside this limit. An app that instead runs `go run` at start compiles under the limit and needs much more (`github.com/redis/go-redis/v9` alone takes over 1 GiB). |
 
-Service and app names share one namespace and must be unique DNS labels.
+Service and app names share one namespace and must be unique DNS labels. Names the engine generates for an app take their place in it too: `<app>-<n>` for replicas, `<app>-pod` and `<app>-<sidecar>` for a pod, `<app>-netinit` in transparent mode, `<app>-agent` for `register` (with replicas, each instance's names: `<app>-<n>-pod`, `<app>-<n>-envoy`, `<app>-<n>-agent`, …).
 
 ## `uses` entries and TLS overrides
 
@@ -66,6 +68,77 @@ uses:
 
 Reserved for later phases, rejected by v1 validation: `tls.clientAuth` (mTLS), `tls.ca` (multiple CAs), infra-to-infra `upstream` edges for proxies.
 
+## Replicas
+
+```yaml
+apps:
+  api:
+    path: ./api
+    replicas: 3
+```
+
+renders three services, `api-1`, `api-2` and `api-3`. Each has its own certificate with DNS SANs for its own name and the shared name, its own health check and status row, and receives `BB_SERVICE` and `BB_FQDN` with its own name. The app's `uses` edges and env contract are the same for every instance. `bb logs api` streams every instance; `bb logs api-2` one. With `replicas: 1` (or none) the service stays `api`. Decision: [ADR-0016](../adr/README.md).
+
+## Sidecars
+
+A sidecar is a container that shares its app's network namespace (same address, same `localhost`) and the directory `/var/run/bb` (`BB_SHARED_DIR` in the app's environment). An app with at least one sidecar runs as a **pod**: a small holder container, `<app>-pod`, owns the network, and the app and its sidecars join it; the sidecars are healthy before the app starts ([`architecture.md`](architecture.md#pods)). Traffic between an app and its own sidecars stays on loopback and may be plaintext; every hop between containers stays TLS ([`security.md`](security.md)). Types come from the sidecar catalog ([`catalog.md`](catalog.md#sidecar-catalog)).
+
+Every entry has a `type` and an optional `name` (default: the type), unique within the app; the sidecar's service is `<app>-<name>`. Keys depend on the type, and unknown keys are errors.
+
+```yaml
+apps:
+  api:
+    path: ./api
+    uses: [postgres, s3]
+    sidecars:
+      - type: envoy
+        inbound:              # TLS termination in front of the app
+          port: 8443          # TLS port other containers connect to (the app's certificate)
+          app_port: 8080      # plaintext port the app listens on, loopback only
+        outbound:             # ambassador listeners on 127.0.0.1
+          - service: orders   # an app, or an infra service with an HTTPS listener
+            port: 9001        # local plaintext port; the app gets ORDERS_URL=http://127.0.0.1:9001
+            lb: round_robin   # round_robin | least_request | random | ring_hash | maglev
+            timeout: 5s
+            retries: 2
+            outlier: {consecutive_5xx: 5, ejection: 30s, max_ejection_percent: 10, interval: 10s}
+        transparent: false    # true | {egress: allow | deny}
+        file: ./envoy.yaml    # optional: your own Envoy config replaces the generated one
+      - type: pgbouncer
+        service: postgres     # a postgres service in uses
+        pool_mode: transaction  # session | transaction | statement
+        port: 6432            # loopback port; DATABASE_URL and PG* point here
+        pool_size: 10
+      - type: fluent-bit
+        to: s3                # an s3-compatible service in uses
+        bucket: logs          # created if missing
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `type` | yes | `envoy`, `pgbouncer`, or `fluent-bit`. (`consul-agent` is internal: `register` creates it.) |
+| `name` | no | Lowercase DNS label; default the type. |
+| `envoy.inbound` | no | `port` and `app_port`, both required, different. The app receives `BB_LISTEN_ADDR=127.0.0.1:<app_port>`. To publish the app on the host, put `inbound.port` (never `app_port`) in `ports`. |
+| `envoy.outbound[]` | no | `service` and `port` required. A target app must serve TLS: its own Envoy `inbound.port`, or its `register.port`. Envoy verifies the target against the lab CA and balances across all its replicas. Defaults: `lb: round_robin`, `timeout: 5s`, `retries: 2`, no outlier detection. `outlier` (Envoy outlier detection) requires `consecutive_5xx` (at least 1) and `ejection` (the base ejection time, a positive duration); `max_ejection_percent` (1-100, the most of the cluster ejected at once) defaults to Envoy's 10, which ejects no host of a cluster under 10 hosts, and `interval` (the analysis sweep that returns ejected hosts, a positive duration) to Envoy's 10s. One listener per target per app. |
+| `envoy.transparent` | no | Captures all of the app's TCP traffic. `true` means `{egress: allow}`; `deny` refuses every destination but the declared outbound targets and the services in `uses`, matched by port and address (the lab then gets fixed container addresses). From outside the pod only declared listeners answer: Envoy's `inbound.port` and the app's `register.port`; a published port must be one of them. Envoy runs as the reserved uid 1337 and a registration agent as 1338; `bb up` refuses an app whose image starts as either (or as a user name it cannot resolve), and the app runs without `SETUID`/`SETGID` and with `no-new-privileges`. The app can then call a target by name in plain HTTP, `http://<target>.<domain>:<tls port>`, and the wire is TLS; the `<TARGET>_URL` loopback listener keeps working. Only on `envoy`. |
+| `envoy.file` | no | Path relative to `experiment.yaml`. Its content is copied into the run directory at each `bb up` (mounted at `/etc/bb/config/envoy.yaml`) and replaces the generated config; certificates stay at `/etc/bb/tls/` and the CA at `/etc/bb/ca.pem`. The file must keep the admin listener on `127.0.0.1:15000` (the health check reads `/ready`) and, with `transparent`, listeners on 15001 and 15006. |
+| `pgbouncer.service` | yes | A postgres service in `uses`, reached over TLS (no `tls.mode: off`). One pooler per service per app. |
+| `pgbouncer.pool_mode`, `port`, `pool_size` | no | Defaults `transaction`, `6432`, `10`; pool size 1 to 1000. |
+| `fluent-bit.to` | yes | An s3-compatible service in `uses`. |
+| `fluent-bit.bucket` | yes | An S3 bucket name, added to the service's buckets so it exists. The app writes `*.log` files to `/var/run/bb/logs/` (`BB_LOG_DIR`); each upload is one object `<instance>/<yyyy>/<mm>/<dd>/<hhmmss>-<uuid>.jsonl`, at most 10 seconds after the line was written. |
+
+Variables a sidecar adds to or changes in its app's environment:
+
+| Type | Variables |
+|---|---|
+| `envoy` | `BB_LISTEN_ADDR=127.0.0.1:<app_port>` with `inbound`; `<TARGET>_URL=http://127.0.0.1:<port>` per outbound target (name upper-cased, `-` → `_`) |
+| `pgbouncer` | the pooled service's `DATABASE_URL` → `postgres://<user>:<password>@127.0.0.1:<port>/<db>?sslmode=disable`, `PGHOST=127.0.0.1`, `PGPORT=<port>`, `PGSSLMODE=disable` (prefixed names for a second Postgres service) |
+| `fluent-bit` | `BB_LOG_DIR=/var/run/bb/logs` |
+
+Every pod's app also receives `BB_SHARED_DIR=/var/run/bb`.
+
+`register` is unchanged. With `sidecars` too, its agent runs in the pod like any other sidecar.
+
 ## Validation rules
 
 Validation fails with every violation listed, each with its YAML path:
@@ -76,3 +149,7 @@ Validation fails with every violation listed, each with its YAML path:
 - `tls.mode` is `on` or `off`; `off` is allowed only toward entries with a plaintext listener.
 - `tls.mode: off` requires a non-empty `reason`.
 - Reserved fields are rejected with a message naming the phase that introduces them.
+- `register` requires a registry service in `uses`.
+- `replicas` is between 1 and 10; an app with more than one replica cannot publish `ports`.
+- Sidecars: `type` must be a sidecar catalog type; keys must belong to that type (`transparent` only on `envoy`); names are unique within the app; no two containers of one pod bind the same port (the app's `inbound.app_port`, Envoy's `inbound.port`, outbound ports, admin `15000`, transparent `15001`/`15006`, PgBouncer's `port`, Fluent Bit's `2020`, the registration agent's `8301`/`8501`); `pgbouncer.service` is a postgres service and `fluent-bit.to` an s3-compatible service in the app's `uses`; `outbound.service` names an existing app or HTTPS infra service other than the app itself. The app's own ports (`health.port`, default 8080 with `health`; `register.port` unless it is an Envoy `inbound.port`; `inbound.app_port`) are claimed before any sidecar's, and the error names where each was declared. A variable a sidecar gives the app (`BB_LISTEN_ADDR`, `<TARGET>_URL`, `BB_LOG_DIR`) must not share a name with one the app already receives from Breadboard, a used service or another sidecar (for example an outbound target named `database` beside Postgres's `DATABASE_URL`); PgBouncer's rewrite of its own service's variables is allowed.
+- Every name the engine generates for an app is unique in the shared namespace and at most 63 characters.

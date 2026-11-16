@@ -1,0 +1,401 @@
+package web
+
+// Redis docs, following the Kafka template (D-031, D-061).
+
+func init() {
+	registerTech(tech{
+		ID:      "redis",
+		Name:    "Redis",
+		Tagline: "In-memory key-value store and cache.",
+		Order:   30,
+		Intro:   redisIntro(),
+		GoodFit: []string{"Caching reads from a slower database", "Counters, rate limits and leaderboards", "Short-lived data such as sessions and locks", "Simple work queues"},
+		PoorFit: []string{"The only copy of data you cannot lose", "Datasets larger than memory", "Ad-hoc queries and joins over stored data"},
+		Diagram: redisDiagram(),
+		Official: []link{
+			{"Develop with Redis", "https://redis.io/docs/latest/develop/"},
+			{"Redis data types", "https://redis.io/docs/latest/develop/data-types/"},
+			{"go-redis client", "https://pkg.go.dev/github.com/redis/go-redis/v9"},
+		},
+		Starters: []string{"redis/cache-invalidation"},
+		Guides: []guide{
+			{
+				Slug: "basic-usage", Title: "Connecting and commands", Summary: "Connect over TLS, set and get a key.",
+				Starter:  "redis/cache-invalidation",
+				Sections: []docSection{{"connect", "Connecting"}, {"handshake", "What happens on connect"}, {"commands", "Setting and getting a key"}, {"execution", "One command at a time"}, {"run", "Run it"}},
+				Body:     redisBasicUsage(),
+			},
+			{
+				Slug: "expiry", Title: "Expiry and TTLs", Summary: "How keys expire, and what happens when memory runs out.",
+				Starter:  "redis/cache-invalidation",
+				Sections: []docSection{{"setting", "Setting a TTL"}, {"rules", "What keeps or clears a TTL"}, {"how", "How Redis removes expired keys"}, {"memory", "When memory runs out"}},
+				Body:     redisExpiry(),
+			},
+			{
+				Slug: "cache-aside", Title: "Cache-aside and invalidation", Summary: "Read through a cache, delete on change.",
+				Starter:  "redis/cache-invalidation",
+				Sections: []docSection{{"read", "Reading through the cache"}, {"invalidate", "Deleting on change"}, {"order", "Why the write comes first"}, {"race", "The stale-read race"}},
+				Body:     redisCacheAside(),
+			},
+			{
+				Slug: "data-structures", Title: "Beyond strings", Summary: "Hashes, lists, sets and sorted sets.",
+				Sections: []docSection{{"types", "Every key has a type"}, {"hashes", "Hashes"}, {"lists", "Lists"}, {"sets", "Sets"}, {"sorted-sets", "Sorted sets"}},
+				Body:     redisDataStructures(),
+			},
+			{
+				Slug: "in-breadboard", Title: "Redis in Breadboard", Summary: "TLS only, the password, persistence, env vars.",
+				Sections: []docSection{{"server", "What runs"}, {"tls", "TLS only, no plaintext port"}, {"env", "What your app receives"}, {"persistence", "Persistence and memory"}, {"keys", "The Keys tab and redis-cli"}},
+				Body:     redisInBreadboard(),
+			},
+		},
+	})
+}
+
+const redisConnectCode = `opts, err := redis.ParseURL(os.Getenv("REDIS_URL"))
+if err != nil {
+    log.Fatal(err)
+}
+cache := redis.NewClient(opts)`
+
+const redisSetGetCode = `// Sends SET product:apple 412 EX 30.
+if err := cache.Set(ctx, "product:apple", 412, 30*time.Second).Err(); err != nil {
+    log.Print(err)
+}
+
+cached, err := cache.Get(ctx, "product:apple").Result()
+switch {
+case errors.Is(err, redis.Nil):
+    // The key does not exist: a cache miss, not a failure.
+case err != nil:
+    log.Print(err) // the connection or the server failed
+default:
+    log.Printf("price=%s", cached)
+}`
+
+const redisTTLCode = `// A TTL at write time: SET product:apple 412 EX 30.
+cache.Set(ctx, "product:apple", 412, 30*time.Second)
+
+// No TTL: a zero duration sends a plain SET, and the key lives until deleted.
+cache.Set(ctx, "config:theme", "dark", 0)
+
+// Add or replace the TTL of a key that already exists: EXPIRE product:apple 60.
+cache.Expire(ctx, "product:apple", 60*time.Second)
+
+// Time left. -1ns means the key has no TTL; -2ns means it does not exist.
+left, err := cache.TTL(ctx, "product:apple").Result()`
+
+const redisReadCode = `// read is cache-aside: try the cache, fall back to the database, then fill
+// the cache. The TTL bounds how long a missed invalidation can serve a stale price.
+func read(ctx context.Context, db *pgx.Conn, cache *redis.Client, id string) (price int, hit bool, err error) {
+    key := "product:" + id
+    cached, err := cache.Get(ctx, key).Result()
+    if err == nil {
+        price, err = strconv.Atoi(cached)
+        return price, true, err
+    }
+    if !errors.Is(err, redis.Nil) {
+        return 0, false, err
+    }
+    if err := db.QueryRow(ctx, ` + "`SELECT price_cents FROM products WHERE id = $1`" + `, id).Scan(&price); err != nil {
+        return 0, false, err
+    }
+    return price, false, cache.Set(ctx, key, price, 30*time.Second).Err()
+}`
+
+const redisInvalidateCode = `fetches.EachRecord(func(r *kgo.Record) {
+    // Delete rather than overwrite: the next read loads the fresh price
+    // from the database, so the cache never holds a value we made up.
+    if err := cache.Del(ctx, "product:"+string(r.Value)).Err(); err != nil {
+        log.Print(err)
+        return
+    }
+    log.Printf("invalidated id=%s", r.Value)
+})`
+
+const redisWriterCode = `// The database is the source of truth: write it first. Announcing the
+// change before the write commits would let a reader cache the old price
+// after the cache entry was already removed.
+if _, err := db.Exec(ctx, ` + "`UPDATE products SET price_cents = $2 WHERE id = $1`" + `, id, price); err != nil {
+    log.Fatal(err)
+}
+if err := client.ProduceSync(ctx, &kgo.Record{Key: []byte(id), Value: []byte(id)}).FirstErr(); err != nil {
+    log.Print(err) // the cached price stays stale until its TTL runs out
+}`
+
+const redisHashCode = `// HSET user:42 name Ada plan pro
+cache.HSet(ctx, "user:42", "name", "Ada", "plan", "pro")
+// HGETALL user:42 returns every field: map[name:Ada plan:pro]
+fields, err := cache.HGetAll(ctx, "user:42").Result()`
+
+const redisListCode = `// Producer: LPUSH jobs resize:7 adds to the head of the list.
+cache.LPush(ctx, "jobs", "resize:7")
+
+// Worker: BRPOP jobs 5 takes from the tail, waiting up to 5 seconds.
+// The reply is [key, value]; on timeout the error is redis.Nil.
+job, err := cache.BRPop(ctx, 5*time.Second, "jobs").Result()`
+
+const redisSetCode = `// SADD online user:42 is idempotent: adding a member twice keeps one copy.
+cache.SAdd(ctx, "online", "user:42")
+// SISMEMBER online user:42
+isOnline, err := cache.SIsMember(ctx, "online", "user:42").Result()`
+
+const redisZSetCode = `// ZINCRBY leaderboard 10 ada adds 10 to ada's score (from 0 if new).
+cache.ZIncrBy(ctx, "leaderboard", 10, "ada")
+// The top ten, highest score first.
+top, err := cache.ZRevRangeWithScores(ctx, "leaderboard", 0, 9).Result()`
+
+templ redisIntro() {
+	@docP() {
+		Redis keeps all of its data in memory and serves it over the network. Each key holds one value, and that value has a type: a string, a hash, a list, a set, a sorted set, or one of several others. Commands read and change those values in place.
+	}
+	@docP() {
+		Because nothing has to come from disk, reads and writes are fast, which makes Redis a common cache in front of a slower database. The cost is that the dataset has to fit in memory, and a cache is a copy that can fall out of step with the data it copies.
+	}
+	@docP() {
+		Redis can also write its data to disk, so it survives a restart. Keys can carry a time to live, after which Redis deletes them on its own.
+	}
+}
+
+templ redisDiagram() {
+	<svg viewBox="0 0 900 220" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Cache-aside: the reader asks Redis first, reads Postgres on a miss and fills Redis with a TTL; the invalidator deletes the key when the data changes">
+		<defs>
+			<marker id="r-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<rect x="40" y="20" width="180" height="180" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="56" y="46" class="fill-slate-900 font-mono text-[13px] font-semibold">cache-reader</text>
+		<text x="56" y="70" class="fill-slate-500 text-[12px]">reads a price</text>
+		<line x1="220" y1="45" x2="372" y2="45" stroke-width="1.5" marker-end="url(#r-arrow)" class="stroke-slate-400"></line>
+		<text x="296" y="37" text-anchor="middle" class="fill-slate-500 text-[12px]">1. GET (hit: done)</text>
+		<line x1="220" y1="85" x2="372" y2="85" stroke-width="1.5" marker-end="url(#r-arrow)" class="stroke-slate-400"></line>
+		<text x="296" y="77" text-anchor="middle" class="fill-slate-500 text-[12px]">3. SET … EX 30</text>
+		<line x1="220" y1="168" x2="372" y2="168" stroke-width="1.5" marker-end="url(#r-arrow)" class="stroke-slate-400"></line>
+		<text x="296" y="160" text-anchor="middle" class="fill-slate-500 text-[12px]">2. on a miss: SELECT</text>
+		<rect x="380" y="20" width="200" height="85" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="396" y="46" class="fill-indigo-800 font-mono text-[13px] font-semibold">redis</text>
+		<rect x="396" y="58" width="168" height="32" rx="6" class="fill-white stroke-indigo-200"></rect>
+		<text x="408" y="79" class="fill-slate-700 font-mono text-[12px]">product:apple = 412</text>
+		<rect x="380" y="130" width="200" height="70" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="396" y="156" class="fill-slate-900 font-mono text-[13px] font-semibold">postgres</text>
+		<text x="396" y="180" class="fill-slate-500 text-[12px]">products table</text>
+		<line x1="700" y1="62" x2="588" y2="62" stroke-width="1.5" marker-end="url(#r-arrow)" class="stroke-slate-400"></line>
+		<text x="644" y="54" text-anchor="middle" class="fill-slate-500 text-[12px]">DEL on change</text>
+		<rect x="700" y="20" width="180" height="85" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="716" y="46" class="fill-slate-900 font-mono text-[13px] font-semibold">cache-invalidator</text>
+		<text x="716" y="70" class="fill-slate-500 text-[12px]">reads product-updates</text>
+	</svg>
+}
+
+templ redisBasicUsage() {
+	@docLead() {
+		A Redis client needs one connection string. These are the lines the redis/cache-invalidation starter runs, using the go-redis client.
+	}
+	@docH2("connect", "Connecting")
+	@docP() {
+		Breadboard puts the whole connection string in @docCodeWord("REDIS_URL"): scheme, user, password, host, port and database number. go-redis parses it into options, so the code holds no address or secret of its own.
+	}
+	@docCode("cmd/cache-reader/main.go", redisConnectCode)
+	@docP() {
+		The URL starts with @docCodeWord("rediss://")&#46; The second s means TLS: @docCodeWord("ParseURL") then sets a TLS config with the host as the server name and TLS 1.2 as the minimum version. It leaves the trusted roots unset, so Go uses the system trust store, and on Linux @docCodeWord("SSL_CERT_FILE") replaces that store with Breadboard's bundle. The client verifies the server's certificate with no extra code.
+	}
+	@docH2("handshake", "What happens on connect")
+	@docP() {
+		@docCodeWord("redis.NewClient") does not connect. It creates a connection pool, sized by default at 10 connections per CPU that Go reports. A command takes a connection from the pool, dialing a new one if none is idle, and returns it when the reply arrives.
+	}
+	@docP() {
+		Each new connection does a TLS handshake, then sends @docCodeWord("HELLO 3") with the user and password from the URL. That one command switches the connection to version 3 of RESP, Redis's wire protocol, and authenticates it. If the database number in the URL is above 0, go-redis also sends @docCodeWord("SELECT")&#46; The URL's user is @docCodeWord("default"), the user whose password Redis's @docCodeWord("requirepass") setting sets.
+	}
+	@docP() {
+		On the wire, every command is an array of strings: the command name, then its arguments. The server replies with a typed value: a status, an integer, a string, an array, an error or a null.
+	}
+	@docH2("commands", "Setting and getting a key")
+	@docCode("main.go", redisSetGetCode)
+	@docP() {
+		@docCodeWord("Set") with a duration of 30 seconds sends @docCodeWord("SET product:apple 412 EX 30")&#46; go-redis turns the integer into the string 412; Redis stores strings as bytes. A duration that is not a whole number of seconds is sent with @docCodeWord("PX") in milliseconds instead.
+	}
+	@docP() {
+		When a key does not exist, @docCodeWord("GET") replies with a null. go-redis turns that null into the error @docCodeWord("redis.Nil"), so a missing key and a failed connection both come back as errors. Check for @docCodeWord("redis.Nil") first: in a cache, it is the normal miss.
+	}
+	@docH2("execution", "One command at a time")
+	@docP() {
+		Redis serves all client requests on a single main thread, one command at a time. Two clients that run @docCodeWord("INCR") on the same key at once never lose an update, because one command finishes before the next starts.
+	}
+	@docP() {
+		The same design means one slow command delays everyone. @docCodeWord("GET") and @docCodeWord("SET") take constant time, but @docCodeWord("KEYS") walks the whole keyspace while every other client waits. @docCodeWord("SCAN") does the same walk in small steps instead.
+	}
+	@docH2("run", "Run it")
+	@docTerminal("bb init redis-lab", "bb starter redis/cache-invalidation", "bb up", "bb logs cache-reader -f")
+}
+
+templ redisExpiry() {
+	@docLead() {
+		A key can carry a time to live (TTL). When the time passes, Redis deletes the key. In a cache, the TTL is the upper bound on how long a stale value can survive.
+	}
+	@docH2("setting", "Setting a TTL")
+	@docCode("main.go", redisTTLCode)
+	@docP() {
+		Redis stores the expiry as an absolute Unix time in milliseconds, not as a countdown. Time keeps passing while the server is stopped, and changing the machine's clock changes when keys expire.
+	}
+	@docP() {
+		go-redis returns @docCodeWord("TTL") as a @docCodeWord("time.Duration")&#46; Redis answers -1 for a key with no TTL and -2 for a missing key, and go-redis passes those through unscaled, so they arrive as -1ns and -2ns rather than as seconds.
+	}
+	@docH2("rules", "What keeps or clears a TTL")
+	@docList(
+		"Commands that replace or delete the value clear the TTL: SET, GETSET, DEL and the *STORE commands. A plain SET on a key with a TTL leaves it with none.",
+		"Commands that change the value in place keep the TTL: INCR, LPUSH, HSET.",
+		"EXPIRE on a key that already has a TTL replaces it with the new one. PERSIST removes it.",
+		"RENAME moves the TTL to the new name.",
+		"EXPIRE with zero or a negative number deletes the key immediately.",
+	)
+	@docH2("how", "How Redis removes expired keys")
+	@docP() {
+		Redis does not keep a timer per key. It removes expired keys in two ways:
+	}
+	@docList(
+		"Passively: when a command touches a key, Redis first checks its expiry. If it has passed, Redis deletes the key and the command sees nothing there.",
+		"Actively: about ten times a second, Redis samples a few random keys from those that have a TTL and deletes the ones that have expired. If many in the sample had expired, it samples again straight away.",
+	)
+	@docP() {
+		The passive check means a client never reads an expired value. The active cycle reclaims the memory of keys nobody asks for again. Until one of the two runs, an expired key still uses memory and still counts in @docCodeWord("DBSIZE")&#46; When a key expires, Redis writes a @docCodeWord("DEL") to the append-only file and to any replicas, so they stay in step.
+	}
+	@docTerminal("redis-cli ... SET demo hello EX 10", "redis-cli ... TTL demo", "# 10, then 9, 8 ... and -2 once it is gone")
+	@docH2("memory", "When memory runs out")
+	@docP() {
+		The @docCodeWord("maxmemory") setting caps how much memory Redis uses for data. Its default on 64-bit systems is 0, which means no cap. With a cap set, every command that adds data first checks memory use, and if it is over the cap Redis applies @docCodeWord("maxmemory-policy"):
+	}
+	@docList(
+		"noeviction: nothing is deleted; commands that add data fail with an error, and reads keep working.",
+		"allkeys-lru: evict the least recently used keys, of any kind.",
+		"allkeys-lfu: evict the least frequently used keys.",
+		"volatile-lru, volatile-lfu, volatile-random: the same choices, but only among keys that have a TTL.",
+		"volatile-ttl: evict the keys with the shortest time left.",
+	)
+	@docP() {
+		LRU in Redis is approximate. Instead of tracking every key's age exactly, it samples a few keys (how many is set by @docCodeWord("maxmemory-samples")) and evicts the oldest of the sample, keeping a pool of good candidates between rounds.
+	}
+	@docCallout("In Breadboard") {
+		Breadboard sets no @docCodeWord("maxmemory"), so Redis grows until it reaches the container's 256m limit and the kernel kills it. To try eviction, run @docCodeWord("CONFIG SET maxmemory 200mb") and @docCodeWord("CONFIG SET maxmemory-policy allkeys-lru") in redis-cli. Settings made this way last until the container restarts.
+	}
+}
+
+templ redisCacheAside() {
+	@docLead() {
+		Cache-aside means the application, not Redis, moves data into the cache: read the cache, fall back to the database on a miss, then fill the cache. The redis/cache-invalidation starter adds the other half: deleting a cached value when the data behind it changes.
+	}
+	@docFigure("The reader asks Redis first and reads Postgres only on a miss. The invalidator deletes a key when the price changes.") {
+		@redisDiagram()
+	}
+	@docH2("read", "Reading through the cache")
+	@docCode("cmd/cache-reader/main.go", redisReadCode)
+	@docP() {
+		What actually happens on each read: one @docCodeWord("GET")&#46; On a hit the price comes straight back and Postgres sees nothing. On a miss Redis replies with a null, go-redis returns @docCodeWord("redis.Nil"), the reader queries Postgres, and then sends @docCodeWord("SET product:apple 412 EX 30")&#46; The next read for that product within 30 seconds is a hit.
+	}
+	@docP() {
+		Any other error from @docCodeWord("GET") is returned rather than treated as a miss. Treating a broken connection as a miss would send every read to the database at once.
+	}
+	@docH2("invalidate", "Deleting on change")
+	@docP() {
+		The cache-writer changes a price in Postgres and then announces the product's ID on the Kafka topic @docCodeWord("product-updates")&#46; The cache-invalidator consumes that topic and deletes the matching key:
+	}
+	@docCode("cmd/cache-invalidator/main.go", redisInvalidateCode)
+	@docP() {
+		It deletes instead of writing the new price. A delete needs nothing but the key, and the next read loads the price from the database, which is the only place the value is decided. If two updates are processed out of order, a delete still leaves the cache empty, while writing values could leave the older price in place.
+	}
+	@docH2("order", "Why the write comes first")
+	@docCode("cmd/cache-writer/main.go", redisWriterCode)
+	@docP() {
+		Suppose the writer announced first. The invalidator could delete the key before the database update commits, a reader could then miss, read the old price from Postgres, and cache it. The cache would hold the old price with no invalidation left to remove it. Writing the database first means any delete that follows happens after the new price is readable.
+	}
+	@docH2("race", "The stale-read race")
+	@docP() {
+		Even in the right order, one interleaving still caches a stale value:
+	}
+	@docSteps(
+		"The reader misses on product:apple and reads the old price from Postgres.",
+		"The writer commits the new price and announces it.",
+		"The invalidator deletes product:apple, which is not in the cache yet.",
+		"The reader, still holding the old price, runs SET product:apple with a 30-second TTL.",
+	)
+	@docP() {
+		The cache now holds the old price and no delete is coming. This is why every entry has a TTL: the stale price lives for at most 30 seconds, then the key expires and the next read fetches the new one. The same TTL covers a lost announcement or a stopped invalidator. A shorter TTL narrows the stale window and sends more reads to the database.
+	}
+	@docTerminal("docker stop bb-redis-lab-cache-invalidator-1", "bb logs cache-reader -f", "# old prices keep coming back for up to 30 seconds after each change")
+}
+
+templ redisDataStructures() {
+	@docLead() {
+		A Redis value is not always a string. Each of these types has its own commands, and each command runs on the server, so the client never reads a value, changes it and writes it back.
+	}
+	@docH2("types", "Every key has a type")
+	@docP() {
+		A key's type is fixed by the first command that creates it. A command for a different type fails with a @docCodeWord("WRONGTYPE") error instead of converting the value. @docCodeWord("TYPE key") reports what a key holds, and the dashboard's Keys tab shows it in a column.
+	}
+	@docH2("hashes", "Hashes")
+	@docP() {
+		A hash is a record: one key holding many field-value pairs. Use it for an object you read or update a field at a time, such as a user's profile or a session.
+	}
+	@docCode("main.go", redisHashCode)
+	@docP() {
+		@docCodeWord("HSET") changes only the named fields and leaves the rest alone. It also leaves the key's TTL alone, because it changes the value rather than replacing it.
+	}
+	@docH2("lists", "Lists")
+	@docP() {
+		A list is a sequence of strings in insertion order, with fast pushes and pops at both ends. Pushing at one end and popping at the other makes a queue.
+	}
+	@docCode("main.go", redisListCode)
+	@docP() {
+		@docCodeWord("BRPOP") blocks: if the list is empty, the server holds the request until an item arrives or the timeout passes. Each item goes to exactly one waiting worker. Once popped, it is gone from Redis, so a worker that crashes mid-job loses that job.
+	}
+	@docH2("sets", "Sets")
+	@docP() {
+		A set is an unordered collection of unique strings. Adding, removing and testing a member take the same time however large the set is. Use it for membership: who is online, which IDs were already processed.
+	}
+	@docCode("main.go", redisSetCode)
+	@docH2("sorted-sets", "Sorted sets")
+	@docP() {
+		A sorted set is a set where each member has a score, and members are kept in score order. Use it for leaderboards, rankings, and anything you need back in order, such as jobs keyed by run time.
+	}
+	@docCode("main.go", redisZSetCode)
+	@docP() {
+		@docCodeWord("ZINCRBY") changes the score and moves the member to its new place in one command. Since commands run one at a time, two clients adding points to the same member at once both count.
+	}
+}
+
+templ redisInBreadboard() {
+	@docLead() {
+		What Breadboard runs when you add Redis, and how it is wired.
+	}
+	@docH2("server", "What runs")
+	@docP() {
+		The service runs the official @docCodeWord("redis") image, Alpine variant, as a single server with no replicas. It is limited to 256m of memory and a quarter of a CPU. Its health check connects over TLS with @docCodeWord("redis-cli") and expects @docCodeWord("PONG") from @docCodeWord("PING")&#46;
+	}
+	@docH2("tls", "TLS only, no plaintext port")
+	@docP() {
+		The server starts with @docCodeWord("--port 0"), which turns off the plaintext port completely, and @docCodeWord("--tls-port 6379"), so the usual Redis port speaks only TLS. Its certificate is issued by your Breadboard CA for @docCodeWord("redis.<domain>")&#46; @docCodeWord("--tls-auth-clients no") turns off Redis's default of requiring client certificates: clients verify the server, and the server checks the password.
+	}
+	@docP() {
+		Unlike Kafka, Redis has no plaintext listener even when an app asks for @docCodeWord("tls.mode: off"), and validation rejects that edge. Redis binds every port to the same addresses, so a plaintext port could not be limited to a private network shared with one app. Plaintext Redis is planned to arrive with terminating proxies.
+	}
+	@docH2("env", "What your app receives")
+	@docList(
+		"REDIS_URL: rediss://default:<password>@redis.<domain>:6379/0, with the password Breadboard generated for the default user.",
+		"SSL_CERT_FILE: the trust bundle Go uses to verify the server.",
+	)
+	@docP() {
+		The password is a generated secret. The server receives it in @docCodeWord("REDIS_PASSWORD") and passes it to @docCodeWord("--requirepass"); @docCodeWord("bb creds redis") prints the connection string.
+	}
+	@docH2("persistence", "Persistence and memory")
+	@docP() {
+		The server runs with @docCodeWord("--appendonly yes --dir /data"), and @docCodeWord("/data") is a Docker volume. Every command that changes data is appended to the append-only file, and on start Redis replays that file to rebuild memory, so keys survive a container restart. With the default @docCodeWord("appendfsync everysec"), the file is flushed to disk once a second: a crash can lose up to the last second of writes.
+	}
+	@docP() {
+		No @docCodeWord("maxmemory") is set. Redis keeps growing until the 256m container limit, and then the kernel kills it rather than Redis evicting keys. See @docLink("/docs/redis/expiry", "Expiry and TTLs") to set a cap and a policy.
+	}
+	@docH2("keys", "The Keys tab and redis-cli")
+	@docP() {
+		The service's Keys tab in the dashboard shows the total key count and up to 200 keys, each with its type and time left. It runs one Lua script through @docCodeWord("redis-cli") inside the container: @docCodeWord("DBSIZE"), then @docCodeWord("SCAN"), calling @docCodeWord("TYPE") and @docCodeWord("TTL") on each key it returns. Because a script runs as one command, the tab costs a single round trip; it uses @docCodeWord("SCAN") rather than @docCodeWord("KEYS") so it stops after 200 keys instead of listing them all.
+	}
+	@docP() {
+		To run commands yourself, open @docCodeWord("redis-cli") in the container. The CA is mounted there and the password is in the environment:
+	}
+	@docTerminal(`docker exec -it bb-redis-lab-redis-1 sh -c 'redis-cli --tls --cacert /etc/bb/ca.pem -h redis.bb.internal --no-auth-warning -a "$REDIS_PASSWORD"'`)
+}

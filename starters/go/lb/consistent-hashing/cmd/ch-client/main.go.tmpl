@@ -1,0 +1,168 @@
+// Command ch-client asks Envoy for the same 200 keys (user-000 … user-199)
+// every 5 seconds, each in the X-User-ID header, once through the ring_hash
+// cluster ("/") and once through the maglev cluster ("/maglev/"). Envoy hashes
+// the header, so a key lands on the same replica every time.
+//
+// For each policy the client remembers where every key landed and logs:
+//   - once placement is stable, the baseline: which keys each replica has;
+//   - every key that moves, with where it was and where it went;
+//   - a summary per round: keys moved since the last round, keys on a
+//     different replica than in the baseline, cache hits, keys per replica.
+//
+// Stop a replica and count how many keys move: only the ones it held.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"maps"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	keys        = 200
+	concurrency = 4
+)
+
+func main() {
+	base := os.Getenv("CH_EDGE_URL") // https://ch-edge.<domain>:8443
+	// The lab CA is trusted through SSL_CERT_FILE, so this is a plain client
+	// that verifies Envoy's certificate.
+	client := &http.Client{Timeout: 5 * time.Second}
+	policies := []*policy{
+		{name: "ring_hash", url: base + "/"},
+		{name: "maglev", url: base + "/maglev/"},
+	}
+	for range time.Tick(5 * time.Second) {
+		for _, p := range policies {
+			p.round(client)
+		}
+	}
+}
+
+// policy is one of Envoy's hashing clusters, and where each key landed.
+type policy struct {
+	name     string
+	url      string
+	rounds   int
+	place    map[string]string // key -> replica, from the last answer
+	baseline map[string]string // placement when it first held still
+}
+
+// answer is one key's reply: the replica, and whether it had the key cached.
+type answer struct {
+	key, replica string
+	hit, failed  bool
+}
+
+func (p *policy) round(client *http.Client) {
+	p.rounds++
+	answers := make([]answer, keys)
+	work := make(chan int)
+	var wg sync.WaitGroup
+	for range concurrency {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range work {
+				answers[i] = ask(client, p.url, fmt.Sprintf("user-%03d", i))
+			}
+		}()
+	}
+	for i := range keys {
+		work <- i
+	}
+	close(work)
+	wg.Wait()
+
+	first := p.place == nil
+	if first {
+		p.place = map[string]string{}
+	}
+	moved, failed, hits := 0, 0, 0
+	for _, a := range answers {
+		if a.failed {
+			failed++ // keep its last known replica
+			continue
+		}
+		if a.hit {
+			hits++
+		}
+		if was, ok := p.place[a.key]; ok && was != a.replica {
+			moved++
+			log.Printf("%s: %s moved %s -> %s", p.name, a.key, was, a.replica)
+		}
+		p.place[a.key] = a.replica
+	}
+	stable := !first && moved == 0 && failed == 0 && len(p.place) == keys
+	if p.baseline == nil && stable {
+		p.baseline = maps.Clone(p.place)
+		log.Printf("%s: placement stable after %d rounds; baseline:", p.name, p.rounds)
+		groups := byReplica(p.baseline)
+		for _, r := range sortedKeys(groups) {
+			ks := groups[r]
+			log.Printf("%s:   %s has %d keys: %s", p.name, r, len(ks), strings.Join(ks, " "))
+		}
+	}
+	differ := "no baseline yet"
+	if p.baseline != nil {
+		n := 0
+		for k, r := range p.place {
+			if p.baseline[k] != r {
+				n++
+			}
+		}
+		differ = fmt.Sprintf("%d differ from baseline", n)
+	}
+	var per []string
+	groups := byReplica(p.place)
+	for _, r := range sortedKeys(groups) {
+		per = append(per, fmt.Sprintf("%s=%d", r, len(groups[r])))
+	}
+	log.Printf("%s round %d: %d keys, %d failed, %d moved, %s, %d cache hits | %s",
+		p.name, p.rounds, keys, failed, moved, differ, hits, strings.Join(per, " "))
+}
+
+func ask(client *http.Client, url, key string) answer {
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	// Envoy's route hashes this header to pick the replica.
+	req.Header.Set("X-User-ID", key)
+	resp, err := client.Do(req)
+	if err != nil {
+		return answer{key: key, failed: true}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	f := strings.Fields(string(body)) // "<instance> hit" or "<instance> miss"
+	if resp.StatusCode != http.StatusOK || len(f) != 2 {
+		return answer{key: key, failed: true}
+	}
+	return answer{key: key, replica: f[0], hit: f[1] == "hit"}
+}
+
+// byReplica groups keys by the replica they landed on, sorted.
+func byReplica(place map[string]string) map[string][]string {
+	out := map[string][]string{}
+	for k, r := range place {
+		out[r] = append(out[r], k)
+	}
+	for _, ks := range out {
+		slices.Sort(ks)
+	}
+	return out
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}

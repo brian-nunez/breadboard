@@ -1,0 +1,104 @@
+// Command rr-client sends ten requests a second, one at a time, to NGINX at
+// RR_EDGE_URL and logs a tally every 5 seconds: how many requests each
+// replica answered, the status codes, and the latency. With round robin,
+// each of the three replicas answers a third.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"time"
+)
+
+func main() {
+	url := os.Getenv("RR_EDGE_URL") // https://rr-edge.<domain>:8443
+	// The lab CA is trusted through SSL_CERT_FILE, so this is a plain client
+	// that verifies NGINX's certificate.
+	client := &http.Client{Timeout: 5 * time.Second}
+	var t tally
+	report := time.Tick(5 * time.Second)
+	for range time.Tick(100 * time.Millisecond) {
+		t.add(call(client, url))
+		select {
+		case <-report:
+			log.Printf("last 5s: %s", t)
+			t = tally{}
+		default:
+		}
+	}
+}
+
+// result is one request: who answered, with which status, how fast.
+type result struct {
+	replica string
+	status  string
+	took    time.Duration
+}
+
+func call(client *http.Client, url string) result {
+	start := time.Now()
+	resp, err := client.Get(url)
+	if err != nil {
+		log.Printf("request failed: %v", err)
+		return result{status: "error", took: time.Since(start)}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	r := result{status: fmt.Sprint(resp.StatusCode), took: time.Since(start)}
+	if resp.StatusCode == http.StatusOK {
+		r.replica = strings.TrimSpace(string(body)) // the instance's name
+	}
+	return r
+}
+
+// tally counts one window of results.
+type tally struct {
+	replicas map[string]int
+	statuses map[string]int
+	took     []time.Duration
+}
+
+func (t *tally) add(r result) {
+	if t.replicas == nil {
+		t.replicas, t.statuses = map[string]int{}, map[string]int{}
+	}
+	if r.replica != "" {
+		t.replicas[r.replica]++
+	}
+	t.statuses[r.status]++
+	t.took = append(t.took, r.took)
+}
+
+// String reads like
+// "30 requests | rr-backend-1=10 (33%) rr-backend-2=10 (33%) rr-backend-3=10 (33%) | status 200=30 | p50 3ms p99 9ms".
+func (t tally) String() string {
+	n := len(t.took)
+	if n == 0 {
+		return "no requests"
+	}
+	var parts []string
+	for _, k := range sortedKeys(t.replicas) {
+		parts = append(parts, fmt.Sprintf("%s=%d (%d%%)", k, t.replicas[k], t.replicas[k]*100/n))
+	}
+	var codes []string
+	for _, k := range sortedKeys(t.statuses) {
+		codes = append(codes, fmt.Sprintf("%s=%d", k, t.statuses[k]))
+	}
+	slices.Sort(t.took)
+	return fmt.Sprintf("%d requests | %s | status %s | p50 %s p99 %s", n, strings.Join(parts, " "), strings.Join(codes, " "),
+		t.took[n/2].Round(time.Millisecond), t.took[n*99/100].Round(time.Millisecond))
+}
+
+func sortedKeys(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}

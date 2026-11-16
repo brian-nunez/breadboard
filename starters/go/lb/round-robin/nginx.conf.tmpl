@@ -1,0 +1,114 @@
+# nginx.conf for rr-edge, shipped by the lb/round-robin starter: yours to
+# edit. bb up copies it into the container in place of the generated config
+# (services.rr-edge.file in experiment.yaml).
+#
+# HTTPS on :8443 with rr-edge's certificate, then every request goes, round
+# robin, to one of the addresses rr-backend.{{.Domain}} resolves to: one per
+# replica. The certificate (/etc/bb/tls/tls.crt and tls.key) and the lab CA
+# (/etc/bb/ca.pem) are mounted by Breadboard. Keep the status server on
+# 127.0.0.1:8404: the container's health check reads /healthz there.
+
+# Run in the foreground, so the container lives as long as NGINX.
+daemon off;
+user nginx;
+# One worker process. Round robin state lives in each worker; with one, the
+# rotation you see is exactly the rotation NGINX keeps.
+worker_processes 1;
+pid /run/nginx.pid;
+# Errors go to the container's output: bb logs rr-edge.
+error_log /dev/stderr notice;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    # Log every request with the replica that answered ($upstream_addr), so
+    # bb logs rr-edge shows the rotation. The health check (user agent
+    # bb-healthcheck, a TRACE refused with 405) is left out.
+    map $http_user_agent $bb_access_log {
+        bb-healthcheck 0;
+        default 1;
+    }
+    log_format rr '$remote_addr "$request" $status upstream=$upstream_addr '
+                  'upstream_time=$upstream_response_time';
+    access_log /dev/stdout rr if=$bb_access_log;
+
+    # Docker's embedded DNS. A server marked resolve is looked up here again
+    # whenever the answer is older than 5s, so NGINX follows replicas as
+    # they start and stop: scale rr-backend and the new ones get traffic.
+    resolver 127.0.0.11 valid=5s ipv6=off;
+
+    # Loopback only: the health check and the stub_status counters
+    # (bb serve's NGINX status tab reads them).
+    server {
+        listen 127.0.0.1:8404;
+        access_log off;
+        location = /healthz {
+            return 200 "ok\n";
+        }
+        location = /stub_status {
+            stub_status;
+        }
+    }
+
+    upstream rr_backend {
+        # No method named: weighted round robin, NGINX's default. Each new
+        # request goes to the next address in turn. Try another method by
+        # adding one line here (see the README): least_conn;
+        # random two least_conn; hash $request_uri consistent; ip_hash;
+
+        # resolve needs a shared memory zone to keep the addresses it finds.
+        zone rr_backend 64k;
+
+        # One name, every replica: rr-backend.{{.Domain}} is a DNS alias on
+        # each instance. NGINX turns each address into a peer. Every peer has
+        # weight 1 by default; to weigh replicas differently, list them one
+        # by one instead, for example:
+        #   server rr-backend-1.{{.Domain}}:8443 resolve weight=3;
+        # Passive health: after 3 failed attempts within 10s a peer rests for
+        # 10s and the request is retried on the next one. A failed attempt is
+        # a connection error or timeout (proxy_next_upstream's default, error
+        # timeout), not an HTTP 5xx answer; list http_500 and friends in
+        # proxy_next_upstream to count those, which also retries them.
+        # (Active checks, health_check, are NGINX Plus only.)
+        server rr-backend.{{.Domain}}:8443 resolve max_fails=3 fail_timeout=10s;
+
+        # Idle TLS connections kept open to the replicas, so most requests
+        # skip the handshake. Balancing is per request, not per connection.
+        keepalive 16;
+    }
+
+    server {
+        listen 8443 ssl;
+        http2 on;
+        server_name rr-edge.{{.Domain}};
+        ssl_certificate /etc/bb/tls/tls.crt;
+        ssl_certificate_key /etc/bb/tls/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        # Tell the backend the client spoke HTTPS and who it was. HTTP/1.1
+        # with an empty Connection header lets upstream connections be reused.
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 2s;
+
+        location / {
+            proxy_pass https://rr_backend;
+            # Re-encrypt: a new TLS connection to the replica, verified
+            # against the lab CA. Every replica's certificate carries the
+            # shared name rr-backend.{{.Domain}}, so one name verifies them all.
+            proxy_ssl_verify on;
+            proxy_ssl_trusted_certificate /etc/bb/ca.pem;
+            proxy_ssl_verify_depth 2;
+            proxy_ssl_server_name on;
+            proxy_ssl_name rr-backend.{{.Domain}};
+            proxy_ssl_protocols TLSv1.2 TLSv1.3;
+            proxy_ssl_session_reuse on;
+        }
+    }
+}

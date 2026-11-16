@@ -1,0 +1,46 @@
+# lb/least-connections
+
+**Least connections**: send each request to the server with the fewest requests in progress. When requests cost about the same, it behaves like round robin. When some servers or some requests are slow, it adapts: a slow server finishes late, keeps a higher count, and is picked less. Here [HAProxy](https://docs.haproxy.org/3.4/configuration.html#4.2-balance) runs `balance leastconn` and `balance roundrobin` side by side over the same replicas, in a config file you own: `haproxy.cfg` in this directory.
+
+- `cmd/lc-backend`: three replicas. Each serves TLS on 8443 and answers with its own name after a delay, the cost of the request: 50 ms, except `lc-backend-3`, which takes 500 ms. The knob is the constants at the top of `main.go`, or `POST /delay?d=…` on a replica's loopback port 8080. Every 5 seconds each replica logs how many requests it is serving.
+- `cmd/lc-client`: keeps six requests in flight to each strategy (`/` is leastconn, `/roundrobin/` is roundrobin). A worker sends its next request as soon as the last one returns. Every 5 seconds it logs a tally per strategy.
+- `haproxy.cfg`: the `lc-edge` service's config (`file: ./least-connections/haproxy.cfg` in `experiment.yaml`), commented.
+
+## How it works
+
+- **Two backends, one set of servers.** `be_leastconn` and `be_roundrobin` each have a `server-template` filled from the addresses `lc-backend.{{.Domain}}` resolves to. The frontend sends `/roundrobin/…` to `be_roundrobin` and everything else to `be_leastconn`. Each backend keeps its own counts.
+- **roundrobin** picks the next server in turn. The slow replica gets a third of the requests, and each one ties up a worker for 500 ms, so a third of the client's workers are usually waiting on it.
+- **leastconn** picks the server with the fewest requests in progress (HAProxy counts queued ones too), taking turns among servers with the same count. The slow replica holds its requests ten times longer, so its count stays high and it is picked much less: a few percent of requests instead of a third.
+- **Why it matters.** Under roundrobin, the p99 latency is the slow replica's 500 ms, and throughput is set by it. Under leastconn, more requests finish in 50 ms and the same six workers do far more work.
+
+```sh
+bb up
+bb logs lc-client -f
+```
+
+A typical pair of lines:
+
+```text
+leastconn  last 5s: 412 requests | lc-backend-1=196 (47%) lc-backend-2=196 (47%) lc-backend-3=20 (4%) | status 200=412 | p50 51ms p99 501ms
+roundrobin last 5s: 149 requests | lc-backend-1=49 (32%) lc-backend-2=50 (33%) lc-backend-3=50 (33%) | status 200=149 | p50 52ms p99 503ms
+```
+
+## What to watch
+
+- `bb serve`, `lc-edge`, **HAProxy stats** tab: per backend and per server, current sessions (requests in progress) and how often the balancer picked each server. In `be_leastconn` the slow replica's picks lag far behind; in `be_roundrobin` they are even. Slot names (`lc1`…`lc3`) are not replica numbers: the tab shows which replica each slot resolved to.
+- MCP: `haproxy_stats` with `service: lc-edge`.
+- `bb logs lc-backend`: each replica's requests in progress. Under leastconn the counts stay close; the slow replica's are high because roundrobin keeps sending to it.
+- `bb status`: `lc-edge` with its upstream `lc-backend (TLS :8443)`.
+
+## Try this
+
+- **Make every replica equal.** `docker exec bb-{{.Experiment}}-lc-backend-3-1 wget -qO- --post-data= 'http://127.0.0.1:8080/delay?d=50ms'`. Both strategies now give each replica a third: least connections only differs from round robin when costs differ.
+- **Move the slowness.** Slow replica 1 with `d=1s` (and set replica 3 to `d=50ms` if you have not already). leastconn follows within a window, with nothing changed in the config: it reacts to what the servers do, not to what you told it about them.
+- **Change the load.** Set `workers = 1` in `cmd/lc-client/main.go` and run `bb up`. With one request at a time no server ever has a request in progress when the next is picked, every count is zero, and leastconn falls back to taking turns: a third each, like roundrobin.
+- **Cap a server.** Add `maxconn 2` to both `server-template` lines and run `bb up`. HAProxy never sends a server more than two requests at once; the rest wait in the backend's queue (the `qcur` column of `/stats;csv`, see `bb learn haproxy`). This is how HAProxy protects a server from overload.
+
+## Break this
+
+- **Make the slow replica very slow.** Set `d=5s` on replica 3. Under roundrobin the client's p99 becomes 5 s and its throughput collapses; leastconn barely notices. Then set `d=15s`: the client gives up after its own 10 s timeout and counts `error` under roundrobin (HAProxy itself would wait up to `timeout server 30s`, then answer 504).
+- **Stop a replica.** `docker stop bb-{{.Experiment}}-lc-backend-2-1`. The active check (a TLS handshake every 2 s) marks its slot `DOWN` after three failures; both backends keep serving from the other two. `docker start` it and it returns after two good checks.
+- **Remove the knowledge leastconn needs.** In your copy, change `be_leastconn` to `balance random(1)` and run `bb up`. One random draw per request ignores load entirely: over a few windows the slow replica gets about a third of the requests again (each window varies with the luck of the draws), and the p99 returns to 500 ms. Then try `balance random(2)`, which is also what a bare `balance random` means, because two draws is HAProxy's default: HAProxy draws two servers and sends the request to the less loaded one. That is the power of two choices (see `lb/power-of-two-choices`), and the slow replica's share falls well below a third again.

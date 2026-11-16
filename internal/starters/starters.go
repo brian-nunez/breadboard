@@ -247,6 +247,85 @@ var all = []Starter{
 			{Name: "log-reader", Command: []string{"log-reader"}, Uses: []string{"s3-compatible"}},
 		},
 	},
+	{
+		ID:       "lb/round-robin",
+		Title:    "Round robin with NGINX",
+		Summary:  "NGINX sends each request to the next of three replicas it found through DNS; scale the backend and it follows.",
+		Language: "go",
+		Template: "go/lb/round-robin",
+		Dir:      "round-robin",
+		Apps: []App{
+			{Name: "rr-backend", Command: []string{"rr-backend"}, Replicas: 3},
+			{Name: "rr-client", Command: []string{"rr-client"}, Uses: []string{"rr-edge"}},
+		},
+		Services: []Service{{
+			Name: "rr-edge",
+			Type: "nginx",
+			// rr-backend serves TLS on 8443; NGINX re-encrypts.
+			Upstreams: []spec.Upstream{{Service: "rr-backend", Port: 8443}},
+			File:      "nginx.conf",
+		}},
+	},
+	{
+		ID:       "lb/least-connections",
+		Title:    "Least connections with HAProxy",
+		Summary:  "HAProxy's leastconn and roundrobin side by side over the same replicas, one of them ten times slower: leastconn sends it far fewer requests.",
+		Language: "go",
+		Template: "go/lb/least-connections",
+		Dir:      "least-connections",
+		Apps: []App{
+			{Name: "lc-backend", Command: []string{"lc-backend"}, Replicas: 3},
+			{Name: "lc-client", Command: []string{"lc-client"}, Uses: []string{"lc-edge"}},
+		},
+		Services: []Service{{
+			Name: "lc-edge",
+			Type: "haproxy",
+			// Named leastconn, so the explorers tag backend be_leastconn
+			// with this upstream; be_roundrobin is the file's own.
+			Upstreams: []spec.Upstream{{Service: "lc-backend", Port: 8443, Name: "leastconn"}},
+			File:      "haproxy.cfg",
+		}},
+	},
+	{
+		ID:       "lb/power-of-two-choices",
+		Title:    "Power of two choices with Traefik",
+		Summary:  "Traefik's p2c picks the less busy of two random replicas; next to wrr over the same replicas, the slow one gets far fewer requests.",
+		Language: "go",
+		Template: "go/lb/power-of-two-choices",
+		Dir:      "power-of-two-choices",
+		Apps: []App{
+			{Name: "p2c-backend", Command: []string{"p2c-backend"}, Replicas: 3},
+			{Name: "p2c-client", Command: []string{"p2c-client"}, Uses: []string{"p2c-edge"}},
+		},
+		Services: []Service{{
+			Name: "p2c-edge",
+			Type: "traefik",
+			// Named p2c, so the explorers tag Traefik service p2c with
+			// this upstream; service wrr is the file's own.
+			Upstreams: []spec.Upstream{{Service: "p2c-backend", Port: 8443, Name: "p2c"}},
+			File:      "dynamic.yml",
+		}},
+	},
+	{
+		ID:       "lb/consistent-hashing",
+		Title:    "Consistent hashing with Envoy",
+		Summary:  "Envoy hashes a header to pick a replica, ring_hash next to maglev: the same key always lands on the same replica, and removing one remaps only a minority of keys.",
+		Language: "go",
+		Template: "go/lb/consistent-hashing",
+		Dir:      "consistent-hashing",
+		Apps: []App{
+			{Name: "ch-backend", Command: []string{"ch-backend"}, Replicas: 4},
+			{Name: "ch-client", Command: []string{"ch-client"}, Uses: []string{"ch-edge"}},
+		},
+		Services: []Service{{
+			Name: "ch-edge",
+			Type: "envoy",
+			// Named ring-hash, so the explorers tag cluster ring-hash with
+			// this upstream; cluster maglev is the file's own.
+			Upstreams: []spec.Upstream{{Service: "ch-backend", Port: 8443, Name: "ring-hash"}},
+			File:      "envoy.yaml",
+		}},
+	},
 }
 
 // envoyInbound is an Envoy sidecar terminating TLS on 8443 in front of an

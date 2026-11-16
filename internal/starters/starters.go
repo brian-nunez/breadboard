@@ -409,6 +409,110 @@ var all = []Starter{
 			},
 		},
 	},
+	{
+		ID:       "proxy/l4-vs-l7",
+		Title:    "Layer 4 vs layer 7 proxying",
+		Summary:  "One HAProxy, two listeners: mode http routes each request by path or header; mode tcp picks a server per connection and cannot see paths.",
+		Language: "go",
+		Template: "go/proxy/l4-vs-l7",
+		Dir:      "l4-vs-l7",
+		Apps: []App{
+			{Name: "l4l7-api", Command: []string{"l4l7-api"}, Replicas: 2},
+			{Name: "l4l7-web", Command: []string{"l4l7-web"}, Replicas: 2},
+			{Name: "l4l7-client", Command: []string{"l4l7-client"}, Uses: []string{"l4l7-edge"}},
+		},
+		Services: []Service{{
+			Name: "l4l7-edge",
+			Type: "haproxy",
+			Upstreams: []spec.Upstream{
+				{Service: "l4l7-api", Port: 8443, Name: "api"},
+				{Service: "l4l7-web", Port: 8443, Name: "web"},
+			},
+			File: "haproxy.cfg",
+		}},
+	},
+	{
+		ID:       "proxy/tls-modes",
+		Title:    "TLS at the proxy: re-encrypt, terminate, passthrough",
+		Summary:  "Three backends behind one HAProxy, one per TLS mode; the client logs which certificate it was shown on each.",
+		Language: "go",
+		Template: "go/proxy/tls-modes",
+		Dir:      "tls-modes",
+		Apps: []App{
+			{Name: "tlsm-reencrypt", Command: []string{"tlsm-reencrypt"}},
+			{Name: "tlsm-terminate", Command: []string{"tlsm-terminate"}},
+			{Name: "tlsm-passthrough", Command: []string{"tlsm-passthrough"}},
+			{Name: "tlsm-client", Command: []string{"tlsm-client"}, Uses: []string{"tlsm-edge"}},
+		},
+		Services: []Service{{
+			Name: "tlsm-edge",
+			Type: "haproxy",
+			Upstreams: []spec.Upstream{
+				{Service: "tlsm-reencrypt", Port: 8443, Name: "reencrypt"},
+				{Service: "tlsm-terminate", Name: "terminate", TLS: spec.TLS{Mode: spec.TLSOff, Reason: "practice TLS termination at the proxy: tlsm-terminate has no TLS code"}},
+				{Service: "tlsm-passthrough", Port: 8443, Name: "passthrough", TLS: spec.TLS{Mode: spec.TLSPassthrough}},
+			},
+			File: "haproxy.cfg",
+		}},
+	},
+	{
+		ID:       "proxy/request-mirroring",
+		Title:    "Request mirroring with Envoy",
+		Summary:  "Envoy copies every request to v2 and discards its answers: v2 is tried on real traffic while clients only ever see v1.",
+		Language: "go",
+		Template: "go/proxy/request-mirroring",
+		Dir:      "request-mirroring",
+		Apps: []App{
+			{Name: "mirror-v1", Command: []string{"mirror-v1"}},
+			{Name: "mirror-v2", Command: []string{"mirror-v2"}},
+			{Name: "mirror-client", Command: []string{"mirror-client"}, Uses: []string{"mirror-edge"}},
+		},
+		Services: []Service{{
+			Name: "mirror-edge",
+			Type: "envoy",
+			Upstreams: []spec.Upstream{
+				{Service: "mirror-v1", Port: 8443, Name: "v1"},
+				{Service: "mirror-v2", Port: 8443, Name: "v2"},
+			},
+			File: "envoy.yaml",
+		}},
+	},
+	{
+		ID:       "proxy/connection-draining",
+		Title:    "Connection draining with HAProxy",
+		Summary:  "Drain a replica through HAProxy's runtime API, or let it fail its health check on SIGTERM, and stop it under load with no failed requests.",
+		Language: "go",
+		Template: "go/proxy/connection-draining",
+		Dir:      "connection-draining",
+		Apps: []App{
+			{Name: "drain-backend", Command: []string{"drain-backend"}, Replicas: 3},
+			{Name: "drain-client", Command: []string{"drain-client"}, Uses: []string{"drain-edge"}},
+		},
+		Services: []Service{{
+			Name:      "drain-edge",
+			Type:      "haproxy",
+			Upstreams: []spec.Upstream{{Service: "drain-backend", Port: 8443, Name: "app"}},
+			File:      "haproxy.cfg",
+		}},
+	},
+	{
+		ID:       "pgbouncer/pooling-modes",
+		Title:    "PgBouncer pooling modes",
+		Summary:  "A shared PgBouncer with a session pool and a transaction pool: server connections vs clients, and the session-state traps of transaction mode.",
+		Language: "go",
+		Template: "go/pgbouncer/pooling-modes",
+		Dir:      "pooling-modes",
+		Requires: []string{"postgres"},
+		Apps: []App{
+			{Name: "pool-modes", Command: []string{"pool-modes"}, Uses: []string{"pool-central"}},
+		},
+		Services: []Service{{
+			Name:      "pool-central",
+			Type:      "pgbouncer",
+			Upstreams: []spec.Upstream{{Service: "postgres"}},
+			File:      "pgbouncer.ini",
+		}},
+	},
 }
 
 // envoyInbound is an Envoy sidecar terminating TLS on 8443 in front of an

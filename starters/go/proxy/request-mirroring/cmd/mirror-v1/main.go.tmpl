@@ -1,0 +1,21 @@
+// Command mirror-v1 is the version in production. Envoy sends it every
+// request, and its answers are the only ones clients get.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	http.HandleFunc("POST /orders", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		fmt.Fprintf(w, "v1 (%s) stored %s\n", name, body)
+	})
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

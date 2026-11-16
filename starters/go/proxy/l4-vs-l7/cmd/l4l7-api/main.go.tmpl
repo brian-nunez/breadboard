@@ -1,0 +1,25 @@
+// Command l4l7-api runs as two replicas behind HAProxy. Every answer names
+// the replica that served it and the request it saw, so the client can tell
+// where each request went and whether it was the right app.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // l4l7-api-1 or l4l7-api-2
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// The instance goes in a header too, so a client can read it
+		// without parsing the body.
+		w.Header().Set("X-Instance", name)
+		fmt.Fprintf(w, "%s saw %s %s (X-Route: %q)\n", name, r.Method, r.URL.Path, r.Header.Get("X-Route"))
+	})
+	// TLS on 8443 with this replica's own certificate, whose names are
+	// l4l7-api-<n>.<domain> and the shared l4l7-api.<domain>.
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

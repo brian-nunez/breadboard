@@ -1,0 +1,49 @@
+# proxy/request-mirroring
+
+Try a new version on real traffic before any user depends on it: [Envoy](https://www.envoyproxy.io/docs/envoy/v1.40.2/api-v3/config/route/v3/route_components.proto#envoy-v3-api-msg-config-route-v3-routeaction-requestmirrorpolicy) sends every request to v1 and a copy to v2, then throws v2's answer away.
+
+- `cmd/mirror-v1`: the version in production. Its answers are the only ones clients get.
+- `cmd/mirror-v2`: the candidate. It takes 250 ms per order and fails one in three, and logs every 5 seconds how many copies it received and how many it failed.
+- `cmd/mirror-client`: places an order through `mirror-edge` five times a second and logs, every 5 seconds, which version answered, failures, and the slowest answer.
+- `envoy.yaml`: the proxy's config, yours to edit. `experiment.yaml` points `services.mirror-edge.file` at it.
+
+## How it works
+
+The route that takes every request names v1 as its cluster, and a mirror policy names v2:
+
+```yaml
+route:
+  cluster: v1
+  request_mirror_policies:
+    - cluster: v2
+      runtime_fraction:
+        default_value: {numerator: 100, denominator: HUNDRED}
+```
+
+- Envoy forwards the request to v1 and returns v1's answer to the client.
+- It also sends a copy (a **shadow**) to v2, without waiting for it, and discards v2's answer. v2's latency and errors never reach the client.
+- The copy's `Host` gets `-shadow` appended (`mirror-edge.{{.Domain}}-shadow:8443`), so v2, its logs and its metrics can tell shadows from real traffic.
+- Both hops are TLS, verified against the lab CA, and both clusters are health checked (`GET /` every 2 s).
+
+```sh
+bb up
+bb logs mirror-client -f   # last 5s: 25 orders, answered by v1=25 v2=0, failed 0, slowest 3ms
+bb logs mirror-v2 -f       # last 5s: received 25 mirrored requests (Host mirror-edge.{{.Domain}}-shadow:8443), answered 500 to 8; nobody saw these answers
+```
+
+In `bb serve`, open **mirror-edge** and its **Envoy clusters** tab: `v1` and `v2` count about the same number of requests, and `v2` counts errors that no client received. MCP clients call `envoy_clusters` with `service: mirror-edge`.
+
+What mirroring is good for: comparing a rewrite's behaviour, latency and resource use under production traffic, warming caches, load testing with real request shapes. What it is not safe for: requests with side effects. v2 receives every order too; if it wrote to the same database or charged the same card, it would do so twice. Shadows need their own data, or idempotent, read-only paths.
+
+## Try this
+
+- **Mirror a sample.** Set `numerator: 10` and `bb up`. v2 now receives about one order in ten.
+- **Compare by hand.** `docker exec bb-{{.Experiment}}-mirror-client-1 sh -c 'wget -qO- --post-data="{\"id\":1}" "$MIRROR_EDGE_URL/v2/orders"'` hits v2 directly through the `/v2/` route, unmirrored, and shows its answer (or its 500). `/v1/orders` does the same for v1.
+- **Keep the Host.** Add `disable_shadow_host_suffix_append: true` under the mirror policy. v2's log now shows the Host unchanged, and it can no longer tell a shadow from a real request.
+- **Promote v2.** When v2's log is clean, swap `cluster: v1` and `cluster: v2` on the default route: v2 answers, and v1 becomes the shadow. Shifting real traffic gradually instead is `lb/weighted-canary`.
+
+## Break this
+
+- **Make v2 very slow.** Change the sleep in `cmd/mirror-v2/main.go` to 5 seconds and `bb up`. The client's `slowest` stays at a few milliseconds: Envoy never waits for a shadow. (A shadow still gets the route's timeout, 15 s by default, after which Envoy cancels it.)
+- **Stop v2.** `docker stop bb-{{.Experiment}}-mirror-v2-1`. The client keeps getting v1's answers with no failures; the Envoy tab shows `v2` with no healthy host. `bb up` starts it again.
+- **Stop v1 instead.** `docker stop bb-{{.Experiment}}-mirror-v1-1`. Now every order fails with 503: the mirror is never a fallback.

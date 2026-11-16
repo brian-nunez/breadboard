@@ -1,0 +1,88 @@
+{{- $pg := .Service "postgres"}}{{$db := .Config "postgres" "database"}}{{$user := .Config "postgres" "user" -}}
+; pgbouncer.ini for pool-central, from the pgbouncer/pooling-modes starter.
+; You own it: experiment.yaml sets services.pool-central.file to this file,
+; and bb up loads your edits (bb up again after a change).
+;
+; One PgBouncer shared by every app that uses it, in front of one Postgres
+; database ({{$db}} on {{$pg}}), offered under two names with two pooling
+; modes:
+;
+;   {{$db}}          transaction pooling, 5 server connections
+;   {{$db}}_session  session pooling, 8 server connections
+;
+; Apps connect with TLS to pool-central.{{.Domain}}:6432 and log in as the
+; application role of {{$pg}} ({{$user}}). DATABASE_URL names the database
+; {{$db}}; add _session to the name to get the other pool.
+;
+; Keep what Breadboard mounts and writes: the certificate
+; (/etc/bb/tls/tls.crt, /etc/bb/tls/tls.key), the lab CA (/etc/bb/ca.pem),
+; the HBA file (/etc/bb/config/pgbouncer_hba.conf) and the auth file
+; (/tmp/pgbouncer/userlist.txt, written at start from BB_PG_USER and
+; BB_PG_PASSWORD). No password belongs in this file.
+
+[databases]
+; Each line is a pool: a name clients ask for, the real database behind it,
+; and settings that override [pgbouncer] for this pool. bb starter wrote
+; your Postgres service and database here; if you rename either in
+; experiment.yaml, change host= and dbname= to match. Apps ask for the
+; database named in DATABASE_URL, so keep the first name equal to it. Both
+; names reach the same database over TLS, verified as {{$pg}}.{{.Domain}}
+; (server_tls_sslmode below).
+{{$db}} = host={{$pg}}.{{.Domain}} port=5432 dbname={{$db}} pool_mode=transaction pool_size=5
+{{$db}}_session = host={{$pg}}.{{.Domain}} port=5432 dbname={{$db}} pool_mode=session pool_size=8
+
+[pgbouncer]
+listen_addr = *
+listen_port = 6432
+; No Unix socket: every client, the admin console included, uses TCP and TLS.
+unix_socket_dir =
+
+; Clients: TLS required, with this service's certificate.
+client_tls_sslmode = require
+client_tls_cert_file = /etc/bb/tls/tls.crt
+client_tls_key_file = /etc/bb/tls/tls.key
+client_tls_protocols = tlsv1.2,tlsv1.3
+
+; Who may log in, and from where: see pgbouncer_hba.conf.
+auth_type = hba
+auth_hba_file = /etc/bb/config/pgbouncer_hba.conf
+auth_file = /tmp/pgbouncer/userlist.txt
+
+; Server connections to Postgres: TLS, verifying the certificate and the
+; host name against the lab CA.
+server_tls_sslmode = verify-full
+server_tls_ca_file = /etc/bb/ca.pem
+server_tls_protocols = tlsv1.2,tlsv1.3
+
+; The defaults for pools that do not set their own (both of ours do).
+;   session:     a client keeps one server connection until it disconnects.
+;   transaction: a client borrows one for a transaction, then gives it back.
+;   statement:   one per statement; multi-statement transactions are refused.
+pool_mode = transaction
+default_pool_size = 10
+max_client_conn = 200
+
+; Session mode resets a server connection before the next client gets it
+; (server_reset_query, DISCARD ALL by default). Transaction mode does not:
+; whatever a client SETs stays on the server connection for the next one.
+
+; Protocol-level prepared statements (what pgx and most drivers use) work in
+; transaction mode: PgBouncer remembers up to this many per client and
+; prepares them again on whichever server connection runs them. SQL-level
+; PREPARE and EXECUTE are not tracked. 0 turns the tracking off.
+max_prepared_statements = 200
+
+; How long a client may wait for a server connection before PgBouncer gives
+; up on it with an error.
+query_wait_timeout = 120
+
+; Drivers send this; PgBouncer would otherwise refuse the connection.
+ignore_startup_parameters = extra_float_digits
+
+; The admin console (database pgbouncer): SHOW POOLS, SHOW STATS. The HBA
+; file admits it from 127.0.0.1 only, so only docker exec reaches it, and
+; bb serve's PgBouncer pools tab and MCP pgbouncer_pools read it that way.
+admin_users = {{$user}}
+stats_users = {{$user}}
+log_connections = 1
+log_disconnections = 1

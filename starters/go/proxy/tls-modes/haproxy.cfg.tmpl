@@ -1,0 +1,99 @@
+# haproxy.cfg for tlsm-edge, from the proxy/tls-modes starter. You own it:
+# experiment.yaml sets services.tlsm-edge.file to this file, and bb up loads
+# your edits (bb up again after a change).
+#
+# Three ways a proxy can handle TLS, side by side:
+#
+#   https://tlsm-edge:8443/reencrypt/  re-encrypt: decrypt, then a new TLS
+#                                      connection to the backend, verified
+#   https://tlsm-edge:8443/terminate/  terminate: decrypt, then plain HTTP on
+#                                      a private segment
+#   tlsm-edge:9443, SNI tlsm-passthrough  passthrough: route on the TLS hello,
+#                                      never decrypt
+#
+# The differences are a few words on a server line, and which frontend the
+# connection arrives at. Keep the monitor frontend on 127.0.0.1:8404 (bb's
+# health check reads /healthz there) and the TLS listener on 8443.
+
+global
+    log stdout format raw local0
+    maxconn 256
+    nbthread 1
+    ssl-default-bind-options ssl-min-ver TLSv1.2
+    ssl-default-server-options ssl-min-ver TLSv1.2
+
+resolvers docker
+    nameserver dns 127.0.0.11:53
+    accepted_payload_size 8192
+    resolve_retries 3
+    timeout resolve 1s
+    timeout retry 1s
+
+defaults
+    log global
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+    timeout check 5s
+    default-server inter 2s fall 3 rise 2 resolvers docker resolve-prefer ipv4 init-addr none
+
+# Loopback only: bb's health check and the stats page (bb serve, MCP).
+frontend monitor
+    bind 127.0.0.1:8404
+    mode http
+    monitor-uri /healthz
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats show-legends
+
+# The client's TLS ends here, with tlsm-edge's certificate (keystore.pem
+# holds it and its key). Everything after this line sees plain HTTP, which
+# is what lets HAProxy route on the path and add headers.
+frontend https
+    bind :8443 ssl crt /etc/bb/tls/keystore.pem alpn h2,http/1.1
+    mode http
+    option httplog
+    http-request set-header X-Forwarded-Proto https
+    option forwardfor
+    use_backend be_terminate if { path_beg /terminate/ }
+    use_backend be_reencrypt if { path_beg /reencrypt/ }
+    default_backend be_reencrypt
+
+# Re-encrypt: "ssl verify required" opens TLS to the backend and checks its
+# certificate against the lab CA; sni and verifyhost name the backend.
+# Use this when the network between proxy and backend is not yours.
+backend be_reencrypt
+    mode http
+    balance roundrobin
+    http-request replace-path /reencrypt/(.*) /\1
+    server-template reencrypt 1 tlsm-reencrypt.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(tlsm-reencrypt.{{.Domain}}) verifyhost tlsm-reencrypt.{{.Domain}} check check-sni tlsm-reencrypt.{{.Domain}}
+
+# Terminate: no "ssl" on the server line, so this hop is plain HTTP. Breadboard
+# puts it on a private segment (tlsm-terminate.plain.<domain>) that only
+# this proxy and the backend join, and the backend's pod drops the port on
+# every other address. experiment.yaml records why (tls.reason).
+backend be_terminate
+    mode http
+    balance roundrobin
+    http-request replace-path /terminate/(.*) /\1
+    server-template terminate 1 tlsm-terminate.plain.{{.Domain}}:8080 check
+
+# Passthrough: a tcp-mode frontend that never decrypts. It waits for the
+# client's TLS hello, reads the server name the client asked for (SNI), and
+# forwards the encrypted bytes. The client sees the backend's certificate;
+# HAProxy cannot read paths or add headers, and closes unknown names.
+frontend passthrough
+    bind :9443
+    mode tcp
+    option tcplog
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req.ssl_hello_type 1 }
+    use_backend be_tls_passthrough if { req.ssl_sni -i tlsm-passthrough.{{.Domain}} }
+
+backend be_tls_passthrough
+    mode tcp
+    balance roundrobin
+    # A TCP connect check: HAProxy cannot complete the client's handshake
+    # for it, and has no business decrypting this traffic.
+    server-template passthrough 1 tlsm-passthrough.{{.Domain}}:8443 check

@@ -1,0 +1,88 @@
+// Command tlsm-client calls one backend per TLS mode through tlsm-edge and
+// logs the certificate it was shown each time:
+//
+//   - re-encrypt and terminate end the client's TLS at HAProxy, so the client
+//     sees HAProxy's certificate (tlsm-edge);
+//   - passthrough forwards the client's TLS untouched, so the client sees the
+//     backend's own certificate (tlsm-passthrough).
+//
+// It also tries the terminate backend's plaintext port directly, which must
+// fail: only the proxy may reach it.
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	// From uses: [tlsm-edge]:
+	//   TLSM_EDGE_URL=https://tlsm-edge.<domain>:8443 (HTTPS, decrypted)
+	//   TLSM_EDGE_PASSTHROUGH_ADDR=tlsm-edge.<domain>:9443 (TLS routed by SNI)
+	edge := os.Getenv("TLSM_EDGE_URL")
+	passthroughAddr := os.Getenv("TLSM_EDGE_PASSTHROUGH_ADDR")
+	_, domain, _ := strings.Cut(os.Getenv("BB_FQDN"), ".")
+
+	// The default transport verifies every certificate against
+	// SSL_CERT_FILE, the lab's trust bundle: no TLS settings in code.
+	viaEdge := &http.Client{Timeout: 3 * time.Second}
+
+	// Passthrough: connect to the edge's passthrough port, but ask for and
+	// verify the backend's name. The URL's host is what goes in the TLS
+	// hello (SNI) and what the certificate must match; only the TCP
+	// connection is redirected to the edge.
+	var d net.Dialer
+	viaPassthrough := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return d.DialContext(ctx, network, passthroughAddr)
+		},
+	}}
+
+	// The terminate backend's plaintext port, tried directly.
+	direct := &http.Client{Timeout: 2 * time.Second}
+
+	for {
+		call("re-encrypt", viaEdge, edge+"/reencrypt/")
+		call("terminate", viaEdge, edge+"/terminate/")
+		call("passthrough", viaPassthrough, fmt.Sprintf("https://tlsm-passthrough.%s:9443/", domain))
+
+		for _, u := range []string{
+			fmt.Sprintf("http://tlsm-terminate.%s:8080/", domain),
+			fmt.Sprintf("http://tlsm-terminate.plain.%s:8080/", domain),
+		} {
+			if resp, err := direct.Get(u); err != nil {
+				log.Printf("direct %s: unreachable, as it should be: %v", u, err)
+			} else {
+				resp.Body.Close()
+				log.Printf("direct %s: answered %s in plaintext: the terminate hop is exposed", u, resp.Status)
+			}
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// call fetches url and logs the certificate the client verified and the
+// backend's answer.
+func call(mode string, c *http.Client, url string) {
+	resp, err := c.Get(url)
+	if err != nil {
+		log.Printf("%-11s %s failed: %v", mode, url, err)
+		return
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	cert := resp.TLS.PeerCertificates[0]
+	sum := sha256.Sum256(cert.Raw)
+	log.Printf("%-11s %s: %s, certificate for %v issued by %q (sha256 %x), %s; backend: %s",
+		mode, url, resp.Status, cert.DNSNames, cert.Issuer.CommonName, sum[:6],
+		tls.VersionName(resp.TLS.Version), strings.TrimSpace(string(body)))
+}

@@ -1,0 +1,84 @@
+// Command drain-client keeps eight requests in flight through drain-edge at
+// all times and logs, every 2 seconds, which replica answered how many and
+// how many failed. While a replica is drained and stopped, the failure
+// count should stay at zero.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+const workers = 8
+
+func main() {
+	// DRAIN_EDGE_URL=https://drain-edge.<domain>:8443, from uses: [drain-edge].
+	url := os.Getenv("DRAIN_EDGE_URL") + "/work"
+	// HAProxy offers HTTP/2, so the eight workers share one connection, each
+	// request a stream on it, and HAProxy balances every stream on its own.
+	// The client verifies HAProxy's certificate against SSL_CERT_FILE.
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	var mu sync.Mutex
+	window := map[string]int{}
+	var failed, total, totalFailed int
+
+	for range workers {
+		go func() {
+			for {
+				who, err := call(client, url)
+				mu.Lock()
+				total++
+				if err != nil {
+					failed++
+					totalFailed++
+					log.Printf("request failed: %v", err)
+				} else {
+					window[who]++
+				}
+				mu.Unlock()
+				if err != nil {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+		}()
+	}
+
+	for range time.Tick(2 * time.Second) {
+		mu.Lock()
+		var parts []string
+		for who, n := range window {
+			parts = append(parts, fmt.Sprintf("%s=%d", who, n))
+		}
+		slices.Sort(parts)
+		log.Printf("last 2s: %s, failed %d; total %d requests, %d failed",
+			strings.Join(parts, " "), failed, total, totalFailed)
+		clear(window)
+		failed = 0
+		mu.Unlock()
+	}
+}
+
+// call returns the replica that answered.
+func call(c *http.Client, url string) (string, error) {
+	resp, err := c.Get(url)
+	if err != nil {
+		return "", err
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	return strings.TrimSpace(string(body)), nil
+}

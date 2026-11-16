@@ -1,0 +1,104 @@
+# haproxy.cfg for l4l7-edge, from the proxy/l4-vs-l7 starter. You own it:
+# experiment.yaml sets services.l4l7-edge.file to this file, and bb up loads
+# your edits (bb up again after a change).
+#
+# One HAProxy, two listeners, the same backends:
+#
+#   :8443  frontend l7, mode http (layer 7). HAProxy decrypts TLS, parses
+#          each HTTP request and picks a backend per request: /api/ or the
+#          header X-Route: api -> l4l7-api, anything else -> l4l7-web.
+#   :7443  frontend l4, mode tcp (layer 4). HAProxy decrypts TLS too, but
+#          never parses HTTP: it picks a server when the connection opens,
+#          and every byte of that connection goes there.
+#
+# Every hop is TLS: client -> HAProxy with HAProxy's certificate, HAProxy ->
+# backend verified against the lab CA. Keep the monitor frontend on
+# 127.0.0.1:8404 (bb's health check reads /healthz there) and a TLS
+# listener on 8443 (the health check also completes a handshake on it).
+
+global
+    # Logs go to the container's stdout: bb logs l4l7-edge.
+    log stdout format raw local0
+    # Small tables for a small container; raise both for a load test.
+    maxconn 256
+    nbthread 1
+    ssl-default-bind-options ssl-min-ver TLSv1.2
+    ssl-default-server-options ssl-min-ver TLSv1.2
+
+# Docker's embedded DNS. server-template lines keep resolving their name
+# here, so HAProxy finds every replica and follows them as they restart.
+resolvers docker
+    nameserver dns 127.0.0.11:53
+    accepted_payload_size 8192
+    resolve_retries 3
+    timeout resolve 1s
+    timeout retry 1s
+
+defaults
+    log global
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+    timeout check 5s
+    # An active check every 2s; down after 3 failures, up after 2 successes.
+    # init-addr none: a replica that does not resolve yet starts down
+    # instead of stopping HAProxy from starting.
+    default-server inter 2s fall 3 rise 2 resolvers docker resolve-prefer ipv4 init-addr none
+
+# Loopback only: bb's health check (/healthz) and the stats page that
+# bb serve's HAProxy tab and MCP haproxy_stats read (/stats;csv).
+frontend monitor
+    bind 127.0.0.1:8404
+    mode http
+    monitor-uri /healthz
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats show-legends
+
+# ---------------------------------------------------------------- layer 7
+frontend l7
+    bind :8443 ssl crt /etc/bb/tls/keystore.pem alpn h2,http/1.1
+    mode http
+    option httplog
+    http-request set-header X-Forwarded-Proto https
+    option forwardfor
+    # Layer 7 can route on anything in the request. Here: the path, or a
+    # header. Try host names (hdr(host)), methods, cookies, query strings.
+    use_backend be_api if { path_beg /api/ } || { req.hdr(x-route) -i api }
+    default_backend be_web
+
+backend be_api
+    mode http
+    # Per request: on one client connection, consecutive requests can go to
+    # different replicas. HAProxy keeps its own idle connections to the
+    # servers and reuses them (http-reuse safe, the default).
+    balance roundrobin
+    server-template api 2 l4l7-api.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(l4l7-api.{{.Domain}}) verifyhost l4l7-api.{{.Domain}} check check-sni l4l7-api.{{.Domain}}
+
+backend be_web
+    mode http
+    balance roundrobin
+    server-template web 2 l4l7-web.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(l4l7-web.{{.Domain}}) verifyhost l4l7-web.{{.Domain}} check check-sni l4l7-web.{{.Domain}}
+
+# ---------------------------------------------------------------- layer 4
+frontend l4
+    # TLS is decrypted here as well (TLS offload). No ALPN is offered, so
+    # clients speak HTTP/1.1: HAProxy only forwards the bytes, and offering
+    # h2 would need every server to speak HTTP/2 to it.
+    bind :7443 ssl crt /etc/bb/tls/keystore.pem
+    mode tcp
+    option tcplog
+    # No use_backend on a path: in tcp mode there is no path, only the
+    # connection (addresses, ports, TLS SNI, bytes). Every connection goes
+    # to the one pool.
+    default_backend be_l4
+
+backend be_l4
+    mode tcp
+    # Per connection: the server chosen when the connection opens gets every
+    # request on it. Both apps are in the pool, so a request for /api/ can
+    # land on l4l7-web: a layer 4 proxy cannot tell them apart.
+    balance roundrobin
+    server-template api 2 l4l7-api.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(l4l7-api.{{.Domain}}) verifyhost l4l7-api.{{.Domain}} check check-sni l4l7-api.{{.Domain}}
+    server-template web 2 l4l7-web.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(l4l7-web.{{.Domain}}) verifyhost l4l7-web.{{.Domain}} check check-sni l4l7-web.{{.Domain}}

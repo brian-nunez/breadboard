@@ -1,0 +1,51 @@
+# proxy/l4-vs-l7
+
+What a proxy can do depends on how much of the traffic it reads. One [HAProxy](https://docs.haproxy.org/3.4/configuration.html) serves the same backends on two listeners: one at layer 7 (HTTP), one at layer 4 (TCP).
+
+- `cmd/l4l7-api` and `cmd/l4l7-web`: two replicas each, serving TLS on 8443. Every answer names the replica and the request it saw.
+- `cmd/l4l7-client`: every 5 seconds, sends the same requests through both listeners of `l4l7-edge` and logs where each one landed.
+- `haproxy.cfg`: the proxy's config, yours to edit. `experiment.yaml` points `services.l4l7-edge.file` at it.
+
+## How it works
+
+| | `:8443`, `frontend l7` | `:7443`, `frontend l4` |
+|---|---|---|
+| HAProxy mode | `mode http` | `mode tcp` |
+| What it reads | each HTTP request: method, path, headers | a TLS connection and the bytes inside it |
+| Routing | `/api/` or `X-Route: api` to `l4l7-api`, everything else to `l4l7-web` | one pool with both apps' replicas |
+| Balancing | per request (`balance roundrobin`) | per connection |
+| On one keep-alive connection | requests spread over replicas | every request goes to the same server |
+
+Both listeners decrypt TLS with HAProxy's certificate, and both open verified TLS to the backends. TLS is a layer below HTTP, so decrypting it does not make a proxy layer 7: in `mode tcp` HAProxy forwards the decrypted bytes and never parses them. It cannot route on a path because, to it, there is no path. (It can still route on what a connection carries: addresses, ports and the TLS server name, as the passthrough frontend of `proxy/tls-modes` does.)
+
+The client's log shows both behaviours:
+
+```text
+L7 :8443 (mode http): 1 connection(s), 8 requests; instances [l4l7-api-1 l4l7-api-2 l4l7-web-1 l4l7-web-2]; misrouted 0 of 8
+L4 :7443 connection 1: /api/orders -> l4l7-api-1, /web/home -> l4l7-api-1
+L4 :7443 connection 2: /api/orders -> l4l7-api-2, /web/home -> l4l7-api-2
+L4 :7443 connection 3: /api/orders -> l4l7-web-1, /web/home -> l4l7-web-1
+L4 :7443 (mode tcp): 4 connections, 8 requests; instances [...]; one instance per connection: true; misrouted 4 of 8
+```
+
+Over one connection (HTTP/2: HAProxy offers `h2` on 8443), layer 7 reached all four replicas and sent every request to the right app. Layer 4 put each connection on one server and half of the requests on the wrong app.
+
+```sh
+bb up
+bb logs l4l7-client -f
+bb logs l4l7-edge          # HAProxy's log: HTTP lines for l7, TCP lines for l4
+```
+
+In `bb serve`, open **l4l7-edge** and its **HAProxy stats** tab: frontend `l7` counts requests, frontend `l4` only sessions (connections). Backends `be_api` and `be_web` show requests spread over both replicas; `be_l4` shows one session per connection, one server at a time. MCP clients call `haproxy_stats` with `service: l4l7-edge`.
+
+## Try this
+
+- **Route on something else.** In `frontend l7`, add `use_backend be_api if { method POST }` above `default_backend` and `bb up`. Layer 7 can route on anything in the request: method, host, cookies, query strings.
+- **Balance layer 4 by client address.** In `be_l4`, change `balance roundrobin` to `balance source` and `bb up`. Every connection from the client now hashes to the same server: stickiness from the only thing a layer 4 proxy knows about a client, its address.
+- **Keep the last server.** In `be_api`, add `option prefer-last-server` and `bb up`. HAProxy then prefers the server it already holds a connection to for the next request on the same client connection, so the layer 7 line shows fewer api replicas per round, and path routing still works.
+- **Make layer 4 pass TLS through.** Remove `ssl crt /etc/bb/tls/keystore.pem` from the `l4` bind and everything from `ssl` onwards (except `check`) on `be_l4`'s server lines, then `bb up`. HAProxy now forwards the client's encrypted bytes, and the client sees a backend's certificate, `l4l7-api.{{.Domain}}` or `l4l7-web.{{.Domain}}`, which does not match the name it asked for: the layer 4 lines fail certificate verification. `proxy/tls-modes` shows how routing on the TLS server name (SNI) makes passthrough work.
+
+## Break this
+
+- **Stop a replica.** `docker stop bb-{{.Experiment}}-l4l7-web-1-1`. Within a few seconds the health checks mark it down in both `be_web` and `be_l4` (the HAProxy stats tab shows it), and both listeners carry on with the other replicas. `bb up` starts it again.
+- **Break the backend hop's verification.** On `be_api`'s server line, change the three names after `sni str(`, `verifyhost` and `check-sni` from `l4l7-api.{{.Domain}}` to `l4l7-web.{{.Domain}}`, then `bb up`. The api replicas' certificates do not carry that name, so every handshake fails verification: the checks mark both api servers down and layer 7 answers `/api/` with 503, while `/web/` still works. Re-encryption is only worth it when the proxy verifies whom it talks to.

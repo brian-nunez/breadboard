@@ -1,0 +1,43 @@
+// Command mirror-v2 is the candidate version. Envoy sends it a copy of
+// every request (a shadow) and throws its answers away, so v2 can be tried
+// on real traffic without any client seeing it. This v2 is slower than v1
+// and fails one request in three: watch the client not notice.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"sync/atomic"
+	"time"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	var copies, failed atomic.Int64
+	var lastHost atomic.Value
+	lastHost.Store("")
+	http.HandleFunc("POST /orders", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		// Envoy marks a shadow by appending -shadow to the Host.
+		lastHost.Store(r.Host)
+		n := copies.Add(1)
+		time.Sleep(250 * time.Millisecond)
+		if n%3 == 0 {
+			failed.Add(1)
+			http.Error(w, "v2 bug: "+string(body), http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprintf(w, "v2 (%s) stored %s\n", name, body)
+	})
+	go func() {
+		for range time.Tick(5 * time.Second) {
+			log.Printf("last 5s: received %d mirrored requests (Host %s), answered 500 to %d; nobody saw these answers",
+				copies.Swap(0), lastHost.Load(), failed.Swap(0))
+		}
+	}()
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

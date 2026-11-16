@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -249,6 +250,40 @@ func TestApplyStarterProxyNameTaken(t *testing.T) {
 	res, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir})
 	if err != nil || strings.Join(res.ExistingServices, ",") != "fixture-edge" {
 		t.Fatalf("re-apply after editing file: %+v, %v", res, err)
+	}
+}
+
+// A proxy in front of infra has no upstream to an app of the starter: after
+// the user copies its file elsewhere and points file there, it is still
+// recognised as the starter's by its client in this directory, and the
+// re-apply keeps the user's file setting.
+func TestApplyStarterInfraProxyRepointedFile(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	if _, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: "pgbouncer/pooling-modes"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(h.dir, "mine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.dir, "mine", "pgbouncer.ini"), []byte(h.read("pooling-modes/pgbouncer.ini")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := h.read("experiment.yaml")
+	edited := strings.Replace(before, "file: ./pooling-modes/pgbouncer.ini", "file: ./mine/pgbouncer.ini", 1)
+	if edited == before {
+		t.Fatalf("pool-central has no file to repoint:\n%s", before)
+	}
+	h.writeSpec(edited)
+	res, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: "pgbouncer/pooling-modes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(res.ExistingServices, "pool-central") || len(res.AddedServices) != 0 || len(res.AddedApps) != 0 {
+		t.Fatalf("re-apply = %+v", res)
+	}
+	if h.read("experiment.yaml") != edited {
+		t.Errorf("re-apply changed experiment.yaml:\n%s", h.read("experiment.yaml"))
 	}
 }
 

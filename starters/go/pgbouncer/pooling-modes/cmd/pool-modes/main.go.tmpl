@@ -1,0 +1,219 @@
+// Command pool-modes shows what a shared PgBouncer does in session and in
+// transaction pooling, with the official Go driver pgx.
+//
+// Load: 30 clients query through the transaction pool (the database named
+// in DATABASE_URL, app by default) and 6 through the session pool (the same
+// name with _session), each on its own client connection. Every query also returns pg_backend_pid(), the Postgres
+// server process that ran it, so the log can count server connections and
+// how often a client's next query ran on a different one.
+//
+// Traps: every 5 seconds a client SETs a session variable and reads it back,
+// and PREPAREs a statement and EXECUTEs it, in both pools. In transaction
+// pooling the second statement can run on another server connection, where
+// the first one's state is missing, or another client's is left over.
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+const (
+	txnClients     = 30 // more than the transaction pool's 5 servers
+	sessionClients = 6  // fewer than the session pool's 8 servers
+)
+
+// pool is one PgBouncer database name and what its clients saw in the
+// current 5-second window.
+type pool struct {
+	db, mode string
+	cfg      *pgx.ConnConfig
+	clients  int
+
+	queries atomic.Int64
+	changes atomic.Int64 // a client's query ran on another server than its previous one
+	mu      sync.Mutex
+	servers map[int32]bool
+}
+
+func main() {
+	ctx := context.Background()
+	// DATABASE_URL, from uses: [pool-central]:
+	// postgres://app:...@pool-central.<domain>:6432/app?sslmode=verify-full
+	// TLS to PgBouncer, verified against PGSSLROOTCERT (the lab CA).
+	txnCfg, err := pgx.ParseConfig(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	// The same server and login, another database name: another pool
+	// (pgbouncer.ini lists both names).
+	sessionCfg := txnCfg.Copy()
+	sessionCfg.Database = txnCfg.Database + "_session"
+
+	txn := &pool{db: txnCfg.Database, mode: "transaction", cfg: txnCfg, clients: txnClients, servers: map[int32]bool{}}
+	session := &pool{db: sessionCfg.Database, mode: "session", cfg: sessionCfg, clients: sessionClients, servers: map[int32]bool{}}
+
+	for _, p := range []*pool{txn, session} {
+		for range p.clients {
+			go p.client(ctx)
+		}
+	}
+
+	// One more client per pool for the traps: a long-lived connection,
+	// like an app's own.
+	traps := []*trapClient{
+		{mode: "transaction", cfg: txnCfg},
+		{mode: "session", cfg: sessionCfg},
+	}
+
+	for round := 1; ; round++ {
+		time.Sleep(5 * time.Second)
+		for _, p := range []*pool{txn, session} {
+			p.report()
+		}
+		for _, t := range traps {
+			t.run(ctx, round)
+		}
+	}
+}
+
+// trapClient runs the traps on one connection to a pool. Each round has a
+// deadline, so a full pool shows up as a log line instead of a stalled loop.
+type trapClient struct {
+	mode string
+	cfg  *pgx.ConnConfig
+	conn *pgx.Conn
+}
+
+func (t *trapClient) run(ctx context.Context, round int) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if t.conn == nil || t.conn.IsClosed() {
+		conn, err := pgx.ConnectConfig(ctx, t.cfg)
+		if err != nil {
+			log.Printf("trap (%s): connect: %v", t.mode, err)
+			return
+		}
+		t.conn = conn
+	}
+	if t.mode == "transaction" {
+		var servers int
+		if err := t.conn.QueryRow(ctx, "select count(*) from pg_stat_activity where usename = current_user").Scan(&servers); err == nil {
+			log.Printf("postgres sees %d server connections for this role; the clients hold %d", servers, txnClients+sessionClients+2)
+		}
+	}
+	setTrap(ctx, t.mode, t.conn, round)
+	prepareTrap(ctx, t.mode, t.conn, round)
+	driverPrepared(ctx, t.mode, t.conn, round)
+	if ctx.Err() != nil {
+		log.Printf("trap (%s): no server connection within 3s: the pool is full", t.mode)
+	}
+}
+
+// client runs short queries in a loop on one client connection.
+func (p *pool) client(ctx context.Context) {
+	conn := connect(ctx, p.cfg)
+	var last int32
+	for {
+		var pid int32
+		if err := conn.QueryRow(ctx, "select pg_backend_pid() from pg_sleep(0.01)").Scan(&pid); err != nil {
+			log.Printf("%s pool: %v", p.mode, err)
+			time.Sleep(time.Second)
+			continue
+		}
+		p.queries.Add(1)
+		if last != 0 && pid != last {
+			p.changes.Add(1)
+		}
+		last = pid
+		p.mu.Lock()
+		p.servers[pid] = true
+		p.mu.Unlock()
+	}
+}
+
+func (p *pool) report() {
+	p.mu.Lock()
+	servers := len(p.servers)
+	clear(p.servers)
+	p.mu.Unlock()
+	log.Printf("%s pool (%s): %d clients ran %d queries in 5s on %d server connections; a client's next query changed server %d times",
+		p.mode, p.db, p.clients, p.queries.Swap(0), servers, p.changes.Swap(0))
+}
+
+// setTrap sets a session variable, then reads it back in the next
+// statement. set_config(name, value, false) is SET in function form; it
+// lets the same statement report which server process ran it.
+func setTrap(ctx context.Context, mode string, conn *pgx.Conn, round int) {
+	want := fmt.Sprintf("tenant-%d", round)
+	var setOn, readOn int32
+	var got string
+	if err := conn.QueryRow(ctx, "select pg_backend_pid() from (select set_config('app.tenant', $1, false)) s", want).Scan(&setOn); err != nil {
+		log.Printf("trap SET (%s): %v", mode, err)
+		return
+	}
+	// missing_ok: NULL (here '') where app.tenant was never set.
+	if err := conn.QueryRow(ctx, "select coalesce(current_setting('app.tenant', true), ''), pg_backend_pid()").Scan(&got, &readOn); err != nil {
+		log.Printf("trap SET (%s): %v", mode, err)
+		return
+	}
+	verdict := "ok"
+	switch {
+	case got != want && got == "":
+		verdict = "WRONG: the value stayed on the other server connection"
+	case got != want:
+		verdict = "WRONG: an older value, left on this server connection by an earlier transaction"
+	}
+	log.Printf("trap SET (%s): set app.tenant = %q on server %d, read back %q on server %d: %s", mode, want, setOn, got, readOn, verdict)
+}
+
+// prepareTrap uses SQL-level PREPARE and EXECUTE, sent as written (simple
+// protocol). PgBouncer does not track them. In transaction mode a failed
+// EXECUTE also leaves the statement on whichever server ran the PREPARE.
+func prepareTrap(ctx context.Context, mode string, conn *pgx.Conn, round int) {
+	name := fmt.Sprintf("trap_%d", round)
+	simple := pgx.QueryExecModeSimpleProtocol
+	if _, err := conn.Exec(ctx, fmt.Sprintf("PREPARE %s AS SELECT %d", name, round), simple); err != nil {
+		log.Printf("trap PREPARE (%s): PREPARE %s: %v", mode, name, err)
+		return
+	}
+	var n int
+	if err := conn.QueryRow(ctx, "EXECUTE "+name, simple).Scan(&n); err != nil {
+		log.Printf("trap PREPARE (%s): PREPARE %s, then EXECUTE %s: WRONG: %v", mode, name, name, err)
+		return
+	}
+	_, _ = conn.Exec(ctx, "DEALLOCATE "+name, simple)
+	log.Printf("trap PREPARE (%s): PREPARE %s, then EXECUTE %s returned %d: ok", mode, name, name, n)
+}
+
+// driverPrepared is what pgx does by default: a protocol-level prepared
+// statement (Parse, Bind, Execute). PgBouncer tracks these
+// (max_prepared_statements), so they work in both modes.
+func driverPrepared(ctx context.Context, mode string, conn *pgx.Conn, round int) {
+	var n int
+	if err := conn.QueryRow(ctx, "select $1::int + 1", round).Scan(&n); err != nil {
+		log.Printf("pgx prepared statement (%s): WRONG: %v", mode, err)
+		return
+	}
+	if round == 1 || round%12 == 0 {
+		log.Printf("pgx prepared statement (%s): select $1::int + 1 returned %d: ok", mode, n)
+	}
+}
+
+func connect(ctx context.Context, cfg *pgx.ConnConfig) *pgx.Conn {
+	for {
+		conn, err := pgx.ConnectConfig(ctx, cfg)
+		if err == nil {
+			return conn
+		}
+		log.Printf("connect to %s: %v", cfg.Database, err)
+		time.Sleep(2 * time.Second)
+	}
+}

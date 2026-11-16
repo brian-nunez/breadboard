@@ -163,6 +163,16 @@ func (d *Document) AddApp(app App) error {
 	if r := resourcesNode(app.Resources); r != nil {
 		body.Content = append(body.Content, scalar("resources"), r)
 	}
+	if app.Replicas > 1 {
+		body.Content = append(body.Content, scalar("replicas"), intScalar(app.Replicas))
+	}
+	if len(app.Sidecars) > 0 {
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, sc := range app.Sidecars {
+			seq.Content = append(seq.Content, sidecarNode(sc))
+		}
+		body.Content = append(body.Content, scalar("sidecars"), seq)
+	}
 	m := d.section("apps")
 	m.Content = append(m.Content, scalar(app.Name), body)
 	return nil
@@ -253,6 +263,81 @@ func flowSeq(items ...string) *yaml.Node {
 	n := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
 	for _, it := range items {
 		n.Content = append(n.Content, scalar(it))
+	}
+	return n
+}
+
+// sidecarNode writes one sidecars entry with the keys the decoder reads,
+// leaving out fields that are unset so their defaults apply.
+func sidecarNode(sc Sidecar) *yaml.Node {
+	n := mapping(scalar("type"), scalar(sc.Type))
+	if sc.Name != "" {
+		n.Content = append(n.Content, scalar("name"), scalar(sc.Name))
+	}
+	add := func(k string, v *yaml.Node) { n.Content = append(n.Content, scalar(k), v) }
+	switch {
+	case sc.Envoy != nil:
+		e := sc.Envoy
+		if e.Inbound != nil {
+			in := mapping(scalar("port"), intScalar(e.Inbound.Port), scalar("app_port"), intScalar(e.Inbound.AppPort))
+			in.Style = yaml.FlowStyle
+			add("inbound", in)
+		}
+		if len(e.Outbound) > 0 {
+			seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+			for _, o := range e.Outbound {
+				on := mapping(scalar("service"), scalar(o.Service), scalar("port"), intScalar(o.Port))
+				if o.LB != "" {
+					on.Content = append(on.Content, scalar("lb"), scalar(o.LB))
+				}
+				if o.Timeout != "" {
+					on.Content = append(on.Content, scalar("timeout"), scalar(o.Timeout))
+				}
+				if o.Retries != nil {
+					on.Content = append(on.Content, scalar("retries"), intScalar(*o.Retries))
+				}
+				if o.Outlier != nil {
+					ol := mapping(scalar("consecutive_5xx"), intScalar(o.Outlier.Consecutive5xx), scalar("ejection"), scalar(o.Outlier.Ejection))
+					if o.Outlier.MaxEjectionPercent != 0 {
+						ol.Content = append(ol.Content, scalar("max_ejection_percent"), intScalar(o.Outlier.MaxEjectionPercent))
+					}
+					if o.Outlier.Interval != "" {
+						ol.Content = append(ol.Content, scalar("interval"), scalar(o.Outlier.Interval))
+					}
+					ol.Style = yaml.FlowStyle
+					on.Content = append(on.Content, scalar("outlier"), ol)
+				}
+				seq.Content = append(seq.Content, on)
+			}
+			add("outbound", seq)
+		}
+		if t := e.Transparent; t != nil {
+			if t.Egress == "" {
+				add("transparent", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
+			} else {
+				tn := mapping(scalar("egress"), scalar(t.Egress))
+				tn.Style = yaml.FlowStyle
+				add("transparent", tn)
+			}
+		}
+		if e.File != "" {
+			add("file", scalar(e.File))
+		}
+	case sc.PgBouncer != nil:
+		p := sc.PgBouncer
+		add("service", scalar(p.Service))
+		if p.PoolMode != "" {
+			add("pool_mode", scalar(p.PoolMode))
+		}
+		if p.Port != 0 {
+			add("port", intScalar(p.Port))
+		}
+		if p.PoolSize != 0 {
+			add("pool_size", intScalar(p.PoolSize))
+		}
+	case sc.FluentBit != nil:
+		add("to", scalar(sc.FluentBit.To))
+		add("bucket", scalar(sc.FluentBit.Bucket))
 	}
 	return n
 }

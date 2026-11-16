@@ -63,6 +63,11 @@ func (dec *decoder) add(path, format string, args ...any) {
 // fields walks a mapping, reporting unknown and reserved keys, and returns the
 // known keys' value nodes.
 func (dec *decoder) fields(path string, n *yaml.Node, reserved map[string]string, known ...string) map[string]*yaml.Node {
+	return dec.fieldsMsg(path, n, reserved, func(string) string { return "unknown key" }, known...)
+}
+
+// fieldsMsg is fields with a custom message for unknown keys.
+func (dec *decoder) fieldsMsg(path string, n *yaml.Node, reserved map[string]string, unknown func(key string) string, known ...string) map[string]*yaml.Node {
 	out := map[string]*yaml.Node{}
 	if n.Kind != yaml.MappingNode {
 		dec.add(path, "must be a mapping")
@@ -76,7 +81,7 @@ func (dec *decoder) fields(path string, n *yaml.Node, reserved map[string]string
 			continue
 		}
 		if !contains(known, k) {
-			dec.add(kp, "unknown key")
+			dec.add(kp, "%s", unknown(k))
 			continue
 		}
 		if _, dup := out[k]; dup {
@@ -168,7 +173,7 @@ func (dec *decoder) app(name, path string, n *yaml.Node) App {
 		dec.add(join(path, "path"), "is required")
 		return app
 	}
-	f := dec.fields(path, n, nil, "path", "command", "uses", "ports", "health", "register", "resources")
+	f := dec.fields(path, n, nil, "path", "command", "uses", "ports", "health", "register", "resources", "replicas", "sidecars")
 	if v, ok := f["path"]; ok {
 		app.Path = dec.str(join(path, "path"), v)
 	} else {
@@ -228,6 +233,19 @@ func (dec *decoder) app(name, path string, n *yaml.Node) App {
 	}
 	if v, ok := f["resources"]; ok {
 		app.Resources = dec.resources(join(path, "resources"), v)
+	}
+	if v, ok := f["replicas"]; ok {
+		app.Replicas = dec.positive(join(path, "replicas"), v, fmt.Sprintf("must be between 1 and %d", MaxReplicas))
+	}
+	if v, ok := f["sidecars"]; ok && !isNull(v) {
+		sp := join(path, "sidecars")
+		if v.Kind != yaml.SequenceNode {
+			dec.add(sp, "must be a list")
+		} else {
+			for i, item := range v.Content {
+				app.Sidecars = append(app.Sidecars, dec.sidecar(fmt.Sprintf("%s[%d]", sp, i), item))
+			}
+		}
 	}
 	return app
 }

@@ -1,0 +1,33 @@
+// Command log-writer writes JSON log lines to a file and knows nothing about
+// where they go. A Fluent Bit sidecar in the same pod tails the file and ships
+// the lines to object storage: the adapter pattern.
+package main
+
+import (
+	"log"
+	"log/slog"
+	"math/rand/v2"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func main() {
+	// BB_LOG_DIR is a directory shared by the app and its sidecars:
+	// /var/run/bb/logs. Fluent Bit tails every *.log file in it.
+	path := filepath.Join(os.Getenv("BB_LOG_DIR"), "app.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	logger := slog.New(slog.NewJSONHandler(f, nil)).With("instance", os.Getenv("BB_SERVICE"))
+	log.Printf("writing JSON lines to %s", path)
+
+	for n := 1; ; n++ {
+		logger.Info("order placed", "order", n, "amount_cents", 100+rand.IntN(9900))
+		if n%10 == 0 {
+			log.Printf("%d lines written", n)
+		}
+		time.Sleep(time.Second)
+	}
+}

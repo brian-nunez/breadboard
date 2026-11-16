@@ -1,0 +1,37 @@
+# sidecar/pgbouncer-pool
+
+Many client connections, few database connections: a [PgBouncer](https://www.pgbouncer.org/) sidecar pools them, using the official Go driver [pgx](https://pkg.go.dev/github.com/jackc/pgx/v5).
+
+- `cmd/pool-client`: 50 workers, each with its own client connection, run a 10 ms query in a loop. Every 5 seconds the app logs how many queries ran and how many connections Postgres sees for its role.
+
+## How it works
+
+Every Postgres connection is a server process with its own memory, and `max_connections` is 100 by default. Fifty mostly idle connections per app instance would use up a database quickly. A pooler keeps a small set of real connections and lends them out.
+
+The `pgbouncer` sidecar in `experiment.yaml` runs PgBouncer in the app's pod:
+
+- It listens on `127.0.0.1:6432`, and Breadboard rewrites the app's `DATABASE_URL`, `PGHOST`, `PGPORT` and `PGSSLMODE` to point there (`sslmode=disable`: that hop never leaves the pod).
+- It connects to Postgres as the app's own role, over TLS verified against the lab CA (`server_tls_sslmode = verify-full`).
+- `pool_mode: transaction` lends a server connection to a client for one transaction, then takes it back. `pool_size: 10` caps the server connections for this database and user.
+
+So Postgres sees at most 10 connections while the app holds 50. When all 10 are busy, the other clients wait in PgBouncer's queue, not in Postgres.
+
+Transaction mode has a price: the next transaction may run on another server connection, so session state does not survive. `SET`, `LISTEN`, session advisory locks, `WITH HOLD` cursors and SQL `PREPARE` do not work as expected. Protocol-level prepared statements, which pgx uses by default, do: PgBouncer tracks them (`max_prepared_statements`, 200 by default).
+
+```sh
+bb up
+bb logs pool-client -f         # clients=50 ... postgres sees 10 server connections
+```
+
+In `bb serve`, open **pool-client** and its **PgBouncer pools** tab: 50 clients split between *active* and *waiting*, and at most 10 server connections. MCP clients use `pgbouncer_pools` with `service: pool-client`.
+
+## Try this
+
+- **Resize the pool.** Set `pool_size: 2`, then `25`, running `bb up` each time, and compare `queries=` in the log. More server connections help until Postgres itself, or its CPU limit, is the bottleneck.
+- **Switch to session mode.** Set `pool_mode: session` and `bb up`. A client now keeps its server connection until it disconnects, and pgx never disconnects: 10 workers run, 40 wait. After `query_wait_timeout` (120 s) PgBouncer drops the waiting clients with an error. The server count query may time out too, because no connection is ever free.
+- **Ask PgBouncer directly.** `docker exec -it bb-{{.Experiment}}-pool-client-pgbouncer-1 sh -c 'PGPASSWORD="$BB_PG_PASSWORD" psql -h 127.0.0.1 -p 6432 -U "$BB_PG_USER" pgbouncer -c "SHOW POOLS"'` opens its admin console, the same one the explorer reads.
+
+## Break this
+
+- **Go direct.** Delete the `sidecars` block from `pool-client` and run `bb up`. `DATABASE_URL` now points at Postgres itself over TLS, and the log shows Postgres serving 50 connections: one server process per client.
+- **Run out of connections.** While direct, set `workers = 120` in `cmd/pool-client/main.go` and `bb up`. Postgres refuses the extra clients with `sorry, too many clients already`. Put the sidecar back and the same 120 clients work, because PgBouncer accepts up to 200 (`max_client_conn`) and still uses 10.

@@ -1,0 +1,19 @@
+// Command transparent-stranger is a service that transparent-caller has not
+// declared, so its sidecar's egress policy refuses to let the caller reach it.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%s, reached over %s\n", os.Getenv("BB_SERVICE"), r.Header.Get("X-Forwarded-Proto"))
+	})
+	addr := os.Getenv("BB_LISTEN_ADDR")
+	log.Printf("listening on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
+}

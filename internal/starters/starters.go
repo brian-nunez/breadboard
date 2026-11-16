@@ -48,6 +48,12 @@ type App struct {
 	Uses []string
 	// Register, when set, registers the app in the registry it uses through a sidecar.
 	Register *spec.Register
+	// Replicas is the number of instances; zero means one.
+	Replicas int
+	// Sidecars run in the app's pod. A reference to an infra service
+	// (pgbouncer service, fluent-bit to, an outbound service that is not an
+	// app of this starter) names its catalog type, which resolves like Uses.
+	Sidecars []spec.Sidecar
 }
 
 var all = []Starter{
@@ -129,7 +135,108 @@ var all = []Starter{
 			{Name: "self-caller", Command: []string{"self-caller"}, Uses: []string{"consul"}},
 		},
 	},
+	{
+		ID:       "sidecar/envoy-ambassador",
+		Title:    "Envoy ambassador",
+		Summary:  "An Envoy sidecar balances calls across three replicas over TLS, with retries and timeouts in config, not code.",
+		Language: "go",
+		Template: "go/sidecar/envoy-ambassador",
+		Dir:      "envoy-ambassador",
+		Apps: []App{
+			{Name: "ambassador-backend", Command: []string{"ambassador-backend"}, Replicas: 3, Sidecars: []spec.Sidecar{envoyInbound()}},
+			{Name: "ambassador-caller", Command: []string{"ambassador-caller"}, Sidecars: []spec.Sidecar{envoyOutbound(spec.EnvoyOutbound{
+				Service: "ambassador-backend", Port: 9001, LB: "round_robin", Timeout: "2s", Retries: intPtr(2),
+			})}},
+		},
+	},
+	{
+		ID:       "sidecar/envoy-tls-termination",
+		Title:    "Envoy TLS termination",
+		Summary:  "A plain HTTP app with no TLS code, bound to loopback, served over verified TLS by its Envoy sidecar.",
+		Language: "go",
+		Template: "go/sidecar/envoy-tls-termination",
+		Dir:      "envoy-tls-termination",
+		Apps: []App{
+			{Name: "plain-web", Command: []string{"plain-web"}, Sidecars: []spec.Sidecar{envoyInbound()}},
+			{Name: "tls-client", Command: []string{"tls-client"}},
+		},
+	},
+	{
+		ID:       "sidecar/envoy-transparent",
+		Title:    "Envoy transparent proxy",
+		Summary:  "iptables send every connection to Envoy: plain HTTP calls by name leave as TLS, and egress deny refuses undeclared services.",
+		Language: "go",
+		Template: "go/sidecar/envoy-transparent",
+		Dir:      "envoy-transparent",
+		Apps: []App{
+			{Name: "transparent-backend", Command: []string{"transparent-backend"}, Sidecars: []spec.Sidecar{envoyInbound()}},
+			{Name: "transparent-stranger", Command: []string{"transparent-stranger"}, Sidecars: []spec.Sidecar{envoyInbound()}},
+			{Name: "transparent-caller", Command: []string{"transparent-caller"}, Sidecars: []spec.Sidecar{{
+				Type: spec.SidecarEnvoy, Envoy: &spec.EnvoySidecar{
+					Outbound:    []spec.EnvoyOutbound{{Service: "transparent-backend", Port: 9001}},
+					Transparent: &spec.Transparent{Egress: spec.EgressDeny},
+				},
+			}}},
+		},
+	},
+	{
+		ID:       "sidecar/circuit-breaking",
+		Title:    "Envoy outlier detection",
+		Summary:  "A flaky replica is ejected by the caller's Envoy sidecar after consecutive 5xx, then let back in after the ejection time.",
+		Language: "go",
+		Template: "go/sidecar/circuit-breaking",
+		Dir:      "circuit-breaking",
+		Apps: []App{
+			{Name: "breaker-backend", Command: []string{"breaker-backend"}, Replicas: 3, Sidecars: []spec.Sidecar{envoyInbound()}},
+			{Name: "breaker-caller", Command: []string{"breaker-caller"}, Sidecars: []spec.Sidecar{envoyOutbound(spec.EnvoyOutbound{
+				Service: "breaker-backend", Port: 9001, Retries: intPtr(0),
+				Outlier: &spec.Outlier{Consecutive5xx: 3, Ejection: "30s", MaxEjectionPercent: 50, Interval: "5s"},
+			})}},
+		},
+	},
+	{
+		ID:       "sidecar/pgbouncer-pool",
+		Title:    "PgBouncer connection pool",
+		Summary:  "50 client connections share 10 Postgres connections through a PgBouncer sidecar in transaction mode.",
+		Language: "go",
+		Template: "go/sidecar/pgbouncer-pool",
+		Dir:      "pgbouncer-pool",
+		Requires: []string{"postgres"},
+		Apps: []App{
+			{Name: "pool-client", Command: []string{"pool-client"}, Uses: []string{"postgres"}, Sidecars: []spec.Sidecar{{
+				Type: spec.SidecarPgBouncer, PgBouncer: &spec.PgBouncerSidecar{Service: "postgres", PoolMode: "transaction", PoolSize: 10},
+			}}},
+		},
+	},
+	{
+		ID:       "sidecar/log-shipper",
+		Title:    "Fluent Bit log shipper",
+		Summary:  "An app writes JSON log files; a Fluent Bit sidecar ships them to S3 Compatible storage, where the AWS SDK finds them.",
+		Language: "go",
+		Template: "go/sidecar/log-shipper",
+		Dir:      "log-shipper",
+		Requires: []string{"s3-compatible"},
+		Apps: []App{
+			{Name: "log-writer", Command: []string{"log-writer"}, Uses: []string{"s3-compatible"}, Sidecars: []spec.Sidecar{{
+				Type: spec.SidecarFluentBit, FluentBit: &spec.FluentBitSidecar{To: "s3-compatible", Bucket: "app-logs"},
+			}}},
+			{Name: "log-reader", Command: []string{"log-reader"}, Uses: []string{"s3-compatible"}},
+		},
+	},
 }
+
+// envoyInbound is an Envoy sidecar terminating TLS on 8443 in front of an
+// app listening on 127.0.0.1:8080.
+func envoyInbound() spec.Sidecar {
+	return spec.Sidecar{Type: spec.SidecarEnvoy, Envoy: &spec.EnvoySidecar{Inbound: &spec.EnvoyInbound{Port: 8443, AppPort: 8080}}}
+}
+
+// envoyOutbound is an Envoy sidecar with one ambassador listener.
+func envoyOutbound(o spec.EnvoyOutbound) spec.Sidecar {
+	return spec.Sidecar{Type: spec.SidecarEnvoy, Envoy: &spec.EnvoySidecar{Outbound: []spec.EnvoyOutbound{o}}}
+}
+
+func intPtr(n int) *int { return &n }
 
 // All returns every starter.
 func All() []Starter { return slices.Clone(all) }

@@ -1,6 +1,6 @@
 # Breadboard (`bb`)
 
-Local lab for real system design practice: real services in Docker Compose, TLS by default, starters using official client libraries, exporters to other platforms. Open source, for developers learning system design. Stage: Phases 1 (core engine and CLI), 2 (starters, S3 Compatible), 3 (web UI, `bb serve`) and 4 (MCP server, `bb mcp`) implemented; later phases not started.
+Local lab for real system design practice: real services in Docker Compose, TLS by default, starters using official client libraries, exporters to other platforms. Open source, for developers learning system design. Stage: Phases 1 (core engine and CLI), 2 (starters, S3 Compatible), 3 (web UI, `bb serve`) and 4 (MCP server, `bb mcp`) implemented; Phase 5 (proxies and relays) in progress: wave A (sidecars and replicas) implemented.
 
 ## Design is the source of truth
 

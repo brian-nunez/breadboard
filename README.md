@@ -38,7 +38,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Breadboard is early.** Phases 1 to 4 work: the core engine and CLI, five services including S3 Compatible, six starters, Compose export, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`). Proxies, mTLS and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
+> **Breadboard is early.** Phases 1 to 4 work: the core engine and CLI, five services including S3 Compatible, Compose export, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`). Phase 5 has begun: sidecars (Envoy, PgBouncer, Fluent Bit) that share an app's network namespace, transparent proxying with egress policy, and app replicas, with twelve starters in all. Proxies as services, mTLS and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
 
 <p align="center">
   <a href="#why-breadboard">Why Breadboard</a> ·
@@ -112,6 +112,12 @@ Each catalog entry pins an exact image version, configures TLS, sets resource li
 | **consul/service-discovery** (recommended) | Registration through a Consul sidecar and resolving services by name. | 2 |
 | **consul/self-registration** (alternative) | The same lookup, with each service registering and deregistering itself. | 2 |
 | **s3/objects-basics** | Buckets, prefixes, multipart uploads and presigned URLs. | 2 |
+| **sidecar/envoy-ambassador** | The ambassador pattern: client-side load balancing, retries and timeouts in an Envoy sidecar. | 5 |
+| **sidecar/envoy-tls-termination** | TLS termination at a sidecar in front of a plaintext app. | 5 |
+| **sidecar/envoy-transparent** | Transparent proxying of all app traffic and egress deny, the root of service ACLs. | 5 |
+| **sidecar/circuit-breaking** | Envoy outlier detection ejecting a flaky replica and letting it back in. | 5 |
+| **sidecar/pgbouncer-pool** | Fifty clients sharing ten Postgres connections through a PgBouncer sidecar. | 5 |
+| **sidecar/log-shipper** | The adapter pattern: a Fluent Bit sidecar shipping app log files to S3 Compatible storage. | 5 |
 
 Starters are Go 1.27.4 projects with a multi-stage Dockerfile and a README with exercises to try and things to break. See [starters](docs/design/starters.md).
 

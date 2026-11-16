@@ -1,0 +1,61 @@
+// Command ambassador-caller calls the backend through its Envoy sidecar, the
+// ambassador. The code sends plain HTTP to 127.0.0.1; the sidecar picks a
+// replica, speaks verified TLS to it, applies the timeout and retries a failed
+// attempt. None of that is in this file.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"time"
+)
+
+func main() {
+	// http://127.0.0.1:9001: the sidecar's listener for ambassador-backend.
+	url := os.Getenv("AMBASSADOR_BACKEND_URL")
+	tally := map[string]int{}
+	for call := 1; ; call++ {
+		tally[answer(url)]++
+		if call%10 == 0 {
+			log.Printf("tally after %d calls: %s", call, format(tally))
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// answer makes one call and returns who answered: a replica's name, or the
+// error the sidecar returned.
+func answer(url string) string {
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Print(err)
+		return "error"
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return resp.Status
+	}
+	name := strings.TrimSpace(string(body))
+	log.Printf("answered by %s", name)
+	return name
+}
+
+func format(tally map[string]int) string {
+	keys := make([]string, 0, len(tally))
+	for k := range tally {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s=%d", k, tally[k])
+	}
+	return strings.Join(parts, " ")
+}

@@ -1,0 +1,35 @@
+# sidecar/envoy-tls-termination
+
+Serve TLS without writing any TLS code: an [Envoy](https://www.envoyproxy.io/docs/envoy/v1.40.0/) sidecar terminates TLS in front of a plain HTTP app.
+
+- `cmd/plain-web`: a plain HTTP server bound to `BB_LISTEN_ADDR` (`127.0.0.1:8080`). It logs every request it receives.
+- `cmd/tls-client`: every 3 seconds, calls `https://plain-web.<domain>:8443/` and logs the TLS version and the verified certificate, then tries `http://plain-web.<domain>:8080/` directly and logs that it was refused.
+
+## How it works
+
+`inbound: {port: 8443, app_port: 8080}` on plain-web's Envoy sidecar does three things:
+
+1. Envoy listens on `0.0.0.0:8443` with plain-web's own certificate (issued by the lab CA for `plain-web.<domain>`), and accepts only TLS there.
+2. It forwards each decrypted request to `127.0.0.1:8080`. The sidecar shares plain-web's network namespace, so that is plain-web's loopback.
+3. Breadboard sets `BB_LISTEN_ADDR=127.0.0.1:8080` for the app. Binding loopback is what makes the sidecar the only way in: a socket on `127.0.0.1` cannot be reached from another container.
+
+The client verifies the certificate with Go's default settings, which read the lab CA from `SSL_CERT_FILE`. Plaintext exists only on loopback inside plain-web's pod.
+
+```sh
+bb up
+bb logs tls-client -f
+bb logs plain-web -f           # every request comes from 127.0.0.1: the sidecar
+```
+
+In `bb serve`, open **plain-web** and its **Envoy** tab: the `inbound` listener on 8443 and the `app` cluster pointing at `127.0.0.1:8080`. An MCP client sees the same through `envoy_clusters` with `service: plain-web`.
+
+## Try this
+
+- **See who listens where.** `docker exec bb-{{.Experiment}}-plain-web-1 netstat -ltn` shows the app on `127.0.0.1:8080`, Envoy on `0.0.0.0:8443` and Envoy's admin API on `127.0.0.1:15000`. All three containers of the pod share that one list.
+- **Read what Envoy was told.** `bb status` shows the sidecar as `plain-web-envoy`; its page in `bb serve` lists its ports and the environment it gives the app.
+
+## Break this
+
+- **Bind every address.** Change the listen address in `cmd/plain-web/main.go` to `":8080"` and run `bb up`. tls-client now logs `http :8080 answered ... in plaintext`: any container can skip the sidecar. Put `BB_LISTEN_ADDR` back.
+- **Speak plaintext to the TLS port.** `docker exec bb-{{.Experiment}}-tls-client-1 wget -qO- http://plain-web.bb.internal:8443/` fails: the sidecar's port only accepts TLS. (Use your domain if you changed it.)
+- **Stop the sidecar.** `docker stop bb-{{.Experiment}}-plain-web-envoy-1`. plain-web keeps running, but tls-client's HTTPS calls are refused: nothing else can reach it. `bb up` brings the sidecar back.

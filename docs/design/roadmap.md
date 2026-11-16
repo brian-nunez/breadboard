@@ -122,22 +122,23 @@ Delivered in five waves, each approved by Brian before it starts.
 
 ### Wave A: Sidecar foundation
 
-Real sidecars that share an app's network namespace, so the app uses them over `127.0.0.1`, and replicas for later load-balancing examples (ADR-0015, ADR-0016, D-074 to D-084).
+Real sidecars that share an app's network namespace, so the app uses them over `127.0.0.1`, and replicas for later load-balancing examples (ADR-0015, ADR-0016, D-074 to D-102).
 
 **Scope:** `apps.<name>.sidecars` with a sidecar catalog (`envoy`: inbound TLS termination, outbound TLS origination with app-to-app edges, opt-in transparent mode; `pgbouncer`; `fluent-bit`; `register` moved onto the internal `consul-agent` type); the pod model (namespace holder, start order, shared `/var/run/bb`); `apps.<name>.replicas` as named instances with per-instance certificate SANs; status, UI and MCP showing each app with its sidecars and replicas; an Envoy explorer read through `docker exec` as a core operation; the architecture graph drawing sidecars under their app and app-to-app edges.
 
 **Completion criteria:**
 
-- [ ] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift.
-- [ ] Golden tests: register-only experiments render output identical to `main`; new fixtures for a pod with each sidecar type, replicas 3, and transparent mode.
-- [ ] Integration (real Docker): Envoy inbound makes a plaintext app reachable only through TLS from another container.
-- [ ] Integration: Envoy outbound across 3 replicas reaches more than one instance.
-- [ ] Integration: in transparent mode the app calls `http://<target>.<domain>:<port>` and the target sees TLS; with `egress: deny` an undeclared destination is refused; stopping Envoy blocks the app (no bypass).
-- [ ] Integration: PgBouncer: the app connects to `127.0.0.1:6432` and Postgres sees connections from PgBouncer over TLS.
-- [ ] Integration: Fluent Bit: a line written to `/var/run/bb/logs/app.log` appears as an object in the bucket.
-- [ ] Integration: `register` (Consul) behaviour is unchanged.
-- [ ] Every integration test leaves no labelled containers, networks or volumes; the full suite (`go test -tags integration ./internal/core/`) passes on the top of the wave A stack.
-- [ ] Docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated (D-074 onward, ADR-0015, ADR-0016).
+- [x] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift.
+- [x] Golden tests: register-only experiments render output identical to `main`; new fixtures for a pod with each sidecar type, replicas 3, and transparent mode.
+- [x] Integration (real Docker): Envoy inbound makes a plaintext app reachable only through TLS from another container.
+- [x] Integration: Envoy outbound across 3 replicas reaches more than one instance.
+- [x] Integration: in transparent mode the app calls `http://<target>.<domain>:<port>` and the target sees TLS; with `egress: deny` an undeclared destination is refused; stopping Envoy blocks the app (no bypass).
+- [x] Integration: PgBouncer: the app connects to `127.0.0.1:6432` and Postgres sees connections from PgBouncer over TLS.
+- [x] Integration: Fluent Bit: a line written to `/var/run/bb/logs/app.log` appears as an object in the bucket.
+- [x] Integration: `register` (Consul) behaviour is unchanged.
+- [x] Six sidecar starters (`sidecar/envoy-ambassador`, `envoy-tls-termination`, `envoy-transparent`, `circuit-breaking`, `pgbouncer-pool`, `log-shipper`) each pass an integration test that asserts the behaviour they teach; the Sidecars docs section renders in `bb serve`.
+- [x] Every integration test leaves no labelled containers, networks or volumes; the full suite (`go test -tags integration ./internal/core/`) passes on the top of the wave A stack.
+- [x] Docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated (D-074 onward, ADR-0015, ADR-0016).
 
 ### Wave B: Proxies as infra
 

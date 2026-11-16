@@ -1,0 +1,65 @@
+// Command breaker-caller calls the backend through its Envoy sidecar four
+// times a second and, every 5 seconds, logs which replicas answered and which
+// failed. When a replica keeps failing, the sidecar's outlier detection ejects
+// it and the failures stop, without any code here.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"time"
+)
+
+func main() {
+	url := os.Getenv("BREAKER_BACKEND_URL") // http://127.0.0.1:9001, the sidecar
+	answered, failed := map[string]int{}, map[string]int{}
+	report := time.Tick(5 * time.Second)
+	for range time.Tick(250 * time.Millisecond) {
+		call(url, answered, failed)
+		select {
+		case <-report:
+			log.Printf("last 5s: answered %s | failed %s", format(answered), format(failed))
+			clear(answered)
+			clear(failed)
+		default:
+		}
+	}
+}
+
+func call(url string, answered, failed map[string]int) {
+	resp, err := http.Get(url)
+	if err != nil {
+		failed["error"]++
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	// Both the answer and the 503 carry the replica's name.
+	name := strings.TrimSpace(string(body))
+	if resp.StatusCode == http.StatusOK {
+		answered[name]++
+	} else {
+		failed[name]++
+	}
+}
+
+func format(m map[string]int) string {
+	if len(m) == 0 {
+		return "none"
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s=%d", k, m[k])
+	}
+	return strings.Join(parts, " ")
+}

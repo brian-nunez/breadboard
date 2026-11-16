@@ -1,0 +1,34 @@
+# sidecar/envoy-ambassador
+
+Client-side load balancing, retries and timeouts done by an [Envoy](https://www.envoyproxy.io/docs/envoy/v1.40.0/) sidecar instead of your code: the **ambassador** pattern.
+
+- `cmd/ambassador-backend`: a plain HTTP service with no TLS code. It runs as **three replicas**, `ambassador-backend-1` to `-3`, and answers every request with its own name.
+- `cmd/ambassador-caller`: twice a second, calls `AMBASSADOR_BACKEND_URL` (`http://127.0.0.1:9001`) and logs which replica answered, with a running tally every 10 calls.
+
+## How it works
+
+Each app in `experiment.yaml` has an Envoy sidecar: a second container that shares the app's network namespace, so the two talk over `127.0.0.1`.
+
+- **The caller's sidecar is the ambassador.** `outbound` makes it listen on `127.0.0.1:9001`. For every request it picks one address behind `ambassador-backend.<domain>` (the name resolves to all three replicas; Envoy re-resolves it every 5 seconds), opens a TLS connection verified against the lab CA, and forwards the request. `lb`, `timeout` and `retries` on the outbound entry configure it.
+- **Each backend replica's sidecar terminates TLS.** `inbound` makes it listen on 8443 with the replica's certificate and forward to the app on `127.0.0.1:8080`, the address Breadboard puts in `BB_LISTEN_ADDR`.
+
+So the wire between containers is TLS, and the only plaintext is loopback inside one pod. The code has no list of replicas, no balancing, no retry loop and no certificates.
+
+```sh
+bb up
+bb logs ambassador-caller -f
+bb status                      # each replica, with its envoy sidecar under it
+```
+
+In `bb serve`, open **ambassador-caller** and its **Envoy** tab: the `outbound_ambassador-backend` cluster lists the three replicas with their request counts. An MCP client sees the same through the `envoy_clusters` tool with `service: ambassador-caller`.
+
+## Try this
+
+- **Change the balancing policy.** Set `lb: ring_hash` on the outbound entry and run `bb up`. Envoy now hashes the caller's source address, and since the caller is its sidecar's only client, every call sticks to one replica. Try `least_request` too.
+- **Scale out without touching the caller.** Set `replicas: 5` on `ambassador-backend` and run `bb up`. Within a few seconds the tally includes `ambassador-backend-4` and `-5`: the sidecar re-resolved the shared name.
+- **Make one replica slow.** In `cmd/ambassador-backend/main.go`, sleep 3 seconds when `name` ends in `-3`, then `bb up`. With `timeout: 2s` the caller logs `504 Gateway Timeout` for every third call. The timeout covers the whole request including retries, and Envoy does not retry a request that ran out of time.
+
+## Break this
+
+- **Stop one replica's app.** `docker stop bb-{{.Experiment}}-ambassador-backend-2-1`. Its sidecar still accepts connections but answers 503, and the caller's sidecar retries the call on another replica (`retries: 2`), so the caller logs no errors. Set `retries: 0`, `bb up`, and the errors appear. `docker start` it again afterwards.
+- **Stop the ambassador.** `docker stop bb-{{.Experiment}}-ambassador-caller-envoy-1`. The caller gets `connection refused` on `127.0.0.1:9001`: the sidecar is now a dependency of every call. `bb up` brings it back.

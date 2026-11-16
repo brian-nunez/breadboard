@@ -408,10 +408,16 @@ func (e *Engine) ApplyStarter(ctx context.Context, req ApplyStarterRequest) (*Ap
 			}
 			return nil, fmt.Errorf("starter %s needs an app named %q, but experiment.yaml already uses that name for something else; rename it there, then apply the starter again: %w", st.ID, a.Name, ErrExists)
 		}
-		app := spec.App{Name: a.Name, Path: res.Dir, Command: a.Command, Register: a.Register}
+		app := spec.App{Name: a.Name, Path: res.Dir, Command: a.Command, Register: a.Register, Replicas: a.Replicas}
 		for _, typ := range a.Uses {
 			app.Uses = append(app.Uses, spec.Use{Service: typeService(typ)})
 		}
+		app.Sidecars = starterSidecars(a.Sidecars, func(ref string) string {
+			if slices.Contains(st.Requires, ref) {
+				return typeService(ref)
+			}
+			return ref // an app of the starter
+		})
 		if err := doc.AddApp(app); err != nil {
 			return nil, err
 		}
@@ -455,6 +461,34 @@ func (e *Engine) ApplyStarter(ctx context.Context, req ApplyStarterRequest) (*Ap
 		}
 	}
 	return res, nil
+}
+
+// starterSidecars copies a starter app's sidecars with their infra
+// references (catalog types) resolved to the experiment's service names.
+func starterSidecars(in []spec.Sidecar, resolve func(string) string) []spec.Sidecar {
+	var out []spec.Sidecar
+	for _, sc := range in {
+		if e := sc.Envoy; e != nil {
+			c := *e
+			c.Outbound = slices.Clone(e.Outbound)
+			for i := range c.Outbound {
+				c.Outbound[i].Service = resolve(c.Outbound[i].Service)
+			}
+			sc.Envoy = &c
+		}
+		if p := sc.PgBouncer; p != nil {
+			c := *p
+			c.Service = resolve(c.Service)
+			sc.PgBouncer = &c
+		}
+		if f := sc.FluentBit; f != nil {
+			c := *f
+			c.To = resolve(c.To)
+			sc.FluentBit = &c
+		}
+		out = append(out, sc)
+	}
+	return out
 }
 
 // MigrateRequest upgrades experiment.yaml.
@@ -522,6 +556,8 @@ type StarterApp struct {
 	Command  []string
 	Uses     []string // catalog types
 	Register *spec.Register
+	Replicas int
+	Sidecars []spec.Sidecar // infra references are catalog types
 }
 
 // StarterFile is one rendered file, relative to the starter's directory.
@@ -543,7 +579,7 @@ func (e *Engine) StarterDetails(ctx context.Context, req StarterDetailsRequest) 
 	d := &StarterDetails{StarterInfo: StarterInfo{ID: st.ID, Title: st.Title, Summary: st.Summary, Language: st.Language, Requires: st.Requires}, Dir: st.Dir}
 	for _, a := range st.Apps {
 		d.StarterInfo.Apps = append(d.StarterInfo.Apps, a.Name)
-		d.Apps = append(d.Apps, StarterApp{Name: a.Name, Command: a.Command, Uses: a.Uses, Register: a.Register})
+		d.Apps = append(d.Apps, StarterApp{Name: a.Name, Command: a.Command, Uses: a.Uses, Register: a.Register, Replicas: a.Replicas, Sidecars: a.Sidecars})
 	}
 	for _, f := range files {
 		d.Files = append(d.Files, StarterFile{Path: f.Path, Data: f.Data})

@@ -1,0 +1,61 @@
+// Command log-reader finds the log objects Fluent Bit uploaded, with the
+// official AWS SDK, and prints the newest one's first record.
+package main
+
+import (
+	"bufio"
+	"context"
+	"log"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+)
+
+const bucket = "app-logs"
+
+func main() {
+	ctx := context.Background()
+	// Credentials, region and endpoint come from AWS_* variables.
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) { o.UsePathStyle = true })
+
+	for range time.Tick(15 * time.Second) {
+		// Keys look like log-writer/2026/11/16/120501-<uuid>.jsonl: one
+		// object per upload, under the instance that wrote the lines.
+		var count int
+		var newest *string
+		var newestTime time.Time
+		pages := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{Bucket: aws.String(bucket)})
+		for pages.HasMorePages() {
+			page, err := pages.NextPage(ctx)
+			if err != nil {
+				log.Print(err)
+				break
+			}
+			for _, o := range page.Contents {
+				count++
+				if t := aws.ToTime(o.LastModified); t.After(newestTime) {
+					newest, newestTime = o.Key, t
+				}
+			}
+		}
+		if newest == nil {
+			log.Printf("no objects in %s yet", bucket)
+			continue
+		}
+		obj, err := client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: newest})
+		if err != nil {
+			log.Print(err)
+			continue
+		}
+		sc := bufio.NewScanner(obj.Body)
+		sc.Scan()
+		obj.Body.Close()
+		log.Printf("%d objects in %s; newest %s starts with %s", count, bucket, aws.ToString(newest), sc.Text())
+	}
+}

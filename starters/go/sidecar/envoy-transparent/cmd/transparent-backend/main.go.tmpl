@@ -1,0 +1,20 @@
+// Command transparent-backend is a plain HTTP service behind an Envoy sidecar
+// that terminates TLS on port 8443. It reports how the request reached its pod.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// The inbound sidecar only accepts TLS and says so in this header.
+		fmt.Fprintf(w, "%s, reached over %s\n", os.Getenv("BB_SERVICE"), r.Header.Get("X-Forwarded-Proto"))
+	})
+	addr := os.Getenv("BB_LISTEN_ADDR")
+	log.Printf("listening on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
+}

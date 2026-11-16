@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -26,6 +27,7 @@ func allServices() []spec.Service {
 		{Name: "postgres", Type: "postgres", Config: map[string]string{"database": "orders"}},
 		{Name: "redis", Type: "redis", Resources: spec.Resources{Memory: "128m"}},
 		{Name: "consul", Type: "consul"},
+		{Name: "s3", Type: "s3-compatible", Config: map[string]string{"buckets": "uploads,reports"}},
 	}
 }
 
@@ -140,7 +142,7 @@ func checkCompose(t *testing.T, b *Bundle) {
 
 func TestEveryEntryInline(t *testing.T) {
 	s := &spec.Spec{Version: 1, Name: "lab", Services: allServices(), Apps: []spec.App{
-		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul"), Ports: []int{8080}, Health: &spec.Health{Path: "/ready"}},
+		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul", "s3"), Ports: []int{8080}, Health: &spec.Health{Path: "/ready"}},
 	}}
 	b := render(t, s, secrets.Inline)
 	checkCompose(t, b)
@@ -152,12 +154,14 @@ func TestEveryEntryInline(t *testing.T) {
 
 func TestEveryEntryDotenv(t *testing.T) {
 	s := &spec.Spec{Version: 1, Name: "lab", Services: allServices(), Apps: []spec.App{
-		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul")},
+		{Name: "api", Path: "./api", Command: []string{"go", "run", "./cmd/api"}, Uses: uses("kafka", "postgres", "redis", "consul", "s3")},
 	}}
 	b := render(t, s, secrets.Dotenv)
 	checkCompose(t, b)
 	f, _ := b.File(ComposeFile)
-	if bytes.Contains(f.Data, []byte("SECRET")) {
+	// Test secret values end in SECRET right after a lowercase letter
+	// (postgrespasswordSECRET); variable names such as AWS_SECRET_ACCESS_KEY do not.
+	if regexp.MustCompile(`[a-z0-9]SECRET`).Match(f.Data) {
 		t.Error("dotenv mode left a secret value in docker-compose.yml")
 	}
 	env, ok := b.File(EnvFile)

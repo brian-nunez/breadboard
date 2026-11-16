@@ -32,6 +32,7 @@ Hostnames below use the default domain and a service named after its type. Image
 | `postgres` | `postgres:18.7-alpine3.24` | 512m, 0.5 cpu | same port 5432; `hostnossl` limited to the segment subnet |
 | `redis` | `redis:8.10.3-alpine3.23` | 256m, 0.25 cpu | none in v1 |
 | `consul` | `hashicorp/consul:1.22.7` | 256m, 0.5 cpu | 8500, bound to the segment address |
+| `s3-compatible` (Phase 2) | `chrislusf/seaweedfs:4.53` | 512m, 0.5 cpu | none |
 
 Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/etc/bb/tls/tls.key`, both together at `/etc/bb/tls/keystore.pem`, the CA at `/etc/bb/ca.pem`, the trust bundle at `/etc/bb/trust-bundle.pem`, and entry configuration under `/etc/bb/config/`.
 
@@ -83,13 +84,16 @@ Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/et
 
 ### `s3-compatible` (Phase 2)
 
-- Displayed as **S3 Compatible**: an object store speaking the S3 API, deliberately not branded as AWS S3. Implemented with the official SeaweedFS image (`weed server -s3`), single container. It replaces MinIO, whose community edition is archived and no longer publishes images.
-- S3 API over HTTPS with the Breadboard certificate; credentials from generated secrets; buckets declared in `config` are created at startup.
-- Health check: an authenticated S3 request over TLS against the FQDN.
+- Displayed as **S3 Compatible**: an object store speaking the S3 API, deliberately not branded as AWS S3. Implemented with the official SeaweedFS image `chrislusf/seaweedfs:4.53` (`weed server -s3`), single container. It replaces MinIO, whose community edition is archived and no longer publishes images.
+- **One network listener.** The S3 gateway serves HTTPS only on 8333 with the Breadboard certificate (a plain HTTP request is refused). Master, volume and filer bind to `127.0.0.1`; the Iceberg and Lance endpoints are off.
+- **gRPC is mutual TLS.** The S3 gateway's gRPC port (18333) shares its bind address and cannot be disabled, so a generated `/etc/seaweedfs/security.toml` requires a client certificate from the lab CA on every gRPC port and, through `allowed_commonNames`, accepts only the service's own certificate. Other lab certificates are rejected.
+- **Credentials.** A generated access key pair is passed as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, which SeaweedFS uses as its admin identity when no IAM config exists.
+- **Buckets.** `config.buckets` (comma-separated) lists buckets created at startup, once the gateway answers.
+- **No plaintext listener.** The gRPC port would follow any plaintext bind address, so `tls.mode: off` is refused, as for Redis.
+- Health check: an authenticated `ListBuckets` (`curl --aws-sigv4`) over TLS against the FQDN.
 - Env contract (generic names first, plus the variables official AWS SDKs read, so S3 clients work with zero code config):
-  - `S3_ENDPOINT=https://s3.bb.internal:8333`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE=true`
+  - `S3_ENDPOINT=https://s3-compatible.bb.internal:8333`, `S3_REGION=us-east-1`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE=true`
   - `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
-- Verify the image's exact tag and TLS configuration when the entry is built.
 
 ### Proxies and relays (Phase 5)
 

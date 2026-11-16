@@ -5,6 +5,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -170,4 +171,61 @@ func TestIntegrationCacheInvalidation(t *testing.T) {
 		return true
 	})
 	t.Logf("reader matched the database %s after the last write", time.Since(stopped).Round(time.Second))
+}
+
+// TestIntegrationS3Compatible checks the S3 Compatible entry: configured
+// buckets exist, S3 is HTTPS only, SeaweedFS's internal servers are not
+// reachable from other containers, and its gRPC port demands a client
+// certificate.
+func TestIntegrationS3Compatible(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := fmt.Sprintf("s3-%d", time.Now().Unix()%100000)
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+	})
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "experiment.yaml"), []byte(fmt.Sprintf(
+		"version: 1\nname: %s\nservices:\n  s3:\n    type: s3-compatible\n    config:\n      buckets: uploads,reports\n  redis:\n    type: redis\n", name)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	upHealthy(t, eng, dir)
+
+	s3 := containerOf(t, name, "s3")
+	list := docker(t, "exec", s3, "sh", "-c", `curl -sf --cacert /etc/bb/ca.pem --aws-sigv4 aws:amz:us-east-1:s3 --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" https://s3.bb.internal:8333/`)
+	for _, b := range []string{"<Name>uploads</Name>", "<Name>reports</Name>"} {
+		if !strings.Contains(list, b) {
+			t.Errorf("bucket %s missing from ListBuckets:\n%s", b, list)
+		}
+	}
+
+	// Probe from another container on the experiment's network.
+	probe := strings.Join([]string{
+		"apk add -q openssl curl >/dev/null",
+		`echo "http: $(curl -s -o /dev/null -w '%{http_code}' http://s3.bb.internal:8333/)"`,
+		"for p in 9333 19333 8080 18080 8888 18888 8181 9101; do nc -z -w 2 s3.bb.internal $p && echo open $p; done",
+		// Another lab service's certificate is signed by the same CA but is
+		// not on the allowed list.
+		`(printf 'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'; sleep 2) | openssl s_client -connect s3.bb.internal:18333 -alpn h2 -cert /other/tls.crt -key /other/tls.key -CAfile /ca.pem 2>&1 | grep -q 'alert bad certificate' && echo other-cert-rejected`,
+		"echo | openssl s_client -connect s3.bb.internal:18333 2>&1 | grep -c 'certificate required'",
+	}, "; ")
+	other := filepath.Join(dir, ".bb", "runtime", "tls", "redis")
+	out, _ := dockerMay("run", "--rm", "--network", "bb-"+name+"_default",
+		"-v", other+":/other:ro", "-v", filepath.Join(dir, ".bb", "runtime", "ca.pem")+":/ca.pem:ro",
+		"alpine:3.24.4", "sh", "-c", probe)
+	if !strings.Contains(out, "other-cert-rejected") {
+		t.Errorf("gRPC port 18333 accepted another service's certificate:\n%s", out)
+	}
+	if !strings.Contains(out, "http: 400") && !strings.Contains(out, "http: 000") {
+		t.Errorf("plain HTTP to 8333 was not refused:\n%s", out)
+	}
+	if strings.Contains(out, "open ") {
+		t.Errorf("internal SeaweedFS ports are reachable from another container:\n%s", out)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(out), "1") {
+		t.Errorf("gRPC port 18333 accepted a client without a certificate:\n%s", out)
+	}
 }

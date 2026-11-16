@@ -58,6 +58,7 @@ Brian owns material decisions: system boundaries, data models and file formats, 
 | D-048 | 2026-11-15 | Every app gets `TLS_CERT_FILE` and `TLS_KEY_FILE` pointing at its own certificate and key, so apps that serve TLS keep certificate paths out of code. |
 | D-049 | 2026-11-15 | Starters may use any popular official SDK for the service they teach without a separate approval; each pin is listed in `starters.md`. `bb`'s own dependencies still need approval (ADR-0011). (Brian's direction.) |
 | D-050 | 2026-11-15 | Apps default to `2g` of memory instead of `512m`. `go run` compiles dependencies inside the app container under its limit, and compiling `go-redis` v9 needs more than 1 GiB (measured: fails at 1g, succeeds at 1536m), so at 512m the compiler was killed and the app never started while still looking healthy. Supersedes the memory default in D-035. |
+| D-051 | 2026-11-15 | `s3-compatible` runs `chrislusf/seaweedfs:4.53`. Only the S3 gateway listens on the network (HTTPS, 8333); internal servers bind to loopback; every gRPC port requires mutual TLS restricted to the service's own certificate; no plaintext listener. Completes the checks ADR-0010 deferred to Phase 2. → [ADR-0010](../adr/README.md) |
 
 ## Open questions
 

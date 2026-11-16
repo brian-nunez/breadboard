@@ -34,6 +34,10 @@ type fakeRuntime struct {
 	filesSeen map[string][]byte
 	// removedOwned records the experiment ids passed to RemoveOwned.
 	removedOwned []string
+	// restartOnPoll makes a service crash and restart (restart count up, new
+	// start time, still running and healthy) on that Containers call.
+	restartOnPoll map[string]int
+	polls         int
 }
 
 func newFake() *fakeRuntime {
@@ -104,7 +108,16 @@ func (f *fakeRuntime) RemoveOwned(ctx context.Context, experimentID string, volu
 func (f *fakeRuntime) Containers(ctx context.Context, experiment string) ([]runtime.Container, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.containers[experiment], nil
+	f.polls++
+	list := f.containers[experiment]
+	for i := range list {
+		if n, ok := f.restartOnPoll[list[i].Service]; ok && f.polls == n {
+			list[i].RestartCount++
+			list[i].StartedAt = list[i].StartedAt.Add(time.Second)
+			list[i].ExitCode = 1
+		}
+	}
+	return list, nil
 }
 
 func (f *fakeRuntime) Stats(ctx context.Context, ids []string) (map[string]runtime.Usage, error) {
@@ -156,6 +169,7 @@ func newHarness(t *testing.T) *harness {
 		SystemRoots:   func() []byte { return []byte("-----BEGIN CERTIFICATE-----\nROOTS\n-----END CERTIFICATE-----\n") },
 		HealthTimeout: time.Second,
 		PollInterval:  time.Millisecond,
+		StartupSettle: 20 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)

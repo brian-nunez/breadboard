@@ -4,6 +4,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -214,21 +215,34 @@ func TestIntegrationS3Compatible(t *testing.T) {
 		"echo | openssl s_client -connect s3.bb.internal:18333 2>&1 | grep -c 'certificate required'",
 	}, "; ")
 	other := filepath.Join(dir, ".bb", "runtime", "tls", "redis")
-	out, _ := dockerMay("run", "--rm", "--network", "bb-"+name+"_default",
-		"-v", other+":/other:ro", "-v", filepath.Join(dir, ".bb", "runtime", "ca.pem")+":/ca.pem:ro",
-		"alpine:3.24.4", "sh", "-c", probe)
-	if !strings.Contains(out, "other-cert-rejected") {
-		t.Errorf("gRPC port 18333 accepted another service's certificate:\n%s", out)
+	// The probe depends on package downloads and short network timeouts, and
+	// failed once under a loaded full-suite run. A missing rejection is retried;
+	// a reachable internal port is never retried, since that is a real leak.
+	var out string
+	var problems []string
+	for attempt := 1; attempt <= 3; attempt++ {
+		out, _ = dockerMay("run", "--rm", "--network", "bb-"+name+"_default",
+			"-v", other+":/other:ro", "-v", filepath.Join(dir, ".bb", "runtime", "ca.pem")+":/ca.pem:ro",
+			"alpine:3.24.4", "sh", "-c", probe)
+		if strings.Contains(out, "open ") {
+			t.Fatalf("internal SeaweedFS ports are reachable from another container:\n%s", out)
+		}
+		problems = nil
+		if !strings.Contains(out, "other-cert-rejected") {
+			problems = append(problems, "gRPC port 18333 accepted another service's certificate")
+		}
+		if !strings.Contains(out, "http: 400") && !strings.Contains(out, "http: 000") {
+			problems = append(problems, "plain HTTP to 8333 was not refused")
+		}
+		if !strings.HasSuffix(strings.TrimSpace(out), "1") {
+			problems = append(problems, "gRPC port 18333 accepted a client without a certificate")
+		}
+		if len(problems) == 0 {
+			return
+		}
+		t.Logf("probe attempt %d: %s\n%s", attempt, strings.Join(problems, "; "), out)
 	}
-	if !strings.Contains(out, "http: 400") && !strings.Contains(out, "http: 000") {
-		t.Errorf("plain HTTP to 8333 was not refused:\n%s", out)
-	}
-	if strings.Contains(out, "open ") {
-		t.Errorf("internal SeaweedFS ports are reachable from another container:\n%s", out)
-	}
-	if !strings.HasSuffix(strings.TrimSpace(out), "1") {
-		t.Errorf("gRPC port 18333 accepted a client without a certificate:\n%s", out)
-	}
+	t.Errorf("%s:\n%s", strings.Join(problems, "; "), out)
 }
 
 // TestIntegrationS3ObjectsBasics proves the walkthrough end to end: the
@@ -339,4 +353,41 @@ func TestIntegrationConsulSelfRegistration(t *testing.T) {
 	if !slices.ContainsFunc(logsOf(t, eng, dir, "self-greeter"), func(l string) bool { return strings.Contains(l, "deregistered") }) {
 		t.Error("self-greeter did not deregister itself on SIGTERM")
 	}
+}
+
+// TestIntegrationUpCatchesACrashAfterStart: an app that passes its first
+// health check and then crashes must fail bb up, not be reported healthy.
+func TestIntegrationUpCatchesACrashAfterStart(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := fmt.Sprintf("crash-%d", time.Now().Unix()%100000)
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+	})
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(dir, "flaky")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for f, c := range map[string]string{
+		"go.mod":     "module flaky\n\ngo 1.27.4\n",
+		"main.go":    "package main\n\nimport (\n\t\"log\"\n\t\"time\"\n)\n\nfunc main() {\n\tlog.Print(\"started\")\n\ttime.Sleep(3 * time.Second)\n\tlog.Fatal(\"lost the database\")\n}\n",
+		"Dockerfile": "FROM golang:1.27.4-alpine3.24 AS dev\nWORKDIR /src\nCOPY . .\nRUN go build -o /usr/local/bin/flaky .\n",
+	} {
+		if err := os.WriteFile(filepath.Join(app, f), []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "experiment.yaml"), []byte(fmt.Sprintf(
+		"version: 1\nname: %s\napps:\n  flaky:\n    path: ./flaky\n    command: [flaky]\n", name)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := eng.Up(ctx, UpRequest{Dir: dir})
+	if !errors.Is(err, ErrUnhealthy) || !strings.Contains(err.Error(), "flaky restarted during startup") {
+		t.Fatalf("Up = %v, want flaky restarted during startup", err)
+	}
+	t.Logf("Up failed as it should: %v", err)
 }

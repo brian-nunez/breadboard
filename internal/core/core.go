@@ -71,6 +71,9 @@ type Options struct {
 	HealthTimeout time.Duration
 	// PollInterval is how often Up checks health.
 	PollInterval time.Duration
+	// StartupSettle is how long every service must stay healthy, without
+	// restarting, before Up reports success.
+	StartupSettle time.Duration
 }
 
 // Engine is the Breadboard core.
@@ -82,6 +85,7 @@ type Engine struct {
 	systemRoots   func() []byte
 	healthTimeout time.Duration
 	pollInterval  time.Duration
+	startupSettle time.Duration
 }
 
 // New returns an Engine.
@@ -93,6 +97,7 @@ func New(opts Options) (*Engine, error) {
 		systemRoots:   opts.SystemRoots,
 		healthTimeout: opts.HealthTimeout,
 		pollInterval:  opts.PollInterval,
+		startupSettle: opts.StartupSettle,
 	}
 	if opts.Home != "" {
 		e.home = state.Home{Dir: opts.Home}
@@ -120,6 +125,9 @@ func New(opts Options) (*Engine, error) {
 	}
 	if e.pollInterval == 0 {
 		e.pollInterval = 2 * time.Second
+	}
+	if e.startupSettle == 0 {
+		e.startupSettle = 5 * time.Second
 	}
 	return e, nil
 }

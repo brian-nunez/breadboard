@@ -70,6 +70,19 @@ templ overviewBody(d dashboardData) {
 					</div>
 				}
 			</div>
+			if len(d.Services) > 0 {
+				<div class="mt-6">
+					@card() {
+						<div class="flex items-center justify-between px-5 pt-5">
+							<h2 class="text-base font-semibold">Architecture</h2>
+							<a href="/architecture" class="text-sm text-indigo-600 hover:text-indigo-800">Open →</a>
+						</div>
+						<div class="m-5 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+							@graphSVG(layout(d.Services, ""), false)
+						</div>
+					}
+				</div>
+			}
 	}
 }
 

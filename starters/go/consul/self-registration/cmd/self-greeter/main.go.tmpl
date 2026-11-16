@@ -1,0 +1,62 @@
+// Command self-greeter is an HTTPS service that registers itself in Consul
+// on start and deregisters itself on shutdown. Compare with the
+// consul/service-discovery starter, where a sidecar does this for the service.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/hashicorp/consul/api"
+)
+
+func main() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "hello from %s\n", os.Getenv("BB_SERVICE"))
+	})
+	go func() {
+		log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+	}()
+
+	// DefaultConfig reads CONSUL_HTTP_ADDR and CONSUL_CACERT. With no local
+	// agent, this registers with the server agent.
+	consul, err := api.NewClient(api.DefaultConfig())
+	if err != nil {
+		log.Fatal(err)
+	}
+	addr := os.Getenv("BB_FQDN") // the name on this app's certificate
+	reg := &api.AgentServiceRegistration{
+		ID:      os.Getenv("BB_SERVICE"),
+		Name:    "self-greeter",
+		Address: addr,
+		Port:    8443,
+		Check: &api.AgentServiceCheck{
+			// Consul connects and completes a TLS handshake every 5 seconds.
+			TCP:           fmt.Sprintf("%s:8443", addr),
+			TCPUseTLS:     true,
+			TLSServerName: addr,
+			Interval:      "5s",
+			Timeout:       "2s",
+			// If this process dies without deregistering, Consul removes the
+			// entry after it has been failing for a minute.
+			DeregisterCriticalServiceAfter: "1m",
+		},
+	}
+	if err := consul.Agent().ServiceRegister(reg); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("registered self-greeter at %s:8443", addr)
+
+	// Registration is now this program's job, and so is cleaning up.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, os.Interrupt)
+	<-stop
+	if err := consul.Agent().ServiceDeregister(reg.ID); err != nil {
+		log.Print(err)
+	}
+	log.Print("deregistered")
+}

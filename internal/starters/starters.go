@@ -114,6 +114,21 @@ var all = []Starter{
 			{Name: "caller", Command: []string{"go", "run", "./cmd/caller"}, Uses: []string{"consul"}},
 		},
 	},
+	{
+		ID:       "consul/self-registration",
+		Title:    "Consul self-registration (alternative)",
+		Summary:  "Alternative to consul/service-discovery: each service registers and deregisters itself through the Consul API.",
+		Language: "go",
+		Template: "go/consul/self-registration",
+		Dir:      "self-registration",
+		Requires: []string{"consul"},
+		Apps: []App{
+			// Built and exec'd rather than go run: go run does not pass SIGTERM on,
+			// and deregistering on SIGTERM is the point of this app.
+			{Name: "self-greeter", Command: []string{"sh", "-c", "go build -o /tmp/self-greeter ./cmd/self-greeter && exec /tmp/self-greeter"}, Uses: []string{"consul"}},
+			{Name: "self-caller", Command: []string{"go", "run", "./cmd/self-caller"}, Uses: []string{"consul"}},
+		},
+	},
 }
 
 // All returns every starter.

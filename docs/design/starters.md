@@ -48,6 +48,8 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 
 `consul/service-discovery` pins `github.com/hashicorp/consul/api v1.35.0`. Its `greeter` serves HTTPS on 8443 with no Consul code; `register: {port: 8443}` in its spec entry makes Breadboard add the `greeter-agent` sidecar (see `catalog.md`). `caller` resolves healthy `greeter` instances through the Consul API and calls one. A starter app declares `register` through `starters.App.Register`, which `bb starter` writes into `experiment.yaml`.
 
+`consul/self-registration` is the labeled alternative, with the same Consul API pin. `self-greeter` registers itself (address from `BB_FQDN`, a TLS check, `DeregisterCriticalServiceAfter` as a crash safety net) and deregisters on SIGTERM; its `command` builds and `exec`s the binary because `go run` does not pass SIGTERM on. Its README points to the recommended starter first.
+
 ## Starter list
 
 | Id | Phase | Teaches |
@@ -56,4 +58,5 @@ A starter declares the catalog types it needs; applying it adds any missing one 
 | `kafka/sink-to-postgres` | 2 | Consume → transform → write; idempotent inserts; at-least-once semantics; migrations. |
 | `redis/cache-invalidation` | 2 | Cache-aside, invalidate-on-write via Kafka events, TTLs, stale reads. |
 | `consul/service-discovery` (recommended) | 2 | Registration via a Consul sidecar, health-checked catalog, resolving services by name. |
+| `consul/self-registration` (alternative) | 2 | The same lookup, with each service registering and deregistering itself through the Consul API: the plumbing the sidecar removes. |
 | `s3/objects-basics` | 2 | Buckets, keys and prefixes, multipart upload, presigned URLs against S3 Compatible storage. |

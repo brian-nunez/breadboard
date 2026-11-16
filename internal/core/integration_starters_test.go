@@ -319,3 +319,23 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+// TestIntegrationConsulSelfRegistration proves the alternative: the service
+// registers itself, the caller finds it by name, and stopping it removes it.
+func TestIntegrationConsulSelfRegistration(t *testing.T) {
+	eng, dir, name := starterLab(t, "selfreg", "consul/self-registration")
+	called := regexp.MustCompile(`(called self-greeter at self-greeter\.bb\.internal:8443 \(1 healthy\): hello from self-greeter)`)
+	eventually(t, 4*time.Minute, "the caller to reach the self-registered greeter", func() bool {
+		return len(matches(logsOf(t, eng, dir, "self-caller"), called)) > 0
+	})
+	docker(t, "stop", containerOf(t, name, "self-greeter"))
+	skip := len(logsOf(t, eng, dir, "self-caller"))
+	eventually(t, time.Minute, "Consul to stop returning the stopped greeter", func() bool {
+		lines := logsOf(t, eng, dir, "self-caller")
+		return slices.ContainsFunc(lines[min(skip, len(lines)):], func(l string) bool { return strings.Contains(l, "no healthy self-greeter instances") })
+	})
+	// The service received SIGTERM and removed itself.
+	if !slices.ContainsFunc(logsOf(t, eng, dir, "self-greeter"), func(l string) bool { return strings.Contains(l, "deregistered") }) {
+		t.Error("self-greeter did not deregister itself on SIGTERM")
+	}
+}

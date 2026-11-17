@@ -1,0 +1,55 @@
+// Command rr-backend runs as three replicas behind NGINX. Each answers every
+// request with the name of the instance that served it (rr-backend-1, -2 or
+// -3), so the client can count how NGINX spreads its requests.
+//
+// The latency knob: every request waits for the replica's delay before it is
+// answered. The default is below; change one running replica with
+//
+//	docker exec bb-<experiment>-rr-backend-2-1 wget -qO- --post-data= 'http://127.0.0.1:8080/delay?d=200ms'
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"sync/atomic"
+	"time"
+)
+
+// defaultDelay is how long every request waits before it is answered.
+const defaultDelay = 0 * time.Millisecond
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	var delay atomic.Int64
+	delay.Store(int64(defaultDelay))
+
+	// The knob listens on loopback only: other containers, NGINX included,
+	// cannot reach it. docker exec runs inside this container, so it can.
+	knob := http.NewServeMux()
+	knob.HandleFunc("POST /delay", func(w http.ResponseWriter, r *http.Request) {
+		d, err := time.ParseDuration(r.URL.Query().Get("d"))
+		if err != nil || d < 0 {
+			http.Error(w, "want ?d=<duration>, for example ?d=200ms", http.StatusBadRequest)
+			return
+		}
+		delay.Store(int64(d))
+		log.Printf("%s now waits %s per request", name, d)
+		fmt.Fprintf(w, "%s now waits %s per request\n", name, d)
+	})
+	go func() { log.Fatal(http.ListenAndServe("127.0.0.1:8080", knob)) }()
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-time.After(time.Duration(delay.Load())):
+		case <-r.Context().Done():
+			return
+		}
+		fmt.Fprintln(w, name)
+	})
+	// NGINX re-encrypts: it connects over TLS and verifies this certificate
+	// against the lab CA. The paths come from the environment.
+	log.Printf("%s serving TLS on :8443, delay %s", name, time.Duration(delay.Load()))
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

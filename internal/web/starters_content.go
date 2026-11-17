@@ -172,4 +172,52 @@ var starterContents = map[string]starterContent{
 		Covers: []string{"The adapter pattern", "Logs as files in a shared volume", "Fluent Bit tail and S3 output", "Finding objects with the AWS SDK"},
 		Guide:  "/docs/sidecars/patterns",
 	},
+	"lb/round-robin": {
+		Area:  "nginx",
+		About: "Three replicas behind NGINX, which sends each request to the next one in turn. NGINX finds the replicas through Docker's DNS and looks again every 5 seconds, so scaling the backend changes the rotation without touching NGINX. The config is a commented nginx.conf the starter writes for you to own.",
+		Steps: []step{
+			{"One name, every replica", "The upstream names rr-backend once, with resolve: each address the name resolves to becomes a peer."},
+			{"Next peer, every request", "No method is named, so NGINX uses weighted round robin with every weight at 1. One worker process keeps a single rotation."},
+			{"Re-encrypt to the replica", "NGINX opens its own TLS connection, verified against the lab CA, and keeps it alive: balancing is per request, not per connection."},
+			{"Scale and it follows", "Set replicas: 4 and run bb up: within seconds each replica answers a quarter, and NGINX was never restarted."},
+		},
+		KeyFile: "nginx.conf", KeyTitle: "The upstream block",
+		Covers: []string{"Round robin", "DNS re-resolution", "Scaling replicas", "Passive health checks"},
+	},
+	"lb/least-connections": {
+		Area:  "haproxy",
+		About: "HAProxy balances the same three replicas two ways at once: leastconn on one path, roundrobin on another. One replica takes ten times longer per request. Round robin keeps giving it a third of the traffic; least connections notices that its requests pile up and sends it a few percent.",
+		Steps: []step{
+			{"Uneven cost", "Requests take 50 ms on two replicas and 500 ms on the third. The client keeps six requests in flight per strategy."},
+			{"roundrobin ignores it", "Each request goes to the next server in turn, so a third of them wait 500 ms."},
+			{"leastconn counts", "Each request goes to the server with the fewest requests in progress; the slow one keeps a high count and loses."},
+			{"Read HAProxy's own counts", "The HAProxy stats tab shows how often each server was picked in each backend."},
+		},
+		KeyFile: "haproxy.cfg", KeyTitle: "Two backends, two algorithms",
+		Covers: []string{"Least connections", "Round robin under uneven cost", "Tail latency", "server-template and DNS"},
+	},
+	"lb/power-of-two-choices": {
+		Area:  "traefik",
+		About: "Traefik picks two replicas at random for each request and sends it to the less busy one. Next to weighted round robin over the same replicas, the slow replica gets far fewer requests, yet every replica keeps serving. Two random choices give most of the benefit of least connections with no global view.",
+		Steps: []step{
+			{"Same servers, two services", "Services p2c and wrr list the three replicas by name; routers send /wrr/ to one and the rest to the other."},
+			{"Two random picks", "p2c compares the requests in flight on two random servers and takes the lower."},
+			{"The slow one loses", "Replica 3 holds its requests ten times longer, so it wins only when it happens to be idle: a few percent of requests."},
+			{"Other strategies", "Switch to leasttime (learns response times) or hrw (sticks a client to one server) in the routing file."},
+		},
+		KeyFile: "dynamic.yml", KeyTitle: "Services p2c and wrr",
+		Covers: []string{"Power of two choices", "Weighted round robin", "Traefik load-balancing strategies", "Health checks"},
+	},
+	"lb/consistent-hashing": {
+		Area:  "envoy",
+		About: "Envoy hashes the X-User-ID header to choose one of four replicas, with ring_hash and maglev side by side. Each replica caches the keys it sees, so the same key landing on the same replica keeps every cache warm. Stop a replica and the client counts how many of its 200 keys move: all of the stopped replica's, and with ring_hash a few others.",
+		Steps: []step{
+			{"Hash the header", "Each route's hash_policy hashes x-user-id; without the header Envoy would pick a host at random."},
+			{"Ring or table", "ring_hash places each host on a ring many times; maglev fills a 65537-entry table. Both map a key to one host."},
+			{"Same key, same replica", "Round after round no key moves, and every request is a cache hit."},
+			{"Remove a replica", "docker stop one of four: its keys move to the others, and most keys stay put with their cache."},
+		},
+		KeyFile: "envoy.yaml", KeyTitle: "Two hashing clusters",
+		Covers: []string{"Consistent hashing", "Ring hash vs Maglev", "Cache locality", "Remapping when a replica leaves"},
+	},
 }

@@ -1,0 +1,49 @@
+# lb/consistent-hashing
+
+**Consistent hashing**: pick the server from a hash of something in the request (a user id, a cache key), so the same key always lands on the same server, and adding or removing a server moves only a small share of the keys. That is what makes per-server caches work behind a load balancer: each replica keeps seeing the same keys, so its cache stays warm. Here [Envoy](https://www.envoyproxy.io/docs/envoy/v1.40.0/intro/arch_overview/upstream/load_balancing/load_balancers#ring-hash) hashes the `X-User-ID` header with two algorithms side by side, `ring_hash` and `maglev`, in a config file you own: `envoy.yaml` in this directory.
+
+- `cmd/ch-backend`: four replicas. Each serves TLS on 8443 and keeps its own in-memory cache: the first request for a key is a miss and costs 20 ms more, later ones are hits. It answers `<instance> hit` or `<instance> miss`. Its latency knob is `defaultDelay` in `main.go`, or `POST /delay?d=…` on a replica's loopback port 8080.
+- `cmd/ch-client`: every 5 seconds asks for the same 200 keys (`user-000` … `user-199`), once through `ring_hash` (`/`) and once through `maglev` (`/maglev/`). For each policy it logs which keys each replica holds once placement is stable (the baseline), every key that moves, and a summary per round.
+- `envoy.yaml`: the `ch-edge` service's config (`file: ./consistent-hashing/envoy.yaml` in `experiment.yaml`), commented.
+
+## How it works
+
+- **The key.** Each route has a `hash_policy` on the `x-user-id` header: Envoy hashes the value and the cluster's balancer turns the hash into a host. A request without the header produces no hash, and Envoy picks a host at random.
+- **The hosts.** Both clusters use strict DNS (`cluster_type: envoy.clusters.dns`) on `ch-backend.{{.Domain}}`, so every replica is a host, found again every 5 seconds. Health checks take a failing host out of the hash.
+- **ring_hash** puts each host on a ring many times (1024 points shared between the hosts, hashed from each host's address). A key goes to the first point clockwise from its hash. When a host leaves, the keys on its stretches of the ring go to the next point along: about 1/N of the keys move. Envoy keeps the ring's size, so each remaining host also gains a few points, and those take a few keys from other remaining hosts.
+- **maglev** fills a lookup table of 65537 entries, each host taking turns from its own permutation, so every host owns almost the same number of entries; a lookup is a single table read. Envoy's docs say that in simulations removing a host moves about twice as many keys as ring hash would. Measure it here: in this lab Maglev moved only the removed host's keys in every run, while Envoy's ring also moved some between the remaining hosts.
+- **Round robin would ruin the cache.** Each of four replicas would see every key in turn, so each would cache all 200 and a request would be a miss on any replica that had not yet seen it. With hashing, after the first round every request is a hit.
+
+```sh
+bb up
+bb logs ch-client -f
+```
+
+A round summary reads `ring_hash round 9: 200 keys, 0 failed, 0 moved, 0 differ from baseline, 200 cache hits | ch-backend-1=44 ch-backend-2=55 ch-backend-3=52 ch-backend-4=49`: no key moved since the last round, every key is where the baseline put it, every answer was a cache hit, and how many keys each replica holds.
+
+## Remove a replica and count the keys that move
+
+1. Wait for `placement stable … baseline:` in the client's log, for both policies. The lines after it list the keys of each replica. Note how many `ch-backend-4` has under each policy (about a quarter).
+2. Stop it: `docker stop bb-{{.Experiment}}-ch-backend-4-1`.
+3. For a round or two its keys fail (`failed` in the summary: Envoy still sends to it until a health check or DNS takes it out, within about 6 seconds). Then the client logs a line for every key that moves, such as `ring_hash: user-042 moved ch-backend-4 -> ch-backend-2`, and the next summaries settle at `0 moved`.
+4. Read `differ from baseline` in the settled summary: that is how many of the 200 keys moved. Every key `ch-backend-4` held moved, spread over the three others. Under `ring_hash` some more move between the remaining replicas, from the extra points they gained: in one run, the 49 keys of `ch-backend-4` and 22 others moved under `ring_hash` (71 of 200), and exactly the 53 keys of `ch-backend-4` under `maglev`. Either way most keys stayed, and so did their cache entries; each moved key misses once on its new replica. With plain modulo hashing (`hash % N`), going from 4 to 3 servers would move about three quarters of all keys.
+5. Bring it back: `docker start bb-{{.Experiment}}-ch-backend-4-1`. Once it passes two health checks it rejoins and takes back about a quarter of the keys. The host's place in the hash comes from its address: if Docker gave it the same address, it gets back exactly the keys it had and `differ from baseline` returns to 0; with a new address it gets a different quarter.
+
+## What to watch
+
+- `bb serve`, `ch-edge`, **Envoy clusters** tab: clusters `ring-hash` and `maglev` with every replica, its health, and requests per host. Stopping a replica shows it failing its health check, then leaving.
+- `bb logs ch-edge`: the access log lists each request's key and the host it went to (`/maglev/ x-user-id=user-042 -> 10.x.x.x:8443 200`).
+- `bb logs ch-backend`: each replica's cached keys, hits and misses every 10 seconds.
+- MCP: `envoy_clusters` with `service: ch-edge`.
+
+## Try this
+
+- **Add a replica.** Set `replicas: 5` on `ch-backend` and run `bb up`. `ch-backend-5` takes roughly a fifth of the keys. Envoy rebuilds the ring when a host joins, so some keys can also move between the existing replicas, as they did when you stopped one. Count every move in the summaries for `ring-hash` and `maglev`: both stay a minority of the keys, but neither promises that every other key keeps its replica and its cache.
+- **Shrink the ring.** Set `minimum_ring_size: 8` and `maximum_ring_size: 8` on `ring-hash` and run `bb up`. Each replica now has two points on the ring, the stretches between points are very uneven, and so are the keys per replica in the summaries. With 100 keys the counts vary from run to run anyway (each replica's address decides its points); more points, or more keys, even them out.
+- **Hash something else.** Replace the `header` policy of the `ring-hash` route with `connection_properties: {source_ip: true}` and run `bb up`. Every request from this one client now lands on one replica: hashing the client's address is session affinity, and one busy client becomes one busy replica.
+
+## Break this
+
+- **Drop the key.** Remove the `hash_policy` from the `ring-hash` route and run `bb up`. With no hash, Envoy picks a host at random: `ring_hash` keys move every round, and the summaries show misses until every replica has cached every key, the same data four times over.
+- **Use round robin.** Set `lb_policy: ROUND_ROBIN` on `ring-hash` (and delete `ring_hash_lb_config`) and run `bb up`. Keys rotate across replicas; after a few rounds each replica has cached every key, four times the memory for the same data.
+- **Make a replica slow.** `docker exec bb-{{.Experiment}}-ch-backend-2-1 wget -qO- --post-data= 'http://127.0.0.1:8080/delay?d=500ms'`. Its quarter of the keys all become slow, and nothing moves them: a hash balancer ignores load, so a slow or hot replica keeps its keys (compare `lb/least-connections`). Set `d=0s` to undo it.

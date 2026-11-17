@@ -1,0 +1,76 @@
+# dynamic.yml for p2c-edge, shipped by the lb/power-of-two-choices starter:
+# yours to edit. bb up copies it into the container in place of the
+# generated routing (services.p2c-edge.file in experiment.yaml); edits
+# apply at the next bb up.
+#
+# Breadboard keeps the static configuration (traefik.yml: the websecure
+# entrypoint on :8443, ping and the API on 127.0.0.1:8080) and the
+# certificate store (tls.yml); this file only routes.
+#
+# Two services balance the same three replicas of p2c-backend, so you can
+# compare them side by side:
+#   /wrr/...        -> wrr (weighted round robin)
+#   everything else -> p2c (power of two choices)
+
+http:
+  routers:
+    # Every request no longer rule claims goes to p2c. Traefik orders
+    # routers by the length of their rule, so the /wrr/ router below wins
+    # for its paths without a priority setting.
+    route-p2c:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/`)
+      service: p2c
+    wrr:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/wrr/`)
+      service: wrr
+
+  services:
+    # Power of two choices: for each request, pick two servers at random and
+    # send it to the one with fewer requests in progress. It needs no global
+    # view and no sorting, only a counter per server, yet a slow server
+    # (whose counter stays high) loses most of the comparisons it is in.
+    p2c:
+      loadBalancer:
+        strategy: p2c
+        # Traefik does not discover the several addresses of one DNS name,
+        # so each replica is listed by its own name. Add a line here when
+        # you add a replica.
+        servers:
+          - url: https://p2c-backend-1.{{.Domain}}:8443
+          - url: https://p2c-backend-2.{{.Domain}}:8443
+          - url: https://p2c-backend-3.{{.Domain}}:8443
+        # Active checks every 2s: a 2xx or 3xx answer keeps a server in.
+        healthCheck:
+          path: /
+          hostname: p2c-backend.{{.Domain}}
+          interval: 2s
+          timeout: 2s
+        serversTransport: p2c-backend
+
+    # Weighted round robin, Traefik's default: each server in turn, in
+    # proportion to its weight (all 1 here), however busy it is.
+    wrr:
+      loadBalancer:
+        strategy: wrr
+        servers:
+          - url: https://p2c-backend-1.{{.Domain}}:8443
+          - url: https://p2c-backend-2.{{.Domain}}:8443
+          - url: https://p2c-backend-3.{{.Domain}}:8443
+        healthCheck:
+          path: /
+          hostname: p2c-backend.{{.Domain}}
+          interval: 2s
+          timeout: 2s
+        serversTransport: p2c-backend
+
+  serversTransports:
+    # Re-encrypt: TLS to each replica, verified against the lab CA as
+    # p2c-backend.{{.Domain}}, a name on every replica's certificate.
+    p2c-backend:
+      serverName: p2c-backend.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem

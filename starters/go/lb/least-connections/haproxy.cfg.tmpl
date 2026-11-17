@@ -1,0 +1,83 @@
+# haproxy.cfg for lc-edge, shipped by the lb/least-connections starter: yours
+# to edit. bb up copies it into the container in place of the generated
+# config (services.lc-edge.file in experiment.yaml).
+#
+# HTTPS on :8443 with lc-edge's certificate, then two backends that balance
+# the same three replicas of lc-backend, so you can compare them side by side:
+#   /roundrobin/...  -> be_roundrobin (balance roundrobin)
+#   everything else  -> be_leastconn  (balance leastconn)
+# The certificate (/etc/bb/tls/keystore.pem) and the lab CA (/etc/bb/ca.pem)
+# are mounted by Breadboard. Keep the monitor frontend on 127.0.0.1:8404:
+# the container's health check reads /healthz there.
+
+global
+    # Logs go to the container's output: bb logs lc-edge.
+    log stdout format raw local0
+    # At most 256 concurrent connections, on one thread, so HAProxy fits in
+    # its 128m container. Raise both (and the service's memory) to load test.
+    maxconn 256
+    nbthread 1
+    # TLS 1.2 or newer, towards clients and towards servers.
+    ssl-default-bind-options ssl-min-ver TLSv1.2
+    ssl-default-server-options ssl-min-ver TLSv1.2
+
+# Docker's embedded DNS. server-template lines keep resolving their name
+# here, so HAProxy follows replicas as they start and stop.
+resolvers docker
+    nameserver dns 127.0.0.11:53
+    accepted_payload_size 8192
+    resolve_retries 3
+    timeout resolve 1s
+    timeout retry 1s
+
+defaults
+    log global
+    mode http
+    option httplog
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+    timeout check 5s
+    # Every server: an active check every 2s, down after 3 failures and up
+    # after 2 successes. Addresses come from the docker resolvers; a server
+    # whose name does not resolve yet starts down instead of failing.
+    default-server inter 2s fall 3 rise 2 resolvers docker resolve-prefer ipv4 init-addr none
+
+# Loopback only: the health check and the stats page. bb serve's HAProxy
+# stats tab reads /stats;csv: watch "cur" sessions per server.
+frontend monitor
+    bind 127.0.0.1:8404
+    monitor-uri /healthz
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    # Server addresses on the stats page, so explorers can tell which
+    # replica each server-template slot resolved to.
+    stats show-legends
+
+frontend https
+    bind :8443 ssl crt /etc/bb/tls/keystore.pem alpn h2,http/1.1
+    # Tell servers the client spoke HTTPS, and who the client was.
+    http-request set-header X-Forwarded-Proto https
+    option forwardfor
+    use_backend be_roundrobin if { path_beg /roundrobin/ }
+    default_backend be_leastconn
+
+# Least connections: each request goes to the server with the fewest
+# requests in progress right now (queued ones count too). A slow server
+# finishes its requests late, so it keeps a higher count and is picked less.
+# Servers with the same count take turns, round robin.
+backend be_leastconn
+    balance leastconn
+    # Three server slots filled from the addresses lc-backend.{{.Domain}}
+    # resolves to (slot numbers are not replica numbers). Re-encrypt: TLS to
+    # each replica, verified against the lab CA as lc-backend.{{.Domain}}, a
+    # name on every replica's certificate; the active check is the TLS
+    # handshake.
+    server-template lc 3 lc-backend.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(lc-backend.{{.Domain}}) verifyhost lc-backend.{{.Domain}} check check-sni lc-backend.{{.Domain}}
+
+# Round robin: each request goes to the next server in turn, however busy
+# it is. The slow server gets a third of the requests, like the others.
+backend be_roundrobin
+    balance roundrobin
+    server-template lc 3 lc-backend.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(lc-backend.{{.Domain}}) verifyhost lc-backend.{{.Domain}} check check-sni lc-backend.{{.Domain}}

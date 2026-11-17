@@ -1,0 +1,93 @@
+// Command ch-backend runs as four replicas behind Envoy. Each keeps its own
+// in-memory cache of the keys it has served: the first request for a key is
+// a miss and pays missCost (loading it from a slow store, say); later ones
+// are hits. It answers "<instance> hit" or "<instance> miss", so the client
+// can see which replica each key landed on and whether that replica had it.
+//
+// The latency knob: every request also waits for the replica's delay, zero by
+// default. Change one running replica with
+//
+//	docker exec bb-<experiment>-ch-backend-2-1 wget -qO- --post-data= 'http://127.0.0.1:8080/delay?d=200ms'
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+const (
+	// defaultDelay is how long every request waits before it is answered.
+	defaultDelay = 0 * time.Millisecond
+	// missCost is the extra wait for a key this replica has not cached yet.
+	missCost = 20 * time.Millisecond
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // ch-backend-1 … ch-backend-4
+	var delay atomic.Int64
+	delay.Store(int64(defaultDelay))
+
+	// The knob listens on loopback only: other containers, Envoy included,
+	// cannot reach it. docker exec runs inside this container, so it can.
+	knob := http.NewServeMux()
+	knob.HandleFunc("POST /delay", func(w http.ResponseWriter, r *http.Request) {
+		d, err := time.ParseDuration(r.URL.Query().Get("d"))
+		if err != nil || d < 0 {
+			http.Error(w, "want ?d=<duration>, for example ?d=200ms", http.StatusBadRequest)
+			return
+		}
+		delay.Store(int64(d))
+		log.Printf("%s now waits %s per request", name, d)
+		fmt.Fprintf(w, "%s now waits %s per request\n", name, d)
+	})
+	go func() { log.Fatal(http.ListenAndServe("127.0.0.1:8080", knob)) }()
+
+	var mu sync.Mutex
+	cache := map[string]bool{}
+	var hits, misses atomic.Int64
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-User-ID")
+		if key == "" {
+			// Envoy's health checks carry no key.
+			fmt.Fprintln(w, name)
+			return
+		}
+		wait := time.Duration(delay.Load())
+		mu.Lock()
+		hit := cache[key]
+		cache[key] = true
+		mu.Unlock()
+		if !hit {
+			wait += missCost
+		}
+		select {
+		case <-time.After(wait):
+		case <-r.Context().Done():
+			return
+		}
+		if hit {
+			hits.Add(1)
+			fmt.Fprintln(w, name, "hit")
+		} else {
+			misses.Add(1)
+			fmt.Fprintln(w, name, "miss")
+		}
+	})
+	go func() {
+		for range time.Tick(10 * time.Second) {
+			mu.Lock()
+			n := len(cache)
+			mu.Unlock()
+			log.Printf("%s: %d keys cached, %d hits, %d misses", name, n, hits.Load(), misses.Load())
+		}
+	}()
+	// Envoy re-encrypts: it connects over TLS and verifies this certificate
+	// against the lab CA. The paths come from the environment.
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

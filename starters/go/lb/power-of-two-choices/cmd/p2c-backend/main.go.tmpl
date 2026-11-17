@@ -1,0 +1,73 @@
+// Command p2c-backend runs as three replicas behind Traefik. Each answers every
+// request with the name of the instance that served it, after a delay: the
+// cost of the request. Replica 3 starts slow, so requests cost ten times more
+// there than on the others.
+//
+// The latency knob: the defaults are below; change one running replica with
+//
+//	docker exec bb-<experiment>-p2c-backend-1-1 wget -qO- --post-data= 'http://127.0.0.1:8080/delay?d=500ms'
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"sync/atomic"
+	"time"
+)
+
+// Every request waits defaultDelay, except on slowInstance, where it waits
+// slowDelay.
+const (
+	defaultDelay = 50 * time.Millisecond
+	slowInstance = "p2c-backend-3"
+	slowDelay    = 500 * time.Millisecond
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // p2c-backend-1, -2 or -3
+	var delay atomic.Int64
+	delay.Store(int64(defaultDelay))
+	if name == slowInstance {
+		delay.Store(int64(slowDelay))
+	}
+
+	// The knob listens on loopback only: other containers, Traefik included,
+	// cannot reach it. docker exec runs inside this container, so it can.
+	knob := http.NewServeMux()
+	knob.HandleFunc("POST /delay", func(w http.ResponseWriter, r *http.Request) {
+		d, err := time.ParseDuration(r.URL.Query().Get("d"))
+		if err != nil || d < 0 {
+			http.Error(w, "want ?d=<duration>, for example ?d=500ms", http.StatusBadRequest)
+			return
+		}
+		delay.Store(int64(d))
+		log.Printf("%s now waits %s per request", name, d)
+		fmt.Fprintf(w, "%s now waits %s per request\n", name, d)
+	})
+	go func() { log.Fatal(http.ListenAndServe("127.0.0.1:8080", knob)) }()
+
+	// in counts the requests this replica is serving right now: what p2c
+	// compares between its two random picks.
+	var in atomic.Int64
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		in.Add(1)
+		defer in.Add(-1)
+		select {
+		case <-time.After(time.Duration(delay.Load())):
+		case <-r.Context().Done():
+			return
+		}
+		fmt.Fprintln(w, name)
+	})
+	go func() {
+		for range time.Tick(5 * time.Second) {
+			log.Printf("%s: delay %s, %d requests in progress", name, time.Duration(delay.Load()), in.Load())
+		}
+	}()
+	// Traefik re-encrypts: it connects over TLS and verifies this certificate
+	// against the lab CA. The paths come from the environment.
+	log.Printf("%s serving TLS on :8443, delay %s", name, time.Duration(delay.Load()))
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

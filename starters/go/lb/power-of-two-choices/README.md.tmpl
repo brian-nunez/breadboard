@@ -1,0 +1,46 @@
+# lb/power-of-two-choices
+
+**Power of two choices (p2c)**: for each request, pick two servers at random and send it to the less busy one. Least connections needs every server's count to find the minimum; p2c only compares two, yet it avoids overloaded servers almost as well, which is why large distributed balancers use it. Here [Traefik](https://doc.traefik.io/traefik/reference/routing-configuration/http/load-balancing/service/) runs `strategy: p2c` and `strategy: wrr` side by side over the same replicas, in a routing file you own: `dynamic.yml` in this directory.
+
+- `cmd/p2c-backend`: three replicas. Each serves TLS on 8443 and answers with its own name after a delay: 50 ms, except `p2c-backend-3`, which takes 500 ms. The knob is the constants at the top of `main.go`, or `POST /delay?d=…` on a replica's loopback port 8080. Every 5 seconds each replica logs how many requests it is serving.
+- `cmd/p2c-client`: keeps six requests in flight to each strategy (`/` is p2c, `/wrr/` is weighted round robin). A worker sends its next request as soon as the last one returns. Every 5 seconds it logs a tally per strategy.
+- `dynamic.yml`: the routing of the `p2c-edge` service (`file: ./power-of-two-choices/dynamic.yml` in `experiment.yaml`), commented. Breadboard keeps Traefik's static configuration and certificate store.
+
+## How it works
+
+- **Two services, one set of servers.** Services `p2c` and `wrr` list the same three replicas by name (`https://p2c-backend-1.{{.Domain}}:8443`, …): Traefik does not discover several addresses behind one DNS name. Router `wrr` takes ``PathPrefix(`/wrr/`)``; router `route-p2c` takes everything else. Traefik orders routers by the length of their rule, so the longer one wins without a priority.
+- **wrr** sends each request to the next server in proportion to its weight (all 1 here). The slow replica gets a third of the requests, however long it takes to answer them.
+- **p2c** picks two servers at random and sends the request to the one with fewer requests in flight (Traefik's docs call it the fewest active connections). The slow replica holds its requests ten times longer, so it loses almost every comparison it is drawn into, but it still wins some: when it happens to be idle. Every replica keeps serving, the slow one much less.
+- **Why two?** Picking one server at random ignores load entirely. Picking the best of two already removes most of the imbalance, and each extra choice helps less. Two needs no shared view of all servers, which matters when many balancers share the same backends.
+
+```sh
+bb up
+bb logs p2c-client -f
+```
+
+A typical pair of lines:
+
+```text
+p2c last 5s: 348 requests | p2c-backend-1=152 (43%) p2c-backend-2=170 (48%) p2c-backend-3=26 (7%) | status 200=348 | p50 51ms p99 502ms
+wrr last 5s: 149 requests | p2c-backend-1=50 (33%) p2c-backend-2=49 (32%) p2c-backend-3=50 (33%) | status 200=149 | p50 52ms p99 505ms
+```
+
+## What to watch
+
+- `bb serve`, `p2c-edge`, **Traefik routes** tab: both routers, services `p2c` and `wrr` with their strategy, and each server's status (UP or DOWN, from the health check). Traefik's API has no per-server request counter: the client's tally and Traefik's access log are your counts.
+- `bb logs p2c-edge`: the access log names the router and the server for every request, with the time it took.
+- MCP: `traefik_routes` with `service: p2c-edge`.
+- `bb logs p2c-backend`: each replica's requests in progress.
+
+## Try this
+
+- **Make every replica equal.** `docker exec bb-{{.Experiment}}-p2c-backend-3-1 wget -qO- --post-data= 'http://127.0.0.1:8080/delay?d=50ms'`. Both strategies now give each replica about a third. Set it back with `d=500ms`.
+- **Weigh the slow replica up.** In `dynamic.yml`, give the third server of `wrr` a weight (`- url: https://p2c-backend-3.{{.Domain}}:8443` then, on the next line, `weight: 3`) and run `bb up`. Under wrr it now gets three requests in five, and the client's throughput on `/wrr/` drops: a weight is a promise about capacity that the server does not keep.
+- **Try leasttime.** Set `strategy: leasttime` on the `p2c` service and run `bb up`. Traefik scores each server by its average response time and its requests in flight, and favours the lowest score: it learns that replica 3 is slow, not only that it is busy.
+- **Try hrw.** Set `strategy: hrw` (highest random weight). Traefik hashes the client's address with each server and picks the highest: every request from this one client goes to the same replica. hrw is for affinity, not for spreading load.
+
+## Break this
+
+- **Take away the concurrency.** Set `workers = 1` in `cmd/p2c-client/main.go` and run `bb up`. With one request at a time, nothing is ever in flight when Traefik compares two servers, so p2c has nothing to go on and the slow replica's share climbs back toward a third.
+- **Stop a replica.** `docker stop bb-{{.Experiment}}-p2c-backend-2-1`. Its health check fails and the Traefik routes tab shows it `DOWN` within seconds; both services keep serving from the other two. `docker start` it and it comes back UP.
+- **Scale without telling Traefik.** Set `replicas: 4` on `p2c-backend` and run `bb up`. `p2c-backend-4` starts, but no request reaches it: the routing file lists servers by name, and nobody added the fourth. Add it to both services and run `bb up` again.

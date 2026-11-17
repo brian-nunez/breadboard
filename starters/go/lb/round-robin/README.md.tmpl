@@ -1,0 +1,41 @@
+# lb/round-robin
+
+**Round robin**: a load balancer sends each new request to the next server in turn. It needs no knowledge of the servers' load, which makes it simple and fair when every request costs about the same, and blind when they do not. Here [NGINX](https://nginx.org/en/docs/http/ngx_http_upstream_module.html) does it, in a config file you own: `nginx.conf` in this directory.
+
+- `cmd/rr-backend`: three replicas (`rr-backend-1`, `-2`, `-3`). Each serves TLS on 8443 and answers every request with its own name. Its latency knob is `defaultDelay` in `main.go`, or `POST /delay?d=200ms` on its loopback port 8080 for one running replica.
+- `cmd/rr-client`: sends ten requests a second, one at a time, to `RR_EDGE_URL` (NGINX) and logs, every 5 seconds, how many each replica answered, the status codes and the latency.
+- `nginx.conf`: the `rr-edge` service's config (`file: ./round-robin/nginx.conf` in `experiment.yaml`), commented line by line.
+
+## How it works
+
+- **One name, every replica.** `rr-backend.{{.Domain}}` is a DNS alias on every instance. The `upstream` block names it once, with `resolve`: NGINX asks Docker's DNS (`resolver 127.0.0.11 valid=5s`) and turns each address into a peer.
+- **Round robin.** The `upstream` names no method, so NGINX uses its default, weighted round robin, with every peer at weight 1: request 1 to the first peer, request 2 to the second, and so on. The config runs one worker process, so you see exactly the rotation NGINX keeps (each worker keeps its own).
+- **Scaling follows DNS.** NGINX looks the name up again whenever the answer is older than 5 seconds. Add a replica and it becomes a peer; stop one and it disappears, with no reload.
+- **Re-encrypt.** The client talks TLS to NGINX, and NGINX opens its own TLS connection to the replica, verified against the lab CA as `rr-backend.{{.Domain}}` (a name on every replica's certificate). `keepalive 16` keeps those connections open: balancing is per request, not per connection.
+- **Passive health only.** Open source NGINX has no active health checks (`health_check` is NGINX Plus). A peer that fails 3 times within 10 seconds rests for 10 seconds, and the failed request is retried on the next peer. A failure here is a connection error or timeout (or an invalid response), NGINX's default `proxy_next_upstream error timeout`: a replica that answers HTTP 500 is not failing by that measure and keeps its share. To count 5xx answers too, add them to `proxy_next_upstream` in `nginx.conf` (for example `proxy_next_upstream error timeout http_500 http_502 http_503 http_504;`), knowing that NGINX then also retries those requests on the next peer, so their handlers must be safe to run twice; `bb learn nginx` has the details.
+
+```sh
+bb up
+bb logs rr-client -f
+```
+
+The client logs a line like `last 5s: 50 requests | rr-backend-1=17 (34%) rr-backend-2=17 (34%) rr-backend-3=16 (32%) | status 200=50 | p50 3ms p99 8ms`.
+
+## What to watch
+
+- `bb logs rr-edge`: the access log names the peer that served each request (`upstream=10.x.x.x:8443`); the addresses rotate.
+- `bb status`: `rr-edge` with its upstream `rr-backend (TLS :8443)` and three replicas.
+- `bb serve`: the **NGINX status** tab of `rr-edge` shows the connection counters and what `rr-backend.{{.Domain}}` resolves to, one address per replica. Open source NGINX keeps no per-peer counters (that is the NGINX Plus API); the client's tally is your per-replica count.
+- MCP: `nginx_status` with `service: rr-edge`, and `service_details` for the upstream.
+
+## Try this
+
+- **Scale out.** Set `replicas: 5` on `rr-backend` in `experiment.yaml` and run `bb up`. NGINX is not restarted, yet within seconds the client's tally lists `rr-backend-4` and `rr-backend-5`, each with a fifth. Scale back to 3 and they leave the rotation.
+- **Weigh one replica.** Replace the `server rr-backend…` line in `nginx.conf` with one line per replica (`server rr-backend-1.{{.Domain}}:8443 resolve weight=3;`, then `-2` and `-3` with weight 1) and run `bb up`. Replica 1 now answers three requests in five: weighted round robin.
+- **Try another method.** Add `least_conn;` or `random two least_conn;` at the top of the `upstream` block and run `bb up`. With requests sent one at a time and replicas this fast, every method looks the same: the strategies only differ under concurrency and uneven cost (see `lb/least-connections` and `lb/power-of-two-choices`).
+
+## Break this
+
+- **Make one replica slow.** `docker exec bb-{{.Experiment}}-rr-backend-2-1 wget -qO- --post-data= 'http://127.0.0.1:8080/delay?d=500ms'`. Round robin keeps giving it a third of the requests, and the client's p99 climbs to 500 ms: round robin does not look at load. Set `d=0s` to undo it.
+- **Stop a replica.** `docker stop bb-{{.Experiment}}-rr-backend-3-1`. Requests that NGINX sends to it fail and are retried on the next peer, so the client still sees 200s, some of them slow (`proxy_connect_timeout 2s`); within seconds DNS stops returning the address and the rotation has two peers. `docker start` it and it rejoins.
+- **Remove `resolve`.** Delete `resolve` from the `server` line and run `bb up`: NGINX now resolves the name once, when it starts. Then scale to 5 and run `bb up` again: the new replicas never get traffic, because NGINX still has the three addresses it found at startup.

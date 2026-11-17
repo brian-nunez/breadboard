@@ -1,0 +1,127 @@
+// Command lc-client keeps six requests in flight to each of two HAProxy
+// backends that balance the same three replicas: leastconn at "/" and
+// roundrobin at "/roundrobin/". Each worker sends its next request as soon as
+// the last one returns, so a slow replica holds on to its requests. Every 5
+// seconds the client logs a tally per strategy: which replica answered, the
+// status codes and the latency.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+// workers is the number of requests each strategy keeps in flight.
+const workers = 6
+
+func main() {
+	base := os.Getenv("LC_EDGE_URL") // https://lc-edge.<domain>:8443
+	// The lab CA is trusted through SSL_CERT_FILE, so this is a plain client
+	// that verifies HAProxy's certificate.
+	client := &http.Client{Timeout: 10 * time.Second}
+	go drive(client, "leastconn ", base+"/")
+	drive(client, "roundrobin", base+"/roundrobin/")
+}
+
+// drive keeps workers requests in flight to url and logs a tally every 5s.
+func drive(client *http.Client, label, url string) {
+	var t tally
+	for range workers {
+		go func() {
+			for {
+				r := call(client, url)
+				t.add(r)
+				if r.status == "error" {
+					time.Sleep(time.Second)
+				}
+			}
+		}()
+	}
+	for range time.Tick(5 * time.Second) {
+		log.Printf("%s last 5s: %s", label, t.reset())
+	}
+}
+
+// result is one request: who answered, with which status, how fast.
+type result struct {
+	replica string
+	status  string
+	took    time.Duration
+}
+
+func call(client *http.Client, url string) result {
+	start := time.Now()
+	resp, err := client.Get(url)
+	if err != nil {
+		log.Printf("request failed: %v", err)
+		return result{status: "error", took: time.Since(start)}
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	r := result{status: fmt.Sprint(resp.StatusCode), took: time.Since(start)}
+	if resp.StatusCode == http.StatusOK {
+		r.replica = strings.TrimSpace(string(body)) // the instance's name
+	}
+	return r
+}
+
+// tally counts one window of results; workers add to it concurrently.
+type tally struct {
+	mu       sync.Mutex
+	replicas map[string]int
+	statuses map[string]int
+	took     []time.Duration
+}
+
+func (t *tally) add(r result) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.replicas == nil {
+		t.replicas, t.statuses = map[string]int{}, map[string]int{}
+	}
+	if r.replica != "" {
+		t.replicas[r.replica]++
+	}
+	t.statuses[r.status]++
+	t.took = append(t.took, r.took)
+}
+
+// reset returns the window so far and starts a new one. It reads like
+// "300 requests | lc-backend-1=140 (46%) lc-backend-2=140 (46%) lc-backend-3=20 (6%) | status 200=300 | p50 51ms p99 502ms".
+func (t *tally) reset() string {
+	t.mu.Lock()
+	replicas, statuses, took := t.replicas, t.statuses, t.took
+	t.replicas, t.statuses, t.took = nil, nil, nil
+	t.mu.Unlock()
+	n := len(took)
+	if n == 0 {
+		return "no requests"
+	}
+	var parts []string
+	for _, k := range sortedKeys(replicas) {
+		parts = append(parts, fmt.Sprintf("%s=%d (%d%%)", k, replicas[k], replicas[k]*100/n))
+	}
+	var codes []string
+	for _, k := range sortedKeys(statuses) {
+		codes = append(codes, fmt.Sprintf("%s=%d", k, statuses[k]))
+	}
+	slices.Sort(took)
+	return fmt.Sprintf("%d requests | %s | status %s | p50 %s p99 %s", n, strings.Join(parts, " "), strings.Join(codes, " "),
+		took[n/2].Round(time.Millisecond), took[n*99/100].Round(time.Millisecond))
+}
+
+func sortedKeys(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}

@@ -31,7 +31,7 @@ func sidecarSetup(t *testing.T, prefix, spec string, extra map[string]map[string
 	t.Helper()
 	eng := realEngine(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("%s-%d", prefix, time.Now().Unix()%100000)
+	name := labName(t, prefix)
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})

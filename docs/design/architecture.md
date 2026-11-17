@@ -258,3 +258,4 @@ Breadboard's own internals use Brian's [bkit](https://github.com/brian-nunez/bki
 - Standard library first, then bkit; every direct dependency is listed in [`decisions.md`](decisions.md).
 - `gofmt`/`goimports`; explicit errors with sentinel values and `errors.Is`/`errors.As`; no panic-driven flow.
 - Tests: `go test ./...`; golden files for every materializer (regenerate with `-update`); Docker-backed tests behind the `integration` build tag.
+- Integration tests: `go test -tags integration -timeout 30m ./internal/core/ ./internal/mcp/`. Labs run in parallel, bounded by the Docker VM's memory and CPUs (`BB_IT_PARALLEL=<n>` overrides; D-183); each test uses its own experiment name from `labName`, its own `BB_HOME` and temp directories, and never a fixed container name, port or image tag. The suite must stay under 10 minutes; a test that needs a long wait polls for a condition instead of sleeping.

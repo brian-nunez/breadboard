@@ -4,7 +4,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +17,7 @@ import (
 func TestIntegrationStarterProxy(t *testing.T) {
 	eng := realEngine(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("st-proxy-%d", time.Now().Unix()%100000)
+	name := labName(t, "st-proxy")
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})

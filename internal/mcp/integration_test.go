@@ -9,9 +9,11 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -76,11 +78,21 @@ func TestAgentRunsAStarterOverStdio(t *testing.T) {
 		return out
 	}
 
-	const experiment = "mcp-it"
+	// Unique, so this test can run beside the core integration tests or
+	// another run of itself.
+	experiment := fmt.Sprintf("mcp-it-%d", time.Now().Unix()%100000)
 	call("init", map[string]any{"name": experiment})
 	defer func() {
-		// Leave nothing behind, even when the test fails part way.
+		// Leave nothing behind, even when the test fails part way: the
+		// lab, and the images compose built for it.
 		_ = exec.Command(bin, "-C", root, "down", "--volumes").Run()
+		if out, err := exec.Command("docker", "image", "ls", "-q", "--filter", "label=com.docker.compose.project=bb-"+experiment).Output(); err == nil {
+			ids := strings.Fields(string(out))
+			slices.Sort(ids)
+			if ids = slices.Compact(ids); len(ids) > 0 {
+				_ = exec.Command("docker", append([]string{"image", "rm", "--force"}, ids...)...).Run()
+			}
+		}
 	}()
 	applied := call("apply_starter", map[string]any{"id": "redis/cache-invalidation"})
 	if len(applied["added_apps"].([]any)) == 0 {

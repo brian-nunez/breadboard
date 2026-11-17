@@ -34,12 +34,16 @@ func TestIntegrationStarterBlueGreen(t *testing.T) {
 
 	// Startup is not a switch. bb up orders only the proxy before the
 	// client, so on a busy machine the client's first requests can reach
-	// NGINX before bg-blue listens: 502s that NGINX's DNS cache and
-	// max_fails stretch over seconds. Force that race on every run: start
-	// the client while blue is down, and blue once the client is waiting.
-	// The client must keep no score until blue answers.
+	// NGINX before bg-blue listens: 502s that NGINX's 5 s DNS cache can
+	// stretch over seconds (max_fails does not apply: each colour is a
+	// single-server upstream). Force that race on every run: start the
+	// client while blue is down, and blue once the client is waiting. The
+	// client must keep no score until blue answers.
 	blue, client := containerOf(t, name, "bg-blue"), containerOf(t, name, "bg-client")
-	docker(t, "stop", "-t", "1", client, blue)
+	// One stop at a time, client first: docker stops several containers in
+	// parallel, and blue stopping first would make the client log errors.
+	docker(t, "stop", "-t", "1", client)
+	docker(t, "stop", "-t", "1", blue)
 	skip := len(logsOf(t, eng, dir, "bg-client"))
 	docker(t, "start", client)
 	eventually(t, time.Minute, "the client to wait for the first answer", func() bool {

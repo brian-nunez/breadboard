@@ -1,0 +1,73 @@
+// Command retry-down is a service in an outage: its database is gone, so
+// every request waits 50 ms for it and then fails with 503. Retrying cannot
+// help; every retry is one more request to a service that is already
+// down. Envoy reaches it on two routes with the same retry policy (3
+// retries): /down/no-budget, whose cluster lets retries run unchecked, and
+// /down/budget, whose cluster has a retry budget.
+//
+// Every 5 seconds it logs, per route, how many attempts it received for how
+// many client requests (attempts numbered 1 by Envoy): the load a retry
+// storm adds, seen from the service that has to absorb it.
+package main
+
+import (
+	"fmt"
+	"log"
+	"maps"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+// waitForDB is how long a request waits for the missing database. A
+// slow failure keeps more requests, and so more retries, in flight.
+const waitForDB = 50 * time.Millisecond
+
+type counts struct{ attempts, requests int }
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	var mu sync.Mutex
+	seen := map[string]*counts{}
+
+	http.HandleFunc("/down/", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		c := seen[r.URL.Path]
+		if c == nil {
+			c = &counts{}
+			seen[r.URL.Path] = c
+		}
+		c.attempts++
+		// Attempt 1 is the client's request; 2 and up are Envoy's retries
+		// (include_request_attempt_count in envoy.yaml).
+		if r.Header.Get("X-Envoy-Attempt-Count") == "1" {
+			c.requests++
+		}
+		mu.Unlock()
+		time.Sleep(waitForDB)
+		http.Error(w, name+": database unavailable", http.StatusServiceUnavailable)
+	})
+
+	go func() {
+		for range time.Tick(5 * time.Second) {
+			mu.Lock()
+			var parts []string
+			for _, p := range slices.Sorted(maps.Keys(seen)) {
+				c := seen[p]
+				parts = append(parts, fmt.Sprintf("%s %d attempts for %d requests (%.1fx)",
+					p, c.attempts, c.requests, float64(c.attempts)/float64(max(c.requests, 1))))
+			}
+			seen = map[string]*counts{}
+			mu.Unlock()
+			if len(parts) > 0 {
+				log.Printf("last 5s: %s", strings.Join(parts, " | "))
+			}
+		}
+	}()
+
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

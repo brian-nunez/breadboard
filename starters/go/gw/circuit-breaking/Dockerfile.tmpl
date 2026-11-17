@@ -1,0 +1,25 @@
+# dev: what bb up runs. The apps are compiled here, while the image builds,
+# so each container starts its finished program: it is PID 1, receives
+# SIGTERM, and is running (not compiling) when its health check passes.
+FROM golang:{{.GoImage}} AS dev
+ENV CGO_ENABLED=0
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# The cache mount keeps compiled packages between builds, so a rebuild after
+# an edit only recompiles what changed.
+RUN --mount=type=cache,target=/root/.cache/go-build go build -o /usr/local/bin/ ./cmd/...
+
+# prod: a small non-root image for one app.
+#   docker build --target prod --build-arg APP=cb-client .
+FROM alpine:{{.AlpineVersion}} AS prod
+ARG APP=cb-client
+LABEL maintainer="Your Name <you@example.com>" \
+      version="0.1.0" \
+      description="Circuit breaking at the gateway with Envoy" \
+      platform="linux"
+RUN adduser -D -u 10001 app
+COPY --from=dev /usr/local/bin/${APP} /usr/local/bin/app
+USER app
+ENTRYPOINT ["/usr/local/bin/app"]

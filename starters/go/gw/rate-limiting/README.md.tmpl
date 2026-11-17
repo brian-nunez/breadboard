@@ -1,0 +1,78 @@
+# gw/rate-limiting
+
+A rate limit lets each client make at most so many requests per second, and answers the rest `429 Too Many Requests` before they reach the backend. Two algorithms dominate, and they agree on the average rate but not on what to do with a burst:
+
+- A **token bucket** holds up to N tokens and refills at the rate. Each request takes a token; with none left it is rejected. A burst of up to N passes **at once**. Here that is [Envoy's `local_ratelimit` filter](https://www.envoyproxy.io/docs/envoy/v1.40.0/configuration/http/http_filters/local_rate_limit_filter).
+- A **leaky bucket** lets requests out at the rate and queues up to `burst` of the excess. A burst is **smoothed**: one request passes, the queued ones follow at the rate, the rest are rejected. Here that is [NGINX `limit_req`](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html).
+
+This starter puts both in front of the same backend, with the same average rate (5 requests a second) and the same burst size (10), and sends them the same traffic.
+
+- `cmd/rate-backend`: counts the requests that got through, per gateway and per client, and logs them every 10 seconds.
+- `cmd/rate-client`: three clients, told apart by an `X-Client-Id` header. Every 10 seconds alice and bob each send 30 requests at once through each gateway; carol sends a steady 4 a second, under the limit. It logs, for every burst, how many requests were accepted and rejected and how long they took.
+- `envoy.yaml`: `rate-token`, a token bucket per client.
+- `nginx.conf`: `rate-leaky`, a leaky bucket per client.
+
+## How it works
+
+**Token bucket, `rate-token`:**
+
+```yaml
+rate_limits:
+  - actions:
+      - request_headers: {header_name: x-client-id, descriptor_key: client}
+descriptors:
+  - entries:
+      - key: client          # no value: one bucket per distinct client
+    token_bucket: {max_tokens: 10, tokens_per_fill: 5, fill_interval: 1s}
+```
+
+Each request gets a descriptor `(client, alice)`. The entry names the key without a value, so every client gets a bucket of its own. alice's bucket is full after a quiet moment: her burst of 30 takes the 10 tokens at once, and the other 20 are rejected in a few milliseconds.
+
+**Leaky bucket, `rate-leaky`:**
+
+```nginx
+limit_req_zone $http_x_client_id zone=per_client:1m rate=5r/s;
+limit_req zone=per_client burst=10;
+limit_req_status 429;
+```
+
+The key is the same header. NGINX lets one request of alice's burst through, queues 10 and releases one every 200 ms, so the last queued request waits about 2 seconds; the other 19 are rejected at once. A request with an empty key is not limited at all.
+
+Both are **local** limits: each gateway counts in its own memory. Two Envoys with these settings would each allow 5 a second per client. A **global** limit has every gateway ask a shared rate limit service (Envoy's `ratelimit` filter, backed by Redis) instead.
+
+## Run it
+
+```sh
+bb up
+bb logs rate-client -f
+```
+
+Every 10 seconds, one line per gateway and client:
+
+```text
+[token] alice burst of 30: 200=10 429=20 | accepted after 7ms..7ms | rejected after 3ms..5ms
+[leaky] alice burst of 30: 200=11 429=19 | accepted after 5ms..2.004s | rejected after 3ms..4ms | nginx: DELAYED=10 PASSED=1 REJECTED=19
+[token] carol steady at 4/s: 40 requests, 200=40 | answered after 1ms..3ms
+```
+
+The token bucket accepted its 10 tokens and answered them at once; the leaky bucket accepted 11 (1 passed, 10 delayed) and spread them over 2 seconds. carol, under the limit, is never touched, and alice's bursts never use up carol's allowance.
+
+## What to watch
+
+- `bb logs rate-backend`: `last 10s received: via rate-leaky: alice=11 bob=11 carol=40 | via rate-token: alice=10 bob=10 carol=40`. Rejected requests never arrive.
+- `bb logs rate-leaky`: NGINX's access log carries `limit=PASSED`, `DELAYED` or `REJECTED` for each request, and its error log a `limiting requests, excess: 10.000 by zone "per_client", client: …` line per rejection.
+- `bb serve`: `rate-token`'s **Envoy clusters** tab and its stats show `rate_token.http_local_rate_limit.ok`, `.rate_limited` and `.enforced`. MCP clients: `envoy_clusters` with `service: rate-token`.
+- Envoy's rejected responses carry `x-envoy-ratelimited: true` and `Retry-After`; every response carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
+
+## Try this
+
+- **Smooth no more.** Add `nodelay` to NGINX's `limit_req` line (`limit_req zone=per_client burst=10 nodelay;`) and `bb up`. All 11 accepted requests are answered at once, like the token bucket: `burst` sizes the bucket, and `nodelay` stops the queueing while still refilling one slot per 200 ms.
+- **Two stages.** Replace `nodelay` with `delay=4`: the first 5 requests of a burst pass at once and the next 6 are delayed, the way NGINX recommends limiting browsers that open several connections at once.
+- **A tighter limit for one client.** In `envoy.yaml`, add a descriptor above the wildcard one with `entries: [{key: client, value: alice}]` and `token_bucket: {max_tokens: 3, tokens_per_fill: 1, fill_interval: 1s}`. alice's bursts now get 3 accepted; bob's still 10. Envoy takes a token from every descriptor a request matches, so alice's smaller bucket decides: a per-plan or per-abuser limit on top of the default one.
+- **Key by IP.** In `nginx.conf`, change the zone's key to `$binary_remote_addr`. All three clients run in one container, so they now share one bucket: alice's and bob's bursts empty it, and carol, still under her own rate, starts getting 429s. That is why APIs limit by API key or user, not by address, behind NAT or another proxy.
+
+## Break this
+
+- **Dry run.** Set `filter_enforced`'s `numerator` to `0` in `envoy.yaml`. Every request through `rate-token` now gets a 200, while `http_local_rate_limit.rate_limited` keeps counting the ones that would have been rejected: how you roll out a new limit without hurting anyone.
+- **No burst at all.** Remove `burst=10` from NGINX's `limit_req`. Each burst gets exactly one request through. Worse, a client under the average rate can be rejected too: with no queue, two of carol's requests less than 200 ms apart are one too many. A leaky bucket needs some burst for real, uneven traffic.
+- **Forget the key.** Change `header_name: x-client-id` in `envoy.yaml` to a header no client sends, such as `x-api-key`. With no descriptor, every request falls to the default bucket (1000 a second): nobody is limited. A rate limit is only as good as the key it counts by.

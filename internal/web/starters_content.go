@@ -380,4 +380,43 @@ var starterContents = map[string]starterContent{
 		Covers: []string{"Path vs header versioning", "Default versions", "Deprecation and Sunset headers", "Breaking vs compatible changes"},
 		Guide:  "/docs/nginx",
 	},
+	"gw/rate-limiting": {
+		Area:  "envoy",
+		About: "The same bursts through two gateways that limit the same backend to 5 requests a second per client, with a burst of 10. Envoy's local_ratelimit is a token bucket: a burst takes its 10 tokens at once and the rest is rejected. NGINX's limit_req is a leaky bucket: one request passes, 10 are queued and released at the rate, the rest are rejected. Each client, named by a header, has its own bucket.",
+		Steps: []step{
+			{"alice and bob burst, carol trickles", "Every 10 seconds alice and bob send 30 requests at once through each gateway; carol sends a steady 4 a second, under the limit."},
+			{"The token bucket passes the burst", "Envoy accepts 10 requests in a few milliseconds and answers the other 20 with 429 at once."},
+			{"The leaky bucket smooths it", "NGINX passes 1, delays 10 at one every 200 ms (the last waits about 2 seconds) and rejects 19."},
+			{"Per-client keys", "Both count by X-Client-Id, so alice's bursts never use up carol's allowance, and rejected requests never reach the backend."},
+		},
+		KeyFile: "envoy.yaml", KeyTitle: "A token bucket per client",
+		Covers: []string{"Token bucket vs leaky bucket", "Burst vs steady rate", "429 and Retry-After", "Per-client keys", "Local vs global limits"},
+		Guide:  "/docs/envoy",
+	},
+	"gw/circuit-breaking": {
+		Area:  "envoy",
+		About: "A slow backend that gets slower under load, behind an Envoy whose cluster circuit breaker admits 5 requests at once and queues 5 more. A client pushes four times that. The excess is refused in a millisecond with 503 and x-envoy-overloaded, and the backend, which logs its own concurrency, never serves more than 5 at once.",
+		Steps: []step{
+			{"20 workers push without pause", "Each sends its next request as soon as the last returns: four times what the breaker admits."},
+			{"5 in flight, 5 waiting", "Over HTTP/1.1, max_connections and max_requests let 5 requests reach the backend; max_pending_requests lets 5 more wait for a connection."},
+			{"The rest fail fast", "Every further request gets an immediate 503 with x-envoy-overloaded: true, counted in upstream_rq_pending_overflow."},
+			{"The backend stays in its comfort zone", "Its peak concurrency is 5, so each request costs it 400 ms instead of the 1.15 s 20 at once would."},
+		},
+		KeyFile: "envoy.yaml", KeyTitle: "The circuit_breakers block",
+		Covers: []string{"Envoy circuit breakers", "Fail fast vs queue", "max_connections, max_pending_requests, max_requests", "Protecting a slow backend"},
+		Guide:  "/docs/envoy",
+	},
+	"gw/retries-and-timeouts": {
+		Area:  "envoy",
+		About: "One Envoy, four routes. Against a flaky backend that fails 4 tries in 10, retries with a 250 ms per-try timeout lift the success rate from about 60% to nearly 100%, and a route timeout cuts stuck answers short. Against a backend that is down, the same retries quadruple its load, a retry storm, unless a retry budget limits retries to a share of the requests in flight.",
+		Steps: []step{
+			{"Timeouts bound the wait", "The route timeout answers a stuck request with 504 after 1 s instead of the backend's 3 s."},
+			{"Retries hide independent failures", "retry_on: 5xx with 3 retries and a per-try timeout: a 503 or a stuck try is tried again, and 0.4^4 of requests fail every try."},
+			{"Retries multiply an outage", "Every request to a down backend becomes 4 tries: the backend receives four times the traffic while it is least able to serve it."},
+			{"A retry budget bounds the storm", "With budget_percent 20, retries in flight stay a fifth of the requests in flight (never fewer than the floor of 1); at this lab's traffic and timing the backend receives about 1.3 tries per request."},
+		},
+		KeyFile: "envoy.yaml", KeyTitle: "Retry policies and the retry budget",
+		Covers: []string{"Route and per-try timeouts", "retry_on and back-off", "Retry storms", "Retry budgets"},
+		Guide:  "/docs/envoy",
+	},
 }

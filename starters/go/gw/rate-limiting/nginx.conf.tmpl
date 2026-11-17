@@ -1,0 +1,117 @@
+# nginx.conf for rate-leaky, from the gw/rate-limiting starter: yours to
+# edit. bb up copies it into the container in place of the generated config
+# (services.rate-leaky.file in experiment.yaml).
+#
+# A leaky bucket per client. Each client (the X-Client-Id header) may send
+# 5 requests a second. Requests that come faster wait in a queue of up to
+# 10 (the burst) and are let out one every 200 ms; once the queue is full,
+# the next request is answered 429. So a burst is smoothed into a steady
+# stream rather than passed at once: compare rate-token (Envoy,
+# envoy.yaml), a token bucket with the same average rate.
+#
+# The certificate (/etc/bb/tls/tls.crt and tls.key) and the lab CA
+# (/etc/bb/ca.pem) are mounted by Breadboard. Keep the status server on
+# 127.0.0.1:8404: the container's health check reads /healthz there.
+
+daemon off;
+user nginx;
+# One worker process. The limit's state lives in a shared memory zone, so
+# more workers would share it too; one keeps the logs easy to follow.
+worker_processes 1;
+pid /run/nginx.pid;
+error_log /dev/stderr notice;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+
+    # The zone: the key is the X-Client-Id header, so each client has its
+    # own bucket. Requests with an empty key are not counted at all: a
+    # client without the header is not limited. 1 MB holds about 16,000
+    # keys; when it is full, the least recently used key is dropped. The
+    # rate is the leak: 5 requests a second, one every 200 ms.
+    limit_req_zone $http_x_client_id zone=per_client:1m rate=5r/s;
+
+    # Rejected requests get 429 Too Many Requests instead of NGINX's
+    # default, 503, which would look like the backend failing.
+    limit_req_status 429;
+    # Rejections are logged as warnings, delays one level lower (notice):
+    # both show in bb logs rate-leaky with error_log at notice.
+    limit_req_log_level warn;
+
+    # The access log shows each request's verdict: PASSED, DELAYED or
+    # REJECTED ($limit_req_status). The health check (a TRACE refused with
+    # 405 before any limit) is left out.
+    map $http_user_agent $bb_access_log {
+        bb-healthcheck 0;
+        default 1;
+    }
+    log_format rate '$remote_addr "$request" $status client=$http_x_client_id '
+                    'limit=$limit_req_status request_time=$request_time';
+    access_log /dev/stdout rate if=$bb_access_log;
+
+    resolver 127.0.0.11 valid=5s ipv6=off;
+
+    # Loopback only: the health check and the stub_status counters
+    # (bb serve's NGINX status tab reads them).
+    server {
+        listen 127.0.0.1:8404;
+        access_log off;
+        location = /healthz {
+            return 200 "ok\n";
+        }
+        location = /stub_status {
+            stub_status;
+        }
+    }
+
+    upstream rate_backend {
+        zone rate_backend 64k;
+        server rate-backend.{{.Domain}}:8443 resolve;
+        keepalive 16;
+    }
+
+    server {
+        listen 8443 ssl;
+        http2 on;
+        server_name rate-leaky.{{.Domain}};
+        ssl_certificate /etc/bb/tls/tls.crt;
+        ssl_certificate_key /etc/bb/tls/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        location / {
+            # The limit. burst=10: up to 10 requests above the rate wait
+            # their turn; the 11th excess request is rejected. With no
+            # nodelay, every waiting request is delayed until the bucket has
+            # leaked enough: the backend sees at most 5 a second. Add
+            # nodelay to forward the burst at once (it still uses up the 10
+            # slots, which free at 5 a second): then NGINX behaves like a
+            # token bucket. delay=4 forwards the first 4 at once and
+            # delays the rest.
+            limit_req zone=per_client burst=10;
+
+            # Tell the client the verdict, on every answer including 429s.
+            add_header X-RateLimit-Status $limit_req_status always;
+
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Via rate-leaky;
+            proxy_connect_timeout 2s;
+            proxy_pass https://rate_backend;
+            # Re-encrypt to rate-backend, verified against the lab CA.
+            proxy_ssl_verify on;
+            proxy_ssl_trusted_certificate /etc/bb/ca.pem;
+            proxy_ssl_verify_depth 2;
+            proxy_ssl_server_name on;
+            proxy_ssl_name rate-backend.{{.Domain}};
+            proxy_ssl_protocols TLSv1.2 TLSv1.3;
+            proxy_ssl_session_reuse on;
+        }
+    }
+}

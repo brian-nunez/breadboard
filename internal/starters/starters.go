@@ -584,6 +584,72 @@ var all = []Starter{
 			File: "nginx.conf",
 		}},
 	},
+	{
+		ID:       "gw/rate-limiting",
+		Title:    "Rate limiting: token bucket and leaky bucket",
+		Summary:  "The same bursts through Envoy's local_ratelimit (a token bucket that passes a burst at once) and NGINX limit_req (a leaky bucket that queues it), with a bucket per client.",
+		Language: "go",
+		Template: "go/gw/rate-limiting",
+		Dir:      "rate-limiting",
+		Apps: []App{
+			{Name: "rate-backend", Command: []string{"rate-backend"}},
+			{Name: "rate-client", Command: []string{"rate-client"}, Uses: []string{"rate-token", "rate-leaky"}},
+		},
+		Services: []Service{
+			{
+				Name:      "rate-token",
+				Type:      "envoy",
+				Upstreams: []spec.Upstream{{Service: "rate-backend", Port: 8443}},
+				File:      "envoy.yaml",
+			},
+			{
+				Name:      "rate-leaky",
+				Type:      "nginx",
+				Upstreams: []spec.Upstream{{Service: "rate-backend", Port: 8443}},
+				File:      "nginx.conf",
+			},
+		},
+	},
+	{
+		ID:       "gw/circuit-breaking",
+		Title:    "Circuit breaking with Envoy",
+		Summary:  "Envoy's cluster circuit breakers cap what reaches a slow backend: past max_requests and max_pending_requests, requests fail at once with 503 instead of piling up.",
+		Language: "go",
+		Template: "go/gw/circuit-breaking",
+		Dir:      "circuit-breaking",
+		Apps: []App{
+			{Name: "cb-backend", Command: []string{"cb-backend"}},
+			{Name: "cb-client", Command: []string{"cb-client"}, Uses: []string{"cb-edge"}},
+		},
+		Services: []Service{{
+			Name:      "cb-edge",
+			Type:      "envoy",
+			Upstreams: []spec.Upstream{{Service: "cb-backend", Port: 8443}},
+			File:      "envoy.yaml",
+		}},
+	},
+	{
+		ID:       "gw/retries-and-timeouts",
+		Title:    "Retries, timeouts and retry budgets with Envoy",
+		Summary:  "Envoy retries with per-try timeouts turn a flaky backend's 60% into nearly 100%; against a backend that is down, the same retries quadruple its load unless a retry budget bounds them.",
+		Language: "go",
+		Template: "go/gw/retries-and-timeouts",
+		Dir:      "retries-and-timeouts",
+		Apps: []App{
+			{Name: "retry-flaky", Command: []string{"retry-flaky"}},
+			{Name: "retry-down", Command: []string{"retry-down"}},
+			{Name: "retry-client", Command: []string{"retry-client"}, Uses: []string{"retry-edge"}},
+		},
+		Services: []Service{{
+			Name: "retry-edge",
+			Type: "envoy",
+			Upstreams: []spec.Upstream{
+				{Service: "retry-flaky", Port: 8443, Name: "flaky"},
+				{Service: "retry-down", Port: 8443, Name: "down"},
+			},
+			File: "envoy.yaml",
+		}},
+	},
 }
 
 // envoyInbound is an Envoy sidecar terminating TLS on 8443 in front of an

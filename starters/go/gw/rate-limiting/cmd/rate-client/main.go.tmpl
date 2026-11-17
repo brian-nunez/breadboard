@@ -1,0 +1,177 @@
+// Command rate-client sends the same traffic through two gateways that
+// limit the same backend, each with its own algorithm:
+//
+//   - rate-token (Envoy local_ratelimit): a token bucket, 10 tokens, refilled
+//     with 5 every second;
+//   - rate-leaky (NGINX limit_req): a leaky bucket, 5 requests a second with
+//     a queue (burst) of 10.
+//
+// Both allow 5 requests a second per client on average. They differ in what
+// they do with a burst, and this client makes one every 10 seconds: alice
+// and bob each send 30 requests at once, through both gateways. carol sends
+// a steady 4 requests a second, under the limit. Each client is a key
+// (X-Client-Id), so each has its own bucket.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	burstSize  = 30               // requests alice and bob each send at once
+	burstEvery = 10 * time.Second // long enough for both buckets to recover
+	steadyRate = 4                // carol's requests per second, under the limit of 5
+)
+
+func main() {
+	// RATE_TOKEN_URL and RATE_LEAKY_URL come from uses: [rate-token,
+	// rate-leaky]. The default client verifies both gateways' certificates
+	// against SSL_CERT_FILE and speaks HTTP/2 to them, so a burst's requests
+	// share one connection and arrive together.
+	gateways := []gateway{
+		{"token", os.Getenv("RATE_TOKEN_URL")},
+		{"leaky", os.Getenv("RATE_LEAKY_URL")},
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	for _, g := range gateways {
+		go steady(client, g, "carol")
+	}
+	// Give carol's requests time to open the connections, then burst.
+	time.Sleep(5 * time.Second)
+	for {
+		var wg sync.WaitGroup
+		for _, g := range gateways {
+			for _, who := range []string{"alice", "bob"} {
+				wg.Go(func() { burst(client, g, who) })
+			}
+		}
+		wg.Wait()
+		time.Sleep(burstEvery)
+	}
+}
+
+type gateway struct{ name, url string }
+
+// result is one request's outcome.
+type result struct {
+	status  string        // HTTP status, or "error"
+	verdict string        // NGINX's $limit_req_status, when the gateway sends it
+	took    time.Duration // until the response headers arrived
+}
+
+func call(client *http.Client, g gateway, who string) result {
+	req, _ := http.NewRequest(http.MethodGet, g.url+"/", nil)
+	// The key both gateways count by. Real APIs use an API key or a user
+	// ID; a client IP is a poor key behind NAT or another proxy.
+	req.Header.Set("X-Client-Id", who)
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[%s] %s: %v", g.name, who, err)
+		return result{status: "error", took: time.Since(start)}
+	}
+	took := time.Since(start)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return result{status: fmt.Sprint(resp.StatusCode), verdict: resp.Header.Get("X-RateLimit-Status"), took: took}
+}
+
+// burst sends burstSize requests at once and logs what happened to them:
+// how many were accepted (200) and rejected (429), and how long each kind
+// took. A token bucket answers the accepted ones at once; a leaky bucket
+// queues them and lets them out at its rate.
+func burst(client *http.Client, g gateway, who string) {
+	results := make([]result, burstSize)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Go(func() {
+			<-start
+			results[i] = call(client, g, who)
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	statuses, verdicts := map[string]int{}, map[string]int{}
+	var accepted, rejected []time.Duration
+	for _, r := range results {
+		statuses[r.status]++
+		if r.verdict != "" {
+			verdicts[r.verdict]++
+		}
+		switch r.status {
+		case "200":
+			accepted = append(accepted, r.took)
+		case "429":
+			rejected = append(rejected, r.took)
+		}
+	}
+	line := fmt.Sprintf("[%s] %s burst of %d: %s | accepted after %s | rejected after %s",
+		g.name, who, burstSize, counts(statuses), spread(accepted), spread(rejected))
+	if len(verdicts) > 0 {
+		line += " | nginx: " + counts(verdicts)
+	}
+	log.Print(line)
+}
+
+// steady sends steadyRate requests a second, forever, and logs a tally
+// every 10 seconds. Under the limit, nothing is rejected or delayed.
+func steady(client *http.Client, g gateway, who string) {
+	var mu sync.Mutex
+	statuses := map[string]int{}
+	var took []time.Duration
+	go func() {
+		for range time.Tick(10 * time.Second) {
+			mu.Lock()
+			n := len(took)
+			line := fmt.Sprintf("[%s] %s steady at %d/s: %d requests, %s | answered after %s",
+				g.name, who, steadyRate, n, counts(statuses), spread(took))
+			statuses, took = map[string]int{}, nil
+			mu.Unlock()
+			if n > 0 {
+				log.Print(line)
+			}
+		}
+	}()
+	for range time.Tick(time.Second / steadyRate) {
+		go func() {
+			r := call(client, g, who)
+			mu.Lock()
+			statuses[r.status]++
+			took = append(took, r.took)
+			mu.Unlock()
+		}()
+	}
+}
+
+// counts reads like "200=10 429=20".
+func counts(m map[string]int) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, m[k]))
+	}
+	return strings.Join(parts, " ")
+}
+
+// spread reads like "2ms..2.01s": the fastest and the slowest.
+func spread(d []time.Duration) string {
+	if len(d) == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%s..%s", slices.Min(d).Round(time.Millisecond), slices.Max(d).Round(time.Millisecond))
+}

@@ -80,7 +80,7 @@ func TestAgentRunsAStarterOverStdio(t *testing.T) {
 
 	// Unique, so this test can run beside the core integration tests or
 	// another run of itself.
-	experiment := fmt.Sprintf("mcp-it-%d", time.Now().Unix()%100000)
+	experiment := fmt.Sprintf("mcp-it-%d", time.Now().UnixNano()%1000000000)
 	call("init", map[string]any{"name": experiment})
 	defer func() {
 		// Leave nothing behind, even when the test fails part way: the

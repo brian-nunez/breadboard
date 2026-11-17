@@ -3,6 +3,8 @@
 package core
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -62,7 +64,7 @@ func parallelLab(t *testing.T) {
 // cache keeps the layers, so a later build of the same app stays fast.
 func labName(t *testing.T, prefix string) string {
 	t.Helper()
-	name := fmt.Sprintf("%s-%d", prefix, time.Now().Unix()%100000)
+	name := prefix + "-" + randomSuffix(t)
 	t.Cleanup(func() {
 		out, err := exec.Command("docker", "image", "ls", "-q", "--filter", "label=com.docker.compose.project=bb-"+name).Output()
 		ids := strings.Fields(string(out))
@@ -74,4 +76,29 @@ func labName(t *testing.T, prefix string) string {
 		}
 	})
 	return name
+}
+
+// randomSuffix is 6 random hex characters: two labs that start in the same
+// second with the same prefix (parallel subtests) still get distinct names,
+// and so distinct images and cleanup.
+func randomSuffix(t *testing.T) string {
+	t.Helper()
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	return hex.EncodeToString(b)
+}
+
+// Lab names with one prefix never collide, so parallel subtests cannot
+// share a project, its images or its cleanup (review of D-183).
+func TestIntegrationLabNamesAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for range 50 {
+		n := "same-" + randomSuffix(t)
+		if seen[n] {
+			t.Fatalf("lab name %s repeated", n)
+		}
+		seen[n] = true
+	}
 }

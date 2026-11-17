@@ -22,7 +22,6 @@ import (
 func realEngine(t *testing.T) *Engine {
 	t.Helper()
 	parallelLab(t)
-	os.Unsetenv("BB_DOMAIN")
 	// Polling health more often only notices changes sooner; the settle
 	// window, which catches a crash after the first healthy check, keeps
 	// its production length.

@@ -1,0 +1,108 @@
+// Command retry-client sends a fixed rate of requests to four routes of
+// retry-edge (Envoy) and logs, every 5 seconds, what each route gave back:
+//
+//   - /flaky/no-retries and /flaky/retries reach retry-flaky, which fails
+//     4 requests in 10, half of them by getting stuck. Without retries the
+//     client sees every failure; with retries and a per-try timeout, Envoy
+//     hides most of them.
+//   - /down/no-budget and /down/budget reach retry-down, which fails every
+//     request. Retries cannot succeed there; they only multiply the load.
+//     retry-down's log shows by how much, with and without a retry budget.
+//
+// The rate is fixed, like real users who keep arriving whether or not the
+// service is struggling: that is what turns retries into a storm.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+var routes = []struct {
+	path string
+	rate int // requests per second
+}{
+	{"/flaky/no-retries", 20},
+	{"/flaky/retries", 20},
+	{"/down/no-budget", 40},
+	{"/down/budget", 40},
+}
+
+func main() {
+	// RETRY_EDGE_URL=https://retry-edge.<domain>:8443, from uses:
+	// [retry-edge]. The default client verifies Envoy's certificate
+	// against SSL_CERT_FILE. Its timeout is a last resort: Envoy's route
+	// timeouts answer first.
+	base := os.Getenv("RETRY_EDGE_URL")
+	client := &http.Client{Timeout: 10 * time.Second}
+	var wg sync.WaitGroup
+	for _, r := range routes {
+		wg.Go(func() { drive(client, base, r.path, r.rate) })
+	}
+	wg.Wait()
+}
+
+// drive sends rate requests a second to path without waiting for answers,
+// and logs a tally every 5 seconds.
+func drive(client *http.Client, base, path string, rate int) {
+	var mu sync.Mutex
+	statuses := map[string]int{}
+	var attempts int
+	var took []time.Duration
+	go func() {
+		for range time.Tick(5 * time.Second) {
+			mu.Lock()
+			n := len(took)
+			if n > 0 {
+				slices.Sort(took)
+				log.Printf("[%s] %d requests: %s | ok %d%% | %.2f attempts per request | p50 %s p99 %s",
+					path[1:], n, counts(statuses), statuses["200"]*100/n, float64(attempts)/float64(n),
+					took[n/2].Round(time.Millisecond), took[(n-1)*99/100].Round(time.Millisecond))
+			}
+			statuses, attempts, took = map[string]int{}, 0, nil
+			mu.Unlock()
+		}
+	}()
+	for range time.Tick(time.Second / time.Duration(rate)) {
+		go func() {
+			start := time.Now()
+			resp, err := client.Get(base + path)
+			status, tries := "error", 0
+			if err == nil {
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				status = fmt.Sprint(resp.StatusCode)
+				// How many times Envoy tried this request upstream
+				// (include_attempt_count_in_response in envoy.yaml).
+				tries, _ = strconv.Atoi(resp.Header.Get("X-Envoy-Attempt-Count"))
+			}
+			mu.Lock()
+			statuses[status]++
+			attempts += tries
+			took = append(took, time.Since(start))
+			mu.Unlock()
+		}()
+	}
+}
+
+// counts reads like "200=61 503=24 504=15".
+func counts(m map[string]int) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, m[k]))
+	}
+	return strings.Join(parts, " ")
+}

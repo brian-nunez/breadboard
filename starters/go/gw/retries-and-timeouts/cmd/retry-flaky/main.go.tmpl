@@ -1,0 +1,94 @@
+// Command retry-flaky is an unreliable service, as most are now and then:
+// of every 100 requests, about 25 fail at once with 503 and about 15 get
+// stuck for 3 seconds (a lost packet, a lock, a GC pause); the rest answer
+// in 10 ms. Each failure is independent, so trying again usually works.
+// Envoy reaches it on two routes, /flaky/no-retries and /flaky/retries.
+//
+// Every 5 seconds it logs, per route, the attempts it received, how many
+// were retries (Envoy's x-envoy-attempt-count above 1), and what it did
+// with them.
+package main
+
+import (
+	"fmt"
+	"log"
+	"maps"
+	"math/rand/v2"
+	"net/http"
+	"os"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	failShare  = 0.25            // answered 503 at once
+	stuckShare = 0.15            // stuck for stuckFor
+	stuckFor   = 3 * time.Second // far longer than any timeout in envoy.yaml
+)
+
+type counts struct{ attempts, retries, ok, failed, stuck int }
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	var mu sync.Mutex
+	seen := map[string]*counts{}
+	count := func(path string, f func(c *counts)) {
+		mu.Lock()
+		defer mu.Unlock()
+		if seen[path] == nil {
+			seen[path] = &counts{}
+		}
+		f(seen[path])
+	}
+
+	http.HandleFunc("/flaky/", func(w http.ResponseWriter, r *http.Request) {
+		// Envoy numbers each attempt of a request: 1, then 2, 3... for its
+		// retries (include_request_attempt_count in envoy.yaml).
+		attempt, _ := strconv.Atoi(r.Header.Get("X-Envoy-Attempt-Count"))
+		count(r.URL.Path, func(c *counts) {
+			c.attempts++
+			if attempt > 1 {
+				c.retries++
+			}
+		})
+		switch p := rand.Float64(); {
+		case p < failShare:
+			count(r.URL.Path, func(c *counts) { c.failed++ })
+			http.Error(w, name+": failed", http.StatusServiceUnavailable)
+		case p < failShare+stuckShare:
+			count(r.URL.Path, func(c *counts) { c.stuck++ })
+			select {
+			case <-time.After(stuckFor):
+				fmt.Fprintf(w, "%s: ok, after being stuck\n", name)
+			case <-r.Context().Done(): // Envoy gave up on this attempt
+			}
+		default:
+			count(r.URL.Path, func(c *counts) { c.ok++ })
+			time.Sleep(10 * time.Millisecond)
+			fmt.Fprintf(w, "%s: ok\n", name)
+		}
+	})
+
+	go func() {
+		for range time.Tick(5 * time.Second) {
+			mu.Lock()
+			var parts []string
+			for _, p := range slices.Sorted(maps.Keys(seen)) {
+				c := seen[p]
+				parts = append(parts, fmt.Sprintf("%s %d attempts (%d retries): ok %d, 503 %d, stuck %d",
+					p, c.attempts, c.retries, c.ok, c.failed, c.stuck))
+			}
+			seen = map[string]*counts{}
+			mu.Unlock()
+			if len(parts) > 0 {
+				log.Printf("last 5s: %s", strings.Join(parts, " | "))
+			}
+		}
+	}()
+
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

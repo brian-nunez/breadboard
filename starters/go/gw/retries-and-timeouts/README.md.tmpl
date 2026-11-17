@@ -1,0 +1,81 @@
+# gw/retries-and-timeouts
+
+A gateway that retries failed requests hides a backend's occasional failures from its clients. The same retries, against a backend that is down, multiply its load at the moment it can least take it: a **retry storm**. This starter shows both with [Envoy's retry policy](https://www.envoyproxy.io/docs/envoy/v1.40.0/configuration/http/http_filters/router_filter#x-envoy-retry-on), and the three settings that keep retries useful:
+
+- a **route timeout**, the client's deadline for the whole request, retries included;
+- a **per-try timeout**, so one stuck try does not use up the deadline;
+- a **[retry budget](https://www.envoyproxy.io/docs/envoy/v1.40.0/api-v3/config/cluster/v3/circuit_breaker.proto)**, which caps retries in flight at a share of the requests in flight.
+
+The apps:
+
+- `cmd/retry-flaky`: an unreliable service. Of every 100 requests about 25 fail at once with 503 and about 15 get stuck for 3 seconds; the rest answer in 10 ms. Each failure is independent, so trying again usually works. It logs what it received per route every 5 seconds, retries included.
+- `cmd/retry-down`: a service in an outage. Every request waits 50 ms for a database that is gone, then fails with 503. It logs, per route, how many tries it received for how many client requests.
+- `cmd/retry-client`: a fixed rate of requests per route, like users who keep arriving whatever the service's state: 20 a second to each `/flaky/` route, 40 a second to each `/down/` route. Every 5 seconds it logs, per route, the statuses, the success rate, the tries per request (from Envoy's `x-envoy-attempt-count`) and the latency.
+- `envoy.yaml`: `retry-edge`, with four routes:
+
+| Route | Backend | Policy |
+|---|---|---|
+| `/flaky/no-retries` | `retry-flaky` | one try, `timeout: 1s` |
+| `/flaky/retries` | `retry-flaky` | `retry_on: 5xx`, `num_retries: 3`, `per_try_timeout: 0.25s`, `timeout: 2s` |
+| `/down/no-budget` | `retry-down` | the same retries; the cluster allows 1000 retries in flight |
+| `/down/budget` | `retry-down` | the same retries; the cluster has a retry budget |
+
+## How it works
+
+```yaml
+timeout: 2s
+retry_policy:
+  retry_on: 5xx
+  num_retries: 3
+  per_try_timeout: 0.25s
+  retry_back_off: {base_interval: 0.025s, max_interval: 0.25s}
+```
+
+`retry_on: 5xx` retries a 5xx answer, a reset or refused connection, and a try that ran past `per_try_timeout`. Up to 4 tries, with a random back-off before each retry (below 25 ms, then below 50 ms, then below 100 ms: the limit starts at `base_interval` and doubles, up to `max_interval`) so that retries do not arrive in lockstep. A request to `retry-flaky` fails all 4 tries with probability 0.4⁴, about 3%. The whole thing must fit in the route's 2 s, or Envoy answers 504.
+
+Without a budget, every failed try is retried: each request to `retry-down` becomes 4 tries. With
+
+```yaml
+circuit_breakers:
+  thresholds:
+    - priority: DEFAULT
+      retry_budget:
+        budget_percent: {value: 20}
+        min_retry_concurrency: 1
+```
+
+retries in flight may be at most 20% of the requests in flight (and never fewer than 1). When most tries fail, the budget runs out, and a failed try is answered with its failure instead of being retried (`upstream_rq_retry_overflow`). A healthy cluster, where few tries fail, still retries all of them. Real chains of services multiply: if each of three hops retries 3 times, one user request can become 4 × 4 × 4 = 64 tries at the last service.
+
+## Run it
+
+```sh
+bb up
+bb logs retry-client -f
+```
+
+```text
+[flaky/no-retries] 103 requests: 200=65 503=28 504=10 | ok 63% | 1.00 attempts per request | p50 12ms p99 1.001s
+[flaky/retries] 101 requests: 200=97 503=2 504=2 | ok 96% | 1.66 attempts per request | p50 13ms p99 565ms
+[down/no-budget] 201 requests: 503=201 | ok 0% | 4.00 attempts per request | p50 289ms p99 353ms
+[down/budget] 201 requests: 503=201 | ok 0% | 1.31 attempts per request | p50 52ms p99 318ms
+```
+
+Retries took the flaky route from 63% to 96% for 1.66 tries per request, and the route timeout turned every stuck answer into a 504 after 1 s instead of a 3 s wait. Against the down service, retries won nothing: every request still failed, slower without a budget, and the service received 4 times the load.
+
+## What to watch
+
+- `bb logs retry-down`: `last 5s: /down/budget 262 attempts for 200 requests (1.3x) | /down/no-budget 802 attempts for 200 requests (4.0x)`. The storm, measured by the service that has to absorb it.
+- `bb logs retry-flaky`: `/flaky/no-retries 100 attempts (0 retries): ok 62, 503 22, stuck 16 | /flaky/retries 177 attempts (77 retries): ok 98, 503 51, stuck 28`. On the retries route every 503 and every stuck try, abandoned after 250 ms, was tried again.
+- `bb serve`: `retry-edge`'s **Envoy clusters** tab shows per cluster `upstream_rq_retry`, `upstream_rq_retry_success`, `upstream_rq_per_try_timeout` and `upstream_rq_retry_overflow` (climbing on `retry-down-budget` only). MCP clients: `envoy_clusters` with `service: retry-edge`.
+
+## Try this
+
+- **Fewer retries.** Set `num_retries: 1` on `/flaky/retries` and `bb up`. Success falls to about 84% (0.4² of requests fail both tries). Each retry buys less than the one before.
+- **No per-try timeout.** Remove `per_try_timeout` from `/flaky/retries`. A stuck try now holds the request until the 2 s deadline, and the client gets a 504: success falls to about 80% and p99 rises to 2 s. A retry needs a per-try timeout to start before the client gives up.
+- **The default floor.** Set `min_retry_concurrency: 3`, the default, on `retry-down-budget`. Tries per request rise above 1.3: at about 2 requests in flight, 20% is less than one retry, so the floor decides. Budgets bite at scale; at small traffic the floor is the real limit.
+
+## Break this
+
+- **Break the flaky service.** In `cmd/retry-flaky/main.go`, set `failShare` to `1.0` and `bb up`. `/flaky/retries` is now a storm too: 4 tries per request, because `retry-flaky`'s cluster raised `max_retries` to 100 and has no budget. A retry policy tuned for a healthy backend is the one that storms when it breaks: give that cluster the same `retry_budget` and watch the tries fall.
+- **A deadline shorter than the retries.** Set `timeout: 0.3s` on `/flaky/retries`. One stuck try (250 ms) leaves no room for another, so stuck requests end in 504 and retries help much less. The per-try timeout times the number of tries, plus back-off, must fit in the route timeout.
+- **No deadline.** Set `timeout: 0s` on `/flaky/no-retries`, which disables it. Stuck requests now wait the full 3 s, and p99 jumps from 1 s to 3 s: without a timeout, the slowest dependency sets your latency.

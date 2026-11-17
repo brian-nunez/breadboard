@@ -1,0 +1,68 @@
+// Command cb-backend is a slow service that gets slower under load: each
+// request takes 200 ms, plus 50 ms for every other request it is serving
+// at the same time, the way a service sharing a database, a lock or a CPU
+// does. Unprotected, a crowd of clients would push every answer towards
+// seconds. cb-edge (Envoy) lets at most 5 requests in at once.
+//
+// The backend measures how many requests it serves at once and logs it
+// every 5 seconds, with the peak since it started: the circuit breaker's
+// limit, seen from the side it protects.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+)
+
+const (
+	baseCost  = 200 * time.Millisecond // one request alone
+	crowdCost = 50 * time.Millisecond  // added per other request in flight
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	var (
+		mu                   sync.Mutex
+		inFlight, peak, ever int // now, this window's peak, the peak since start
+		served               int
+		slowest              time.Duration
+	)
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		inFlight++
+		n := inFlight
+		peak, ever = max(peak, n), max(ever, n)
+		mu.Unlock()
+
+		cost := baseCost + time.Duration(n-1)*crowdCost
+		select {
+		case <-time.After(cost):
+		case <-r.Context().Done(): // the caller gave up
+		}
+
+		mu.Lock()
+		inFlight--
+		served++
+		slowest = max(slowest, cost)
+		mu.Unlock()
+		fmt.Fprintf(w, "%s served in %s with %d in flight\n", name, cost, n)
+	})
+
+	go func() {
+		for range time.Tick(5 * time.Second) {
+			mu.Lock()
+			log.Printf("last 5s: served %d, in flight peak %d (since start %d), slowest %s",
+				served, peak, ever, slowest)
+			served, peak, slowest = 0, inFlight, 0
+			mu.Unlock()
+		}
+	}()
+
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

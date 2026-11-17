@@ -1,0 +1,91 @@
+// Command cb-client overloads cb-backend through cb-edge (Envoy): 20
+// workers each send a request as soon as their last one returns, four
+// times what Envoy's circuit breaker lets through. Every 5 seconds it logs
+// how many requests were served and how many Envoy turned away with a fast
+// 503 (the response carries x-envoy-overloaded: true), and how long each
+// kind took.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"sync"
+	"time"
+)
+
+const (
+	workers = 20
+	// After an overflow 503 a worker waits before trying again, as a
+	// polite client backs off. Set it to 0 to watch Envoy answer
+	// thousands of 503s a second without the backend noticing.
+	backoff = 100 * time.Millisecond
+)
+
+func main() {
+	// CB_EDGE_URL=https://cb-edge.<domain>:8443, from uses: [cb-edge]. The
+	// default client verifies Envoy's certificate against SSL_CERT_FILE.
+	url := os.Getenv("CB_EDGE_URL") + "/work"
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	var mu sync.Mutex
+	var served, overflow []time.Duration
+	other := map[string]int{}
+	for range workers {
+		go func() {
+			for {
+				start := time.Now()
+				resp, err := client.Get(url)
+				took := time.Since(start)
+				status := "error"
+				overloaded := false
+				if err == nil {
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					status = fmt.Sprint(resp.StatusCode)
+					// Envoy marks the requests its circuit breaker
+					// refused, so a client can tell them from a 503 that
+					// came from the backend.
+					overloaded = resp.Header.Get("X-Envoy-Overloaded") == "true"
+				}
+				mu.Lock()
+				switch {
+				case status == "200":
+					served = append(served, took)
+				case status == "503" && overloaded:
+					overflow = append(overflow, took)
+				default:
+					other[status]++
+				}
+				mu.Unlock()
+				if status != "200" {
+					time.Sleep(backoff)
+				}
+			}
+		}()
+	}
+
+	for range time.Tick(5 * time.Second) {
+		mu.Lock()
+		line := fmt.Sprintf("last 5s: served %d (p50 %s, p99 %s) | overflow 503 %d (p50 %s, p99 %s)",
+			len(served), pct(served, 50), pct(served, 99), len(overflow), pct(overflow, 50), pct(overflow, 99))
+		if len(other) > 0 {
+			line += fmt.Sprintf(" | other %v", other)
+		}
+		served, overflow, other = nil, nil, map[string]int{}
+		mu.Unlock()
+		log.Print(line)
+	}
+}
+
+// pct is the p-th percentile of d.
+func pct(d []time.Duration, p int) string {
+	if len(d) == 0 {
+		return "-"
+	}
+	slices.Sort(d)
+	return d[(len(d)-1)*p/100].Round(time.Millisecond).String()
+}

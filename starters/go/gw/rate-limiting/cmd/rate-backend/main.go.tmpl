@@ -1,0 +1,67 @@
+// Command rate-backend sits behind two gateways at once: rate-token (Envoy,
+// token bucket) and rate-leaky (NGINX, leaky bucket). It answers every
+// request at once and counts, every 10 seconds, the requests it received
+// per gateway and per client. A request a gateway rejected never shows up
+// here: rate limiting protects the backend by never forwarding the excess.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	var mu sync.Mutex
+	seen := map[string]map[string]int{} // gateway -> client -> requests
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// X-Via names the gateway, set in its config. X-Client-Id is the
+		// key both gateways limit on.
+		via, client := r.Header.Get("X-Via"), r.Header.Get("X-Client-Id")
+		mu.Lock()
+		if seen[via] == nil {
+			seen[via] = map[string]int{}
+		}
+		seen[via][client]++
+		mu.Unlock()
+		fmt.Fprintf(w, "%s served %s\n", name, client)
+	})
+
+	go func() {
+		for range time.Tick(10 * time.Second) {
+			mu.Lock()
+			var parts []string
+			for _, via := range sortedKeys(seen) {
+				var c []string
+				for _, k := range sortedKeys(seen[via]) {
+					c = append(c, fmt.Sprintf("%s=%d", k, seen[via][k]))
+				}
+				parts = append(parts, fmt.Sprintf("via %s: %s", via, strings.Join(c, " ")))
+			}
+			seen = map[string]map[string]int{}
+			mu.Unlock()
+			if len(parts) > 0 {
+				log.Printf("last 10s received: %s", strings.Join(parts, " | "))
+			}
+		}
+	}()
+
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}

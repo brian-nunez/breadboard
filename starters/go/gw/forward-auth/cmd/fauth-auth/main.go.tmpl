@@ -1,0 +1,131 @@
+// Command fauth-auth is the auth service Traefik delegates to. It keeps
+// sessions in memory: POST /auth/login hands out an opaque session token,
+// POST /auth/logout revokes it, and GET /verify, which only Traefik calls,
+// answers whether a request may pass. A yes is a 200 with the caller's
+// identity in headers; a no is a 401 or 403 that Traefik returns to the
+// client unchanged.
+//
+// A real auth service (oauth2-proxy, Authelia, an SSO gateway) signs the
+// user in with a password, a passkey or an identity provider first. This
+// one skips that step: it opens a session for any demo user who asks. No
+// token is written anywhere or logged.
+package main
+
+import (
+	"crypto/rand"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+// sessionTTL is how long a session lasts unless it is revoked first.
+const sessionTTL = 10 * time.Minute
+
+// roles are the demo users and what they may do.
+var roles = map[string][]string{
+	"alice": {"admin", "orders"},
+	"bob":   {"orders"},
+}
+
+type session struct {
+	user    string
+	expires time.Time
+}
+
+var (
+	mu       sync.Mutex
+	sessions = map[string]session{} // token -> session
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+
+	// POST /auth/login?user=alice opens a session and returns its token.
+	http.HandleFunc("POST /auth/login", func(w http.ResponseWriter, r *http.Request) {
+		user := r.URL.Query().Get("user")
+		if _, ok := roles[user]; !ok {
+			http.Error(w, name+": unknown user", http.StatusForbidden)
+			return
+		}
+		// 26 random characters (130 bits): unguessable, and meaningless
+		// to anyone but this service.
+		token := rand.Text()
+		mu.Lock()
+		sessions[token] = session{user, time.Now().Add(sessionTTL)}
+		n := len(sessions)
+		mu.Unlock()
+		log.Printf("opened a session for %s (%d open)", user, n)
+		fmt.Fprint(w, token)
+	})
+
+	// POST /auth/logout revokes the caller's session. The next request
+	// with that token is refused at once: the check happens on every call.
+	http.HandleFunc("POST /auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		token := bearer(r)
+		mu.Lock()
+		s, ok := sessions[token]
+		delete(sessions, token)
+		mu.Unlock()
+		if !ok {
+			http.Error(w, name+": no such session", http.StatusUnauthorized)
+			return
+		}
+		log.Printf("revoked a session of %s", s.user)
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	// /verify is the forwardAuth endpoint. Traefik calls it with GET for
+	// every /api/ request, passing the client's Authorization header (its
+	// authRequestHeaders) and the original method and URI as X-Forwarded-*.
+	http.HandleFunc("/verify", func(w http.ResponseWriter, r *http.Request) {
+		method, uri := r.Header.Get("X-Forwarded-Method"), r.Header.Get("X-Forwarded-Uri")
+		token := bearer(r)
+		if token == "" {
+			deny(w, http.StatusUnauthorized, method, uri, "", name+": no credentials")
+			return
+		}
+		mu.Lock()
+		s, ok := sessions[token]
+		mu.Unlock()
+		if !ok || time.Now().After(s.expires) {
+			deny(w, http.StatusUnauthorized, method, uri, "", name+": unknown or revoked session")
+			return
+		}
+		// Authorisation by path, decided here: only admins reach /api/admin/.
+		if strings.HasPrefix(uri, "/api/admin/") && !slices.Contains(roles[s.user], "admin") {
+			deny(w, http.StatusForbidden, method, uri, s.user, name+": "+s.user+" lacks role admin")
+			return
+		}
+		// Traefik copies these onto the request (authResponseHeaders).
+		w.Header().Set("X-Auth-User", s.user)
+		w.Header().Set("X-Auth-Roles", strings.Join(roles[s.user], ","))
+		log.Printf("allowed %s %s for %s", method, uri, s.user)
+	})
+
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}
+
+// bearer returns the token of an "Authorization: Bearer <token>" header.
+func bearer(r *http.Request) string {
+	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return token
+}
+
+// deny logs the refusal and answers it. Traefik returns this status, body
+// and headers to the client as they are.
+func deny(w http.ResponseWriter, status int, method, uri, user, reason string) {
+	if user == "" {
+		user = "anonymous"
+	}
+	log.Printf("denied %s %s for %s: %d %s", method, uri, user, status, reason)
+	if status == http.StatusUnauthorized {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="fauth"`)
+	}
+	http.Error(w, reason, status)
+}

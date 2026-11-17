@@ -1,0 +1,69 @@
+// Command bff-orders owns orders. It answers with a user's full order
+// history, every line item included. It is reachable two ways: through the
+// gateway at /orders/<user>, and from bff-api directly.
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"time"
+)
+
+// latency is how long a lookup takes. Raise it past bff-api's per-call
+// timeout to see the BFF answer without orders instead of failing.
+const latency = 120 * time.Millisecond
+
+type item struct {
+	SKU      string  `json:"sku"`
+	Name     string  `json:"name"`
+	Quantity int     `json:"quantity"`
+	Price    float64 `json:"price"`
+}
+
+type order struct {
+	ID     string    `json:"id"`
+	Status string    `json:"status"`
+	Total  float64   `json:"total"`
+	Placed time.Time `json:"placed"`
+	Items  []item    `json:"items"`
+}
+
+// history builds eight orders for a user, newest first.
+func history(user string) []order {
+	statuses := []string{"processing", "shipped", "delivered", "delivered", "delivered", "delivered", "returned", "delivered"}
+	var orders []order
+	for i, st := range statuses {
+		items := []item{
+			{SKU: fmt.Sprintf("SKU-%03d", 100+i), Name: "Widget", Quantity: 1 + i%3, Price: 9.99},
+			{SKU: fmt.Sprintf("SKU-%03d", 200+i), Name: "Gadget", Quantity: 1, Price: 24.50},
+		}
+		total := 0.0
+		for _, it := range items {
+			total += float64(it.Quantity) * it.Price
+		}
+		orders = append(orders, order{
+			ID:     fmt.Sprintf("%s-%04d", user, 1000-i),
+			Status: st,
+			Total:  float64(int(total*100)) / 100,
+			Placed: time.Date(2026, 11, 10-i, 12, 0, 0, 0, time.UTC),
+			Items:  items,
+		})
+	}
+	return orders
+}
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	http.HandleFunc("GET /orders/{user}", func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		time.Sleep(latency)
+		log.Printf("GET %s (request %s) in %s", r.URL.Path, r.Header.Get("X-Request-Id"), time.Since(start).Round(time.Millisecond))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"user": r.PathValue("user"), "orders": history(r.PathValue("user"))})
+	})
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

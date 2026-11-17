@@ -1,0 +1,122 @@
+// Command grpc-catalog serves the gRPC service catalog.v1.Catalog (see
+// proto/catalog.proto) over TLS on :8443, as two replicas. GetItem answers
+// at once; Search takes 800 ms, longer than the 500 ms Envoy allows that
+// one method, so Envoy gives up on it, answers the client
+// DEADLINE_EXCEEDED, and cancels the call here.
+package main
+
+import (
+	"context"
+	"log"
+	"net"
+	"os"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
+)
+
+// searchLatency is how long Search takes. Bring it under the route's
+// 500 ms in envoy.yaml (or raise the limit) and Search succeeds.
+const searchLatency = 800 * time.Millisecond
+
+var name = os.Getenv("BB_SERVICE") // grpc-catalog-1 or grpc-catalog-2
+
+// Envoy routes on the HTTP/2 path, /<service>/<method>.
+const service = "catalog.v1.Catalog"
+
+// catalog is the service's description for grpc-go: its full name and,
+// per method, a handler that decodes the request and calls the code. It is
+// what protoc-gen-go-grpc generates from proto/catalog.proto.
+var catalog = grpc.ServiceDesc{
+	ServiceName: service,
+	Methods: []grpc.MethodDesc{
+		unary("GetItem", getItem),
+		unary("Search", search),
+	},
+	Metadata: "proto/catalog.proto",
+}
+
+func getItem(ctx context.Context, sku string) (map[string]any, error) {
+	log.Printf("GetItem %s (%s)", sku, deadline(ctx))
+	return map[string]any{"sku": sku, "name": "Widget " + sku, "price": 9.99}, nil
+}
+
+// search stops as soon as the call is cancelled: when Envoy's limit for
+// this method passes, it resets the stream, and ctx is done. Work for a
+// caller that has gone is wasted.
+func search(ctx context.Context, query string) (map[string]any, error) {
+	start := time.Now()
+	log.Printf("Search %q started (%s)", query, deadline(ctx))
+	select {
+	case <-time.After(searchLatency):
+		log.Printf("Search %q finished in %s", query, time.Since(start).Round(time.Millisecond))
+		return map[string]any{"query": query, "results": []any{"SKU-100", "SKU-200"}}, nil
+	case <-ctx.Done():
+		log.Printf("Search %q abandoned after %s: %v", query, time.Since(start).Round(time.Millisecond), ctx.Err())
+		return nil, status.FromContextError(ctx.Err()).Err()
+	}
+}
+
+func main() {
+	// TLS with this replica's certificate; the handshake negotiates
+	// HTTP/2 ("h2" by ALPN), which Envoy's cluster offers.
+	creds, err := credentials.NewServerTLSFromFile(os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	s := grpc.NewServer(grpc.Creds(creds))
+	s.RegisterService(&catalog, nil)
+	// The standard health service: Envoy's grpc_health_check calls it.
+	healthpb.RegisterHealthServer(s, health.NewServer())
+
+	lis, err := net.Listen("tcp", ":8443")
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("%s serving catalog.v1.Catalog over TLS on :8443", name)
+	log.Fatal(s.Serve(lis))
+}
+
+// unary turns fn into the grpc.MethodDesc of one method: the request is a
+// StringValue, the response a Struct, and the answer carries this
+// replica's name in the x-served-by header, so the client can see which
+// replica Envoy picked.
+func unary(method string, fn func(context.Context, string) (map[string]any, error)) grpc.MethodDesc {
+	call := func(ctx context.Context, req any) (any, error) {
+		grpc.SetHeader(ctx, metadata.Pairs("x-served-by", name))
+		out, err := fn(ctx, req.(*wrapperspb.StringValue).GetValue())
+		if err != nil {
+			return nil, err
+		}
+		return structpb.NewStruct(out)
+	}
+	return grpc.MethodDesc{
+		MethodName: method,
+		Handler: func(_ any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+			in := new(wrapperspb.StringValue)
+			if err := dec(in); err != nil {
+				return nil, err
+			}
+			if interceptor == nil {
+				return call(ctx, in)
+			}
+			return interceptor(ctx, in, &grpc.UnaryServerInfo{FullMethod: "/" + service + "/" + method}, call)
+		},
+	}
+}
+
+// deadline describes the deadline the call arrived with: grpc-go turns
+// the grpc-timeout header into the context's deadline.
+func deadline(ctx context.Context) string {
+	if d, ok := ctx.Deadline(); ok {
+		return "deadline in " + time.Until(d).Round(time.Millisecond).String()
+	}
+	return "no deadline"
+}

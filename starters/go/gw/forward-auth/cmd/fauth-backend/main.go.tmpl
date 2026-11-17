@@ -1,0 +1,37 @@
+// Command fauth-backend is the API behind the gateway. It has no session
+// code: Traefik asked fauth-auth about every request first, and forwards
+// the identity it returned as X-Auth-User and X-Auth-Roles. The backend
+// trusts those headers because, in this design, only Traefik can reach it
+// with a request. Calling it directly breaks that assumption (see the
+// README's "Break this").
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	// record logs what arrived: the identity, how many X-Auth-User values
+	// (one: Traefik replaced the client's), and whether the session token
+	// got through (no: the drop-credentials middleware removed it).
+	record := func(r *http.Request) (user, roles string) {
+		user, roles = r.Header.Get("X-Auth-User"), r.Header.Get("X-Auth-Roles")
+		log.Printf("%s %s for user=%s roles=%s (values of X-Auth-User: %d; Authorization forwarded: %t)",
+			r.Method, r.URL.Path, user, roles, len(r.Header.Values("X-Auth-User")), r.Header.Get("Authorization") != "")
+		return user, roles
+	}
+	http.HandleFunc("GET /api/orders", func(w http.ResponseWriter, r *http.Request) {
+		user, roles := record(r)
+		fmt.Fprintf(w, "%s: orders for user=%s roles=%s\n", name, user, roles)
+	})
+	http.HandleFunc("GET /api/admin/report", func(w http.ResponseWriter, r *http.Request) {
+		user, _ := record(r)
+		fmt.Fprintf(w, "%s: admin report for user=%s\n", name, user)
+	})
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

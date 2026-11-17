@@ -1,0 +1,75 @@
+# dynamic.yml for bff-edge, from the gw/bff-aggregation starter. You own
+# it: experiment.yaml sets services.bff-edge.file to this file, and bb up
+# loads your edits (bb up again after a change).
+#
+# Two ways to serve the same screen, side by side:
+#
+#   https://bff-edge:8443/profile/...  -> bff-profile  (gateway routing)
+#   https://bff-edge:8443/orders/...   -> bff-orders   (gateway routing)
+#   https://bff-edge:8443/bff/...      -> bff-api      (backend for frontend)
+#   anything else                      -> 404 from Traefik
+#
+# Gateway routing maps one path to one service: the client makes one call
+# per service and joins the answers itself. The BFF is an app of its own
+# behind the gateway: one call from the client, which the BFF fans out to
+# both services at once, inside the lab, and answers with only what the
+# screen shows. The gateway does not aggregate: it routes, and the BFF
+# composes.
+#
+# This file replaces Traefik's dynamic configuration only. Breadboard keeps
+# traefik.yml (the websecure entrypoint on :8443, the API and ping on
+# 127.0.0.1:8080) and tls.yml (this service's certificate). Traefik reads
+# this file through Go templates, so it contains no double braces, not even
+# in comments.
+
+http:
+  routers:
+    bff:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/bff/`)
+      service: bff
+    profile:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/profile/`)
+      service: profile
+    orders:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/orders/`)
+      service: orders
+
+  # One service per app, each with one server and no health check: a
+  # failed check would only turn a working route into a 503.
+  services:
+    bff:
+      loadBalancer:
+        servers:
+          - url: https://bff-api.{{.Domain}}:8443
+        serversTransport: bff
+    profile:
+      loadBalancer:
+        servers:
+          - url: https://bff-profile.{{.Domain}}:8443
+        serversTransport: profile
+    orders:
+      loadBalancer:
+        servers:
+          - url: https://bff-orders.{{.Domain}}:8443
+        serversTransport: orders
+
+  # Re-encrypt: TLS to each app, verified against the lab CA by its name.
+  serversTransports:
+    bff:
+      serverName: bff-api.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem
+    profile:
+      serverName: bff-profile.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem
+    orders:
+      serverName: bff-orders.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem

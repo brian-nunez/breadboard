@@ -1,0 +1,19 @@
+// The catalog.v1.Catalog contract. grpc-catalog serves it and grpc-client
+// calls it. Both use the protobuf well-known types for messages, so the
+// starter needs no code generation step: cmd/grpc-catalog/main.go describes
+// the service to grpc-go by hand (a grpc.ServiceDesc), exactly as the code
+// protoc-gen-go-grpc would generate from this file does.
+syntax = "proto3";
+
+package catalog.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+service Catalog {
+  // GetItem looks one item up by SKU. Fast.
+  rpc GetItem(google.protobuf.StringValue) returns (google.protobuf.Struct);
+  // Search scans the catalog for a query. Slow (800 ms): longer than the
+  // 500 ms Envoy allows this one method, so it ends DEADLINE_EXCEEDED.
+  rpc Search(google.protobuf.StringValue) returns (google.protobuf.Struct);
+}

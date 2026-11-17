@@ -1,0 +1,98 @@
+# dynamic.yml for fauth-edge, from the gw/forward-auth starter. You own it:
+# experiment.yaml sets services.fauth-edge.file to this file, and bb up
+# loads your edits (bb up again after a change).
+#
+# Delegated authentication. Before Traefik forwards a request to /api/, the
+# forwardAuth middleware asks fauth-auth whether to let it through, sending
+# the request's Authorization header and its method and URI. A 2xx answer
+# lets the request go on, carrying the identity headers the auth service
+# returned; any other answer (401, 403) goes straight back to the client,
+# and the backend never sees the request.
+#
+#   https://fauth-edge:8443/auth/...  -> fauth-auth (login and logout)
+#   https://fauth-edge:8443/api/...   -> fauth-backend, if fauth-auth says yes
+#   anything else                     -> 404 from Traefik
+#
+# This file replaces Traefik's dynamic configuration only. Breadboard keeps
+# traefik.yml (the websecure entrypoint on :8443, the API and ping on
+# 127.0.0.1:8080) and tls.yml (this service's certificate). Traefik reads
+# this file through Go templates, so it contains no double braces, not even
+# in comments.
+
+http:
+  routers:
+    # Sign in and out. No middleware: you need no session to get one.
+    auth:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/auth/`)
+      service: auth
+    # The API. Middlewares run in the order listed: check the session
+    # first, then drop the credential before the request moves on.
+    api:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/api/`)
+      middlewares:
+        - check-session
+        - drop-credentials
+      service: backend
+
+  middlewares:
+    check-session:
+      forwardAuth:
+        # The auth service's decision endpoint. It is not routed above, so
+        # clients cannot call it through the gateway. HTTPS, verified
+        # against the lab CA as fauth-auth.<domain>, the name in the URL.
+        address: https://fauth-auth.{{.Domain}}:8443/verify
+        tls:
+          ca: /etc/bb/ca.pem
+        # Send the auth service only what it needs: the credential. Without
+        # this list every request header (cookies included) goes to it.
+        # Traefik adds X-Forwarded-Method, -Uri, -Host, -Proto and -For in
+        # any case, so it can decide by path.
+        authRequestHeaders:
+          - Authorization
+        # On a 2xx, copy these headers from the auth service's answer onto
+        # the request, replacing any the client sent: a client cannot claim
+        # to be someone else by sending X-Auth-User itself.
+        authResponseHeaders:
+          - X-Auth-User
+          - X-Auth-Roles
+        # The most Traefik reads of the auth service's answer, in bytes; a
+        # bigger answer counts as a refusal (401). Unset means unlimited,
+        # which Traefik warns about: a broken or hostile auth service could
+        # exhaust its memory.
+        maxResponseBodySize: 4096
+    # Remove the session token before the request reaches the backend: an
+    # empty value deletes the header. The backend gets the identity, not a
+    # credential it could leak or replay.
+    drop-credentials:
+      headers:
+        customRequestHeaders:
+          Authorization: ""
+
+  # One service per app, each with one server and no health check: a
+  # failed check would only turn a working route into a 503.
+  services:
+    auth:
+      loadBalancer:
+        servers:
+          - url: https://fauth-auth.{{.Domain}}:8443
+        serversTransport: auth
+    backend:
+      loadBalancer:
+        servers:
+          - url: https://fauth-backend.{{.Domain}}:8443
+        serversTransport: backend
+
+  # Re-encrypt: TLS to each app, verified against the lab CA by its name.
+  serversTransports:
+    auth:
+      serverName: fauth-auth.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem
+    backend:
+      serverName: fauth-backend.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem

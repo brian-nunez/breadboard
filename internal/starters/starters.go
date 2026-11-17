@@ -650,6 +650,101 @@ var all = []Starter{
 			File: "envoy.yaml",
 		}},
 	},
+	{
+		ID:       "gw/jwt-auth",
+		Title:    "JWT authentication at the edge with Envoy",
+		Summary:  "Envoy verifies JWTs against the issuer's JWKS before any request reaches the backend: no token or a forged signature gets 401, a valid token arrives as trusted claim headers.",
+		Language: "go",
+		Template: "go/gw/jwt-auth",
+		Dir:      "jwt-auth",
+		Apps: []App{
+			{Name: "jwt-issuer", Command: []string{"jwt-issuer"}},
+			{Name: "jwt-backend", Command: []string{"jwt-backend"}},
+			{Name: "jwt-client", Command: []string{"jwt-client"}, Uses: []string{"jwt-edge"}},
+		},
+		Services: []Service{{
+			Name: "jwt-edge",
+			Type: "envoy",
+			Upstreams: []spec.Upstream{
+				{Service: "jwt-backend", Port: 8443, Name: "backend"},
+				{Service: "jwt-issuer", Port: 8443, Name: "issuer"},
+			},
+			File: "envoy.yaml",
+		}},
+	},
+	{
+		ID:       "gw/forward-auth",
+		Title:    "Forward authentication with Traefik",
+		Summary:  "Traefik asks an auth service about every API request before forwarding it: refusals come back from the auth service as they are, and allowed requests carry the identity it returned as headers.",
+		Language: "go",
+		Template: "go/gw/forward-auth",
+		Dir:      "forward-auth",
+		Apps: []App{
+			{Name: "fauth-auth", Command: []string{"fauth-auth"}},
+			{Name: "fauth-backend", Command: []string{"fauth-backend"}},
+			{Name: "fauth-client", Command: []string{"fauth-client"}, Uses: []string{"fauth-edge"}},
+		},
+		Services: []Service{{
+			Name: "fauth-edge",
+			Type: "traefik",
+			// Named like the file's Traefik services, so the explorers tag
+			// them. The forwardAuth call to fauth-auth's /verify is the
+			// middleware's own connection, not a route.
+			Upstreams: []spec.Upstream{
+				{Service: "fauth-backend", Port: 8443, Name: "backend"},
+				{Service: "fauth-auth", Port: 8443, Name: "auth"},
+			},
+			File: "dynamic.yml",
+		}},
+	},
+	{
+		ID:       "gw/bff-aggregation",
+		Title:    "Backend for frontend behind Traefik",
+		Summary:  "One call to a BFF fans out to two services at once and returns only what the screen needs, next to the same screen loaded through plain gateway routing: fewer round trips and fewer bytes.",
+		Language: "go",
+		Template: "go/gw/bff-aggregation",
+		Dir:      "bff-aggregation",
+		Apps: []App{
+			{Name: "bff-api", Command: []string{"bff-api"}},
+			{Name: "bff-profile", Command: []string{"bff-profile"}},
+			{Name: "bff-orders", Command: []string{"bff-orders"}},
+			{Name: "bff-client", Command: []string{"bff-client"}, Uses: []string{"bff-edge"}},
+		},
+		Services: []Service{{
+			Name: "bff-edge",
+			Type: "traefik",
+			// Named like the file's Traefik services, so the explorers tag them.
+			Upstreams: []spec.Upstream{
+				{Service: "bff-api", Port: 8443, Name: "bff"},
+				{Service: "bff-profile", Port: 8443, Name: "profile"},
+				{Service: "bff-orders", Port: 8443, Name: "orders"},
+			},
+			File: "dynamic.yml",
+		}},
+	},
+	{
+		ID:       "gw/grpc-routing",
+		Title:    "gRPC routing through Envoy",
+		Summary:  "One Envoy listener routes gRPC calls to two services by their service name over HTTP/2, balances calls across replicas, and cuts one slow method off with DEADLINE_EXCEEDED.",
+		Language: "go",
+		Template: "go/gw/grpc-routing",
+		Dir:      "grpc-routing",
+		Apps: []App{
+			{Name: "grpc-catalog", Command: []string{"grpc-catalog"}, Replicas: 2},
+			{Name: "grpc-inventory", Command: []string{"grpc-inventory"}},
+			{Name: "grpc-client", Command: []string{"grpc-client"}, Uses: []string{"grpc-edge"}},
+		},
+		Services: []Service{{
+			Name: "grpc-edge",
+			Type: "envoy",
+			// Named like the file's clusters, so the explorers tag them.
+			Upstreams: []spec.Upstream{
+				{Service: "grpc-catalog", Port: 8443, Name: "catalog"},
+				{Service: "grpc-inventory", Port: 8443, Name: "inventory"},
+			},
+			File: "envoy.yaml",
+		}},
+	},
 }
 
 // envoyInbound is an Envoy sidecar terminating TLS on 8443 in front of an

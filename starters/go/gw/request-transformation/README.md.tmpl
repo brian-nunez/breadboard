@@ -1,0 +1,65 @@
+# gw/request-transformation
+
+A gateway does more than pick a service: it changes requests on the way in and responses on the way out, so every service behind it gets the same clean input and every client the same headers. It adds headers the backend can rely on, removes headers no client should be trusted to send, rewrites old paths to new ones, and answers retired URLs with a redirect by itself. Here [Traefik middlewares](https://doc.traefik.io/traefik/v3.7/reference/routing-configuration/http/middlewares/overview/) do all of it, in a file you own.
+
+- `cmd/xform-backend`: an echo service. It answers every request with what actually arrived (the path and the headers the gateway touches) and logs the same line, `saw GET path=... gateway=... user-id=...`.
+- `cmd/xform-client`: every 5 seconds sends three requests to `XFORM_EDGE_URL`, each carrying headers a client should not be trusted with, and logs what the backend saw and what came back. Each transformation the gateway promises is checked; any that did not happen is logged `UNEXPECTED`.
+- `dynamic.yml`: Traefik's routers and middlewares for `xform-edge`, yours to read and change. `experiment.yaml` points the service's `file` at it.
+
+## How it works
+
+```yaml
+api:
+  rule: PathPrefix(`/api/`)
+  middlewares: [gateway-headers, strip-api]
+legacy:
+  rule: PathPrefix(`/legacy/orders/`)
+  middlewares: [gateway-headers, legacy-rewrite]
+v0:
+  rule: PathPrefix(`/v0/`)
+  middlewares: [v0-moved]
+```
+
+1. **A middleware sits between a router and its service.** A router lists its middlewares in order and each request passes through them top to bottom; on the way back the response passes through them again. A middleware can change the request, change the response, or answer by itself so the service never sees the request.
+2. **Add and remove headers.** `gateway-headers` is a `headers` middleware. In `customRequestHeaders` a value sets a header (replacing whatever the client sent) and an empty value removes it: the backend gets `X-Gateway: xform-edge` and never sees `X-User-Id`. The client sends `X-User-Id: admin` on purpose: a backend that trusts that header makes anyone who can type it an admin. Identity belongs to authentication at the gateway, never to a header a client chooses.
+3. **Change responses too.** `customResponseHeaders` adds `X-Gateway` and removes the backend's `X-Powered-By`, which tells attackers what the service runs on. `stsSeconds` and `contentTypeNosniff` add `Strict-Transport-Security: max-age=31536000` and `X-Content-Type-Options: nosniff` to every answer, so no service has to remember them.
+4. **Forwarded headers are the gateway's.** The client also sends `X-Forwarded-For: 203.0.113.7`. Traefik does not trust forwarded headers from clients unless its entrypoint is told to, so it replaces the forged value with the address it really saw. That one is static configuration (Breadboard's `traefik.yml`), not a middleware.
+5. **Strip a prefix.** `strip-api` removes `/api`, so `/api/orders/7` reaches the backend as `/orders/7`, and records what it removed in `X-Forwarded-Prefix`.
+6. **Rewrite a path.** `legacy-rewrite` is a `replacePathRegex`: `^/legacy/orders/(.*)` becomes `/orders/$1`, and the original path travels in `X-Replaced-Path`. The client never learns the new URL; old clients keep working unchanged.
+7. **Redirect instead.** `v0-moved` is a `redirectRegex` on the full URL (scheme, host and port included): `/v0/orders/7` gets a `301 Moved Permanently` to `/api/orders/7` from Traefik itself. Unlike a rewrite, the client is told, and can update its links; the backend never sees the first request. A router needs a service even when a middleware always answers first.
+8. **Request IDs.** The client assigns `X-Request-Id` and Traefik forwards it untouched; the backend echoes it in its answer and its log, so one ID ties the client's line to the backend's. Traefik 3.7 has no middleware that generates a request ID: a `headers` value is static, the same for every request. A gateway that makes its own uses tracing (Traefik's tracing injects a `traceparent` header, and is static configuration) or a plugin.
+
+## Run it
+
+```sh
+bb up
+bb logs xform-client -f
+```
+
+Every 5 seconds, three lines and a summary:
+
+```text
+GET /api/orders/7 (sent X-User-Id: admin, X-Forwarded-For: 203.0.113.7, X-Request-Id: 3f9c...) -> 200 | backend saw path=/orders/7 gateway=xform-edge user-id=- request-id=3f9c... prefix=/api replaced=- forwarded-for=172.21.0.4 forwarded-host=xform-edge.{{.Domain}}:8443 | response gateway=xform-edge powered-by=-
+GET /legacy/orders/7 -> 200 | backend saw path=/orders/7 gateway=xform-edge user-id=- request-id=- prefix=- replaced=/legacy/orders/7 forwarded-for=172.21.0.4 forwarded-host=xform-edge.{{.Domain}}:8443 | response gateway=xform-edge powered-by=-
+GET /v0/orders/7 -> 301 Location: https://xform-edge.{{.Domain}}:8443/api/orders/7 -> 200 | backend saw path=/orders/7
+round 3: 3 requests, unexpected 0
+```
+
+## What to watch
+
+- `bb logs xform-backend`: one `saw GET` line per request that reached it. There is never a line for `/v0/`, and never `user-id=admin`.
+- `bb serve`: the **Traefik routes** tab of `xform-edge` lists the three routers with their middlewares in order. MCP clients get the same from `traefik_routes` with `service: xform-edge`.
+- `bb logs xform-edge`: Traefik's access log, one line per request with the router that matched; the `/v0/` requests end at Traefik with a 301.
+
+## Try this
+
+- **Ask by hand.** `docker exec bb-{{.Experiment}}-xform-client-1 sh -c 'wget -qS -O- --header "X-User-Id: admin" "$XFORM_EDGE_URL/api/orders/9"'`: the backend's echo shows `user-id=-`, and the response headers (`-S`) show `X-Gateway` and no `X-Powered-By`.
+- **Add a response header.** Add `Cache-Control: no-store` under `customResponseHeaders` and run `bb up`. `wget -S` by hand shows it on every `/api/` and `/legacy/` answer but not on the `/v0/` redirect: middlewares belong to routers, and the `v0` router does not list `gateway-headers`.
+- **Rewrite with a fixed path.** Replace `legacy-rewrite` with a `replacePath` middleware (`path: /orders/7`) and run `bb up`. Every legacy URL now lands on order 7, whatever the client asked for: `replacePath` swaps the whole path, `replacePathRegex` keeps what the group captured.
+
+## Break this
+
+- **Trust the client.** Delete the `X-User-Id: ""` line and run `bb up`. The backend now sees `user-id=admin` on every `/api/` request, and the client logs `UNEXPECTED: X-User-Id admin arrived, want it removed`. Any client could now be anyone.
+- **Strip too much.** Change `strip-api`'s prefix to `/api/orders` and run `bb up`. The backend now receives `/7`, and the client logs `UNEXPECTED: path /7, want /orders/7 (prefix stripped)`: a strip prefix is part of the contract between the gateway and the service, and only one side changed.
+- **Rewrite where you meant to redirect.** Swap `v0-moved` for a `replacePathRegex` (`regex: ^/v0/(.*)`, `replacement: /orders/$1`) and run `bb up`. `/v0/orders/7` now answers 200 directly: the client is never told the URL moved, and logs `UNEXPECTED: status 200, want a permanent redirect`.
+- **Make the redirect temporary.** Set `permanent: false` on `v0-moved` and run `bb up`. Traefik answers `302 Found` and the client flags it: browsers and caches do not remember a temporary redirect, so clients keep calling the retired URL.

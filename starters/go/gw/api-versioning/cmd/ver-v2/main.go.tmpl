@@ -1,0 +1,32 @@
+// Command ver-v2 is version 2 of the orders API. Its total is an object
+// with an integer amount in cents and a currency: a breaking change for any
+// v1 client that reads "total" as a string, which is why it is a new
+// version rather than an edit to v1.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // ver-v2
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /orders/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(r.PathValue("id"))
+		if err != nil {
+			http.Error(w, "order ids are numbers", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("X-Instance", name)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id":%d,"total":{"amount":%d,"currency":"USD"}}`+"\n", id, 1250*id)
+		log.Printf("%s %s (Api-Version %q)", r.Method, r.URL.Path, r.Header.Get("Api-Version"))
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Printf("%s listening on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), mux))
+}

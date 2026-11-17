@@ -341,4 +341,43 @@ var starterContents = map[string]starterContent{
 		Covers: []string{"Session vs transaction pooling", "pool_size vs client count", "Session state in transaction mode", "Central pool vs sidecar"},
 		Guide:  "/docs/load-balancing/connection-pooling",
 	},
+	"gw/path-host-routing": {
+		Area:  "traefik",
+		About: "One Traefik gateway is the only address the client knows, and four services sit behind it. Routers send /users/ to the users service with the prefix stripped, /orders/ to the orders service as is, every request for the admin host to the admin site, and everything else to a default service that owns the 404.",
+		Steps: []step{
+			{"A router is a rule and a service", "Traefik tries routers by priority and the first whose rule matches handles the request."},
+			{"Path prefixes match characters", "Path(`/users`) || PathPrefix(`/users/`) keeps /usersettings out of the users service; the client sends it to prove it."},
+			{"Strip or forward the prefix", "stripPrefix hands route-users /42 and X-Forwarded-Prefix: /users; route-orders owns /orders/ and gets the path unchanged."},
+			{"Host routes and the default", "Host(`admin.route-edge.<domain>`) at priority 100 wins on that host whatever the path; PathPrefix(`/`) at priority 1 catches the rest."},
+		},
+		KeyFile: "dynamic.yml", KeyTitle: "Four routers and their priorities",
+		Covers: []string{"Path routing", "Host (virtual host) routing", "Strip prefix", "Router priority", "Default routes"},
+		Guide:  "/docs/traefik",
+	},
+	"gw/request-transformation": {
+		Area:  "traefik",
+		About: "Traefik middlewares change what passes through the gateway: they add a header the backend can rely on, remove an identity header no client should be trusted to send, strip and rewrite paths, clean up response headers, and answer a retired URL with a redirect. An echo backend shows exactly what arrived.",
+		Steps: []step{
+			{"Middlewares run in order", "Each router lists its middlewares; requests pass through them top to bottom, responses back through them."},
+			{"Headers both ways", "customRequestHeaders adds X-Gateway and removes the forged X-User-Id; customResponseHeaders removes X-Powered-By."},
+			{"Strip, rewrite, redirect", "/api/ is stripped, /legacy/orders/ rewritten with the original in X-Replaced-Path, and /v0/ answered with a 301 the backend never sees."},
+			{"Request IDs end to end", "The client assigns X-Request-Id, Traefik forwards it, and the backend echoes it in its answer and its log."},
+		},
+		KeyFile: "dynamic.yml", KeyTitle: "The middleware chain",
+		Covers: []string{"Header injection and removal", "Path rewriting", "Rewrite vs redirect", "Request IDs", "Not trusting client headers"},
+		Guide:  "/docs/traefik",
+	},
+	"gw/api-versioning": {
+		Area:  "nginx",
+		About: "Two versions of an orders API run side by side behind NGINX. Clients choose one by path (/v1/, /v2/) or by an Api-Version header, and the gateway marks every v1 answer deprecated with Deprecation, Sunset and Link headers, so the old version can be retired without touching its code.",
+		Steps: []step{
+			{"Version by path", "location /v1/ and /v2/ proxy to their own upstream; the trailing / strips the version, so each backend serves /orders/7."},
+			{"Version by header", "A map turns Api-Version into v1, v2 or unsupported; proxy_pass https://ver-$api_version names the upstream."},
+			{"A safe default", "No header means v1, the version unversioned clients were written against; an unknown version is a 400, not a guess."},
+			{"Deprecation at the edge", "Maps keyed by the chosen version fill add_header ... always, so only v1 answers carry the headers, however v1 was chosen."},
+		},
+		KeyFile: "nginx.conf", KeyTitle: "Routing by version and the deprecation headers",
+		Covers: []string{"Path vs header versioning", "Default versions", "Deprecation and Sunset headers", "Breaking vs compatible changes"},
+		Guide:  "/docs/nginx",
+	},
 }

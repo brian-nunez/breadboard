@@ -1,0 +1,57 @@
+// Command xform-backend is an echo service: it answers every request with
+// what actually arrived after the gateway's middlewares ran (the path, and
+// the headers the gateway adds, rewrites or removes), and logs the same
+// line, so you can compare what the client sent with what the service got.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+)
+
+// shown are the request headers this service reports, in order, each with
+// the short name it is printed under.
+var shown = []struct{ header, name string }{
+	{"X-Gateway", "gateway"},             // added by the gateway
+	{"X-User-Id", "user-id"},             // sent by the client, removed by the gateway
+	{"X-Request-Id", "request-id"},       // sent by the client, kept by the gateway
+	{"X-Forwarded-Prefix", "prefix"},     // set by stripPrefix
+	{"X-Replaced-Path", "replaced"},      // set by replacePathRegex
+	{"X-Forwarded-For", "forwarded-for"}, // set by Traefik on every request
+	{"X-Forwarded-Host", "forwarded-host"},
+}
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // xform-backend
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fields := []string{"path=" + r.URL.Path}
+		for _, h := range shown {
+			fields = append(fields, h.name+"="+or(strings.Join(r.Header.Values(h.header), ",")))
+		}
+		saw := strings.Join(fields, " ")
+		log.Printf("saw %s %s", r.Method, saw)
+
+		w.Header().Set("X-Instance", name)
+		// Echo the request ID, so the caller can match this answer to its
+		// request and to this service's log line.
+		if id := r.Header.Get("X-Request-Id"); id != "" {
+			w.Header().Set("X-Request-Id", id)
+		}
+		// A header that gives away the stack; the gateway removes it.
+		w.Header().Set("X-Powered-By", "go-net-http")
+		fmt.Fprintln(w, saw)
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Printf("%s listening on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}
+
+func or(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}

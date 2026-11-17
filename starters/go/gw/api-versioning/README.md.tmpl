@@ -1,0 +1,65 @@
+# gw/api-versioning
+
+An API that has clients cannot change shape under them. When a change would break them (a field that changes type, a field removed), the API gets a new **version**, and both versions run side by side until the old one's clients have moved. The gateway is where that is managed: it sends each request to the version the client asked for, and it tells the clients of the old version, on every answer, that it is going away and when. Here [NGINX](https://nginx.org/en/docs/http/ngx_http_map_module.html) does both, in a config you own.
+
+- `cmd/ver-v1`: version 1 of the orders API. An order's total is a decimal string, `{"id":7,"total":"87.50"}`. It knows nothing about being deprecated.
+- `cmd/ver-v2`: version 2. The total is an object with an integer amount in cents and a currency, `{"id":7,"total":{"amount":8750,"currency":"USD"}}`: a breaking change for any v1 client that reads `total` as a string, which is why it is a new version and not an edit to v1.
+- `cmd/ver-client`: every 5 seconds asks for the same order six ways, by path and by header, and logs which version answered, the body, and the deprecation headers. An answer from the wrong version, a missing deprecation notice or a notice on v2 is logged `UNEXPECTED`.
+- `nginx.conf`: the gateway `ver-edge`, yours to read and change. `experiment.yaml` points the service's `file` at it.
+
+## How it works
+
+| Request | Goes to | As |
+|---|---|---|
+| `/v1/orders/7` | ver-v1 | `/orders/7` |
+| `/v2/orders/7` | ver-v2 | `/orders/7` |
+| `/orders/7` with `Api-Version: 2` | ver-v2 | `/orders/7` |
+| `/orders/7` with `Api-Version: 1`, or none | ver-v1 | `/orders/7` |
+| `/orders/7` with any other `Api-Version` | NGINX answers 400 | |
+
+1. **Version by path.** `location /v1/` and `location /v2/` each `proxy_pass` to their version's `upstream` with a trailing `/`, which replaces the matched `/v1/` or `/v2/` with `/`. Neither version ever sees a version in its path, so the same code could serve any version prefix. Path versions are explicit and easy to test, cache and log; the URL of a resource changes with each version.
+2. **Version by header.** Every other path goes to `location /`. A `map` turns the request's `Api-Version` header (`$http_api_version`) into `v1`, `v2` or `unsupported`, and `proxy_pass https://ver-$api_version` names the upstream block of that name. The URL stays the same across versions; the version is invisible in a link and a cache must vary on the header.
+3. **A default, and a refusal.** A request with no `Api-Version` gets v1, the version unversioned clients were written against: changing the default to v2 would break all of them at once. An unknown version gets a `400` from NGINX rather than a guess.
+4. **Deprecation at the gateway.** Three more maps set, for v1 only, the values of three headers that `add_header ... always` puts on every answer, errors included. An empty value adds nothing, so v2 answers carry none of them:
+   - `Deprecation: @1767225600` ([RFC 9745](https://www.rfc-editor.org/rfc/rfc9745)): deprecated since 2026-01-01, as a date in Unix seconds;
+   - `Sunset: Thu, 01 Jul 2027 00:00:00 GMT` ([RFC 8594](https://www.rfc-editor.org/rfc/rfc8594)): when v1 stops answering;
+   - `Link: </v2/>; rel="successor-version"` ([RFC 5829](https://www.rfc-editor.org/rfc/rfc5829)): what replaces it.
+
+   The gateway adds them, so ver-v1's code never changes to be retired, and they reach v1 clients whichever way they chose v1.
+5. **Re-encrypt.** Each version has its own `upstream` (re-resolved through Docker's DNS) and NGINX verifies each against the lab CA by name: `proxy_ssl_name` follows the version too.
+
+## Run it
+
+```sh
+bb up
+bb logs ver-client -f
+```
+
+Every 5 seconds, six lines and a summary:
+
+```text
+GET /v1/orders/7 (Api-Version: -) -> ver-v1 200 deprecated since 2026-01-01 (Deprecation: @1767225600), sunset Thu, 01 Jul 2027 00:00:00 GMT, link </v2/>; rel="successor-version" | {"id":7,"total":"87.50"}
+GET /v2/orders/7 (Api-Version: -) -> ver-v2 200 current | {"id":7,"total":{"amount":8750,"currency":"USD"}}
+GET /orders/7 (Api-Version: 2) -> ver-v2 200 current | {"id":7,"total":{"amount":8750,"currency":"USD"}}
+GET /orders/7 (Api-Version: 3) -> gateway 400 current | unsupported Api-Version "3": use 1 or 2
+round 3: 6 requests, unexpected 0
+```
+
+## What to watch
+
+- `bb logs ver-edge`: NGINX's access log, one line per request with the version chosen and the header that chose it, for example `"GET /orders/7 HTTP/2.0" 200 api_version=v2 header="2"`. Counting `api_version=v1` lines is how you know whether v1 can be switched off yet.
+- `bb logs ver-v1` and `bb logs ver-v2`: each version logs only its own requests, always as `/orders/7`.
+- `bb serve`: the proxy page of `ver-edge` shows this config and the two upstreams.
+
+## Try this
+
+- **Ask by hand.** `docker exec bb-{{.Experiment}}-ver-client-1 sh -c 'wget -qS -O- --header "Api-Version: 2" "$VER_EDGE_URL/orders/9"'`: v2's body, with no `Deprecation` header in the response headers (`-S`).
+- **Change the default.** In the `map $http_api_version` block, change `""` to `v2` and run `bb up`. Requests without a header now get v2, and the client logs that line `UNEXPECTED`: every client that never sent a version just received a body it cannot parse.
+- **Announce v2's successor.** Add `v2 "@1798761600";` (2027-01-01) to the `$api_deprecation` map and run `bb up`. v2 answers now carry `Deprecation` too, and the client flags them: the same three headers retire any version, with no change to its code.
+
+## Break this
+
+- **Override a header in a location.** Add `add_header Cache-Control no-store;` inside `location /v1/` and run `bb up`. Path-chosen v1 answers lose all four inherited headers (NGINX inherits `add_header` only into a block that has none of its own), so the client logs `/v1/orders/7` as `current` and `UNEXPECTED`, while header-chosen v1 answers keep them. Then add `add_header_inherit merge;` to the same location (NGINX 1.29.3 and later): the location's headers are added to the inherited ones instead of replacing them.
+- **Forget the trailing slash.** Change `proxy_pass https://ver-v1/;` to `proxy_pass https://ver-v1;` and run `bb up`. ver-v1 now receives `/v1/orders/7`, which it has no route for, and answers 404: the gateway and the service disagree about who owns the prefix.
+- **Guess instead of refusing.** Change `default unsupported;` to `default v2;` and run `bb up`. `Api-Version: 3` now gets v2, and the client flags it: a client asking for a version that does not exist gets a body in a shape it never asked for, instead of an error it would notice.
+- **Turn v1 off.** Make the v1 locations answer the way a sunset version should, `return 410 "v1 was retired, see /v2/\n";` in `location /v1/`, and run `bb up`. Clients that read the `Sunset` header knew this date in advance; the client logs every remaining v1 call as `UNEXPECTED`.

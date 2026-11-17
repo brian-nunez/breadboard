@@ -1,0 +1,160 @@
+# nginx.conf for ver-edge: API versioning at the gateway.
+#
+# Two versions of the orders API run side by side: ver-v1 (the old one, its
+# total a string) and ver-v2 (the total an object). Clients choose a version
+# in one of two ways, and the gateway sends each request to that version:
+#
+#   by path     /v1/orders/7  -> ver-v1 as /orders/7
+#               /v2/orders/7  -> ver-v2 as /orders/7
+#   by header   /orders/7 with Api-Version: 2 -> ver-v2
+#               /orders/7 with Api-Version: 1, or none -> ver-v1
+#               any other Api-Version -> 400 from the gateway
+#
+# v1 is deprecated. Every v1 answer, however it was chosen, carries the
+# headers that say so, added here so v1's code never changes:
+#   Deprecation: @1767225600            (RFC 9745: deprecated since 2026-01-01)
+#   Sunset: Thu, 01 Jul 2027 00:00:00 GMT  (RFC 8594: when it stops answering)
+#   Link: </v2/>; rel="successor-version"  (RFC 5829: what replaces it)
+#
+# Breadboard requires the status server on 127.0.0.1:8404 (the health check
+# reads /healthz) and the TLS listener on 8443 with the certificate under
+# /etc/bb/tls; the lab CA is /etc/bb/ca.pem.
+
+# Runs in the foreground: NGINX is the container's main process.
+daemon off;
+user nginx;
+worker_processes 1;
+pid /run/nginx.pid;
+# Errors go to the container's output: bb logs ver-edge.
+error_log /dev/stderr notice;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    # One access log line per request with the version chosen and the
+    # address that answered. The health check's requests are left out.
+    log_format versioning '$remote_addr "$request" $status api_version=$api_version '
+                          'header="$http_api_version" upstream=$upstream_addr';
+    map $http_user_agent $bb_access_log {
+        bb-healthcheck 0;
+        default 1;
+    }
+    access_log /dev/stdout versioning if=$bb_access_log;
+    # Docker's embedded DNS: each version's name is resolved again every 5s.
+    resolver 127.0.0.11 valid=5s ipv6=off;
+
+    # Loopback only: the health check and the stub_status counters.
+    server {
+        listen 127.0.0.1:8404;
+        access_log off;
+        location = /healthz {
+            return 200 "ok\n";
+        }
+        location = /stub_status {
+            stub_status;
+        }
+    }
+
+    # One upstream per version, named after its app, so a variable holding
+    # "ver-v1" or "ver-v2" can name the upstream in proxy_pass.
+    upstream ver-v1 {
+        zone ver-v1 64k;
+        server ver-v1.{{.Domain}}:8443 resolve max_fails=3 fail_timeout=10s;
+        keepalive 16;
+    }
+    upstream ver-v2 {
+        zone ver-v2 64k;
+        server ver-v2.{{.Domain}}:8443 resolve max_fails=3 fail_timeout=10s;
+        keepalive 16;
+    }
+
+    # Version by header. $http_api_version is the request's Api-Version
+    # header. No header defaults to v1, the version unversioned clients
+    # were written against; an unknown version is refused below rather than
+    # guessed.
+    map $http_api_version $api_version_by_header {
+        ""      v1;
+        "1"     v1;
+        "2"     v2;
+        default unsupported;
+    }
+
+    # The deprecation headers, per version. A map is evaluated when the
+    # variable is read, so these follow $api_version, which each location
+    # sets. An empty value means add_header adds nothing, so v2 answers
+    # carry none of them.
+    map $api_version $api_deprecation {
+        v1      "@1767225600";
+        default "";
+    }
+    map $api_version $api_sunset {
+        v1      "Thu, 01 Jul 2027 00:00:00 GMT";
+        default "";
+    }
+    map $api_version $api_successor {
+        v1      '</v2/>; rel="successor-version"';
+        default "";
+    }
+
+    server {
+        listen 8443 ssl;
+        http2 on;
+        server_name ver-edge.{{.Domain}};
+        ssl_certificate /etc/bb/tls/tls.crt;
+        ssl_certificate_key /etc/bb/tls/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        # Every proxied request: HTTP/1.1 with keepalive to the version, the
+        # client's Host, and who the client was.
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 5s;
+        # Re-encrypt: verify each version against the lab CA (the name to
+        # check is set per location).
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/bb/ca.pem;
+        proxy_ssl_verify_depth 2;
+        proxy_ssl_server_name on;
+        proxy_ssl_protocols TLSv1.2 TLSv1.3;
+        proxy_ssl_session_reuse on;
+
+        # Added to every answer, errors included (always). They are set at
+        # the server level and inherited by each location below; a location
+        # with an add_header of its own would drop all four.
+        add_header X-Api-Version $api_version always;
+        add_header Deprecation $api_deprecation always;
+        add_header Sunset $api_sunset always;
+        add_header Link $api_successor always;
+
+        # Version by path. The trailing / in proxy_pass replaces the matched
+        # /v1/ with /, so each version serves /orders/... and never sees the
+        # version in its path.
+        location /v1/ {
+            set $api_version v1;
+            proxy_pass https://ver-v1/;
+            proxy_ssl_name ver-v1.{{.Domain}};
+        }
+        location /v2/ {
+            set $api_version v2;
+            proxy_pass https://ver-v2/;
+            proxy_ssl_name ver-v2.{{.Domain}};
+        }
+
+        # Version by header, for every other path. With a variable in
+        # proxy_pass, NGINX looks the name up among the upstream blocks above
+        # and passes the request URI unchanged.
+        location / {
+            set $api_version $api_version_by_header;
+            if ($api_version = unsupported) {
+                return 400 "unsupported Api-Version \"$http_api_version\": use 1 or 2\n";
+            }
+            proxy_pass https://ver-$api_version;
+            proxy_ssl_name ver-$api_version.{{.Domain}};
+        }
+    }
+}

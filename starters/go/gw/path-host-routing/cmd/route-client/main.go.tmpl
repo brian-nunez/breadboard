@@ -1,0 +1,94 @@
+// Command route-client sends the same round of requests through the gateway
+// every 5 seconds and logs, for each one, which service answered and what
+// that service saw: the path after any rewrite, the prefix the gateway
+// stripped and the Host. Each request has an expected service, so a route
+// you break shows up as MISROUTED.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+)
+
+// probe is one request of a round and the service that should answer it.
+type probe struct {
+	path   string
+	host   string // the Host header; empty keeps the gateway's own name
+	want   string // the service that should answer
+	status int    // and its status
+}
+
+func main() {
+	edge := os.Getenv("ROUTE_EDGE_URL") // https://route-edge.<domain>:8443
+	u, err := url.Parse(edge)
+	if err != nil || u.Hostname() == "" {
+		log.Fatalf("ROUTE_EDGE_URL %q: %v", edge, err)
+	}
+	// The admin site is a virtual host on the same gateway: same address,
+	// same TLS connection, another Host header.
+	admin := "admin." + u.Hostname()
+	probes := []probe{
+		{"/users/42", "", "route-users", 200},
+		{"/users", "", "route-users", 200},
+		{"/orders/7", "", "route-orders", 200},
+		{"/", admin, "route-admin", 200},
+		{"/users/42", admin, "route-admin", 200},
+		{"/usersettings", "", "route-default", 404},
+		{"/nope", "", "route-default", 404},
+	}
+	// The lab CA is trusted through SSL_CERT_FILE, so this client verifies
+	// the gateway's certificate. TLS always names the gateway (SNI
+	// route-edge.<domain>); only the Host header changes per request.
+	client := &http.Client{Timeout: 5 * time.Second}
+	for round := 1; ; round++ {
+		misrouted := 0
+		for _, p := range probes {
+			line, ok := call(client, edge, p)
+			if !ok {
+				misrouted++
+				line = "MISROUTED " + line
+			}
+			log.Print(line)
+		}
+		log.Printf("round %d: %d requests, misrouted %d", round, len(probes), misrouted)
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// call sends one probe and describes the answer; ok is false when another
+// service (or another status) answered than the probe expects.
+func call(client *http.Client, edge string, p probe) (string, bool) {
+	req, err := http.NewRequest(http.MethodGet, edge+p.path, nil)
+	if err != nil {
+		return err.Error(), false
+	}
+	host := "route-edge"
+	if p.host != "" {
+		req.Host = p.host // the Host header Traefik's Host() rule matches
+		host = p.host
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Sprintf("GET %s (host %s) -> error: %v", p.path, host, err), false
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	// X-Instance names the service; without it, the gateway answered by
+	// itself (Traefik's own 404 when no router matches).
+	who := resp.Header.Get("X-Instance")
+	if who == "" {
+		who = "gateway"
+	}
+	saw := strings.TrimSpace(string(body))
+	if _, rest, found := strings.Cut(saw, " "); found {
+		saw = rest
+	}
+	line := fmt.Sprintf("GET %s (host %s) -> %s %d: %s", p.path, host, who, resp.StatusCode, saw)
+	return line, who == p.want && resp.StatusCode == p.status
+}

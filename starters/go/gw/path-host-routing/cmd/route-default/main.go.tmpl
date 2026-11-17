@@ -1,0 +1,25 @@
+// Command route-default is the gateway's default route: it gets every
+// request no other route claims, and answers a 404 of its own. Owning the
+// "not found" answer lets an API return one consistent error body (and log
+// the misses) instead of the proxy's built-in page.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // route-default
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Instance", name)
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "%s path=%s prefix=- host=%s | no route for %s\n", name, r.URL.Path, r.Host, r.URL.Path)
+		log.Printf("no route: %s %s (host %s)", r.Method, r.URL.Path, r.Host)
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Printf("%s listening on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

@@ -1,0 +1,32 @@
+// Command ver-v1 is version 1 of the orders API: an order's total is a
+// decimal string. It knows nothing about being deprecated; the gateway adds
+// the deprecation headers to its answers.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // ver-v1
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /orders/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(r.PathValue("id"))
+		if err != nil {
+			http.Error(w, "order ids are numbers", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("X-Instance", name)
+		w.Header().Set("Content-Type", "application/json")
+		// v1's shape: the total as a string with two decimals, currency implied.
+		fmt.Fprintf(w, `{"id":%d,"total":"%d.%02d"}`+"\n", id, 1250*id/100, 1250*id%100)
+		log.Printf("%s %s (Api-Version %q)", r.Method, r.URL.Path, r.Header.Get("Api-Version"))
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Printf("%s listening on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), mux))
+}

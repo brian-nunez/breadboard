@@ -1,0 +1,116 @@
+# dynamic.yml for xform-edge: request and response transformation with
+# Traefik middlewares.
+#
+# A middleware sits between a router and its service and changes the request
+# on the way in, the response on the way out, or answers by itself. A router
+# lists its middlewares in order; each request passes through them top to
+# bottom before it reaches the service.
+#
+#   /api/...           gateway-headers, strip-api       -> xform-backend
+#   /legacy/orders/... gateway-headers, legacy-rewrite  -> xform-backend
+#   /v0/...            v0-moved (answers a redirect; the backend never sees it)
+#
+# xform-backend echoes what arrived, so its log shows each change.
+#
+# This file replaces Traefik's dynamic configuration only. Breadboard keeps
+# traefik.yml (the websecure entrypoint on :8443, the API and ping on
+# 127.0.0.1:8080) and tls.yml (this service's certificate). Traefik reads
+# this file through Go templates, so it contains no double braces, not even
+# in comments.
+
+http:
+  routers:
+    # The public API: /api/orders/7 reaches the backend as /orders/7.
+    api:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/api/`)
+      middlewares:
+        - gateway-headers
+        - strip-api
+      service: xform-backend
+
+    # Old URLs kept alive: /legacy/orders/7 is rewritten to /orders/7. The
+    # client never learns the new path (compare v0 below, which tells it).
+    legacy:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/legacy/orders/`)
+      middlewares:
+        - gateway-headers
+        - legacy-rewrite
+      service: xform-backend
+
+    # A retired version: every /v0/ URL redirects to its /api/ equivalent.
+    # A router needs a service even when a middleware always answers first.
+    v0:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/v0/`)
+      middlewares:
+        - v0-moved
+      service: xform-backend
+
+  middlewares:
+    # Headers in both directions. In customRequestHeaders and
+    # customResponseHeaders, a value sets the header (replacing any the
+    # client or backend sent) and an empty value removes it.
+    gateway-headers:
+      headers:
+        customRequestHeaders:
+          # Added: the backend can tell traffic came through the gateway.
+          X-Gateway: xform-edge
+          # Removed: identity must come from authentication at the gateway,
+          # never from a header any client can type. Without this line a
+          # client sending "X-User-Id: admin" is admin to the backend.
+          X-User-Id: ""
+        customResponseHeaders:
+          X-Gateway: xform-edge
+          # Removed: the backend's X-Powered-By tells attackers its stack.
+          X-Powered-By: ""
+        # Also on every response: Strict-Transport-Security, so browsers
+        # use HTTPS only for a year, and X-Content-Type-Options: nosniff.
+        stsSeconds: 31536000
+        contentTypeNosniff: true
+
+    # Removes /api and sends it in X-Forwarded-Prefix.
+    strip-api:
+      stripPrefix:
+        prefixes:
+          - /api
+
+    # Rewrites the path with a regular expression (Go RE2 syntax; $1 is
+    # the first group) and keeps the original in X-Replaced-Path.
+    legacy-rewrite:
+      replacePathRegex:
+        regex: '^/legacy/orders/(.*)'
+        replacement: '/orders/$1'
+
+    # Answers with a redirect instead of forwarding. The regex runs on the
+    # full URL, scheme, host and port included; permanent: true makes it a
+    # permanent redirect, which clients and caches may remember.
+    v0-moved:
+      redirectRegex:
+        regex: '^https://([^/]+)/v0/(.*)'
+        replacement: 'https://${1}/api/${2}'
+        permanent: true
+
+    # Request IDs: Traefik 3.7 has no middleware that generates one, and
+    # these headers are static values, not per-request. Traefik forwards a
+    # client's X-Request-Id untouched, so here the client assigns it. A
+    # gateway that makes its own uses tracing (Traefik's tracing, which
+    # injects a traceparent header, is static configuration) or a plugin.
+
+  services:
+    xform-backend:
+      loadBalancer:
+        servers:
+          - url: https://xform-backend.{{.Domain}}:8443
+        serversTransport: xform-backend
+
+  # Re-encrypt: TLS to the backend, verified against the lab CA by its name.
+  serversTransports:
+    xform-backend:
+      serverName: xform-backend.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem

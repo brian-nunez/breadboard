@@ -1,0 +1,30 @@
+// Command route-admin is the admin site. The gateway sends it every request
+// for the host admin.route-edge.<domain>, whatever the path: one gateway
+// address, two sites, told apart by the Host header.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // route-admin
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Instance", name)
+		fmt.Fprintf(w, "%s path=%s prefix=%s host=%s | admin dashboard\n", name, r.URL.Path, or(r.Header.Get("X-Forwarded-Prefix")), r.Host)
+		log.Printf("%s %s (host %s) -> 200", r.Method, r.URL.Path, r.Host)
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Printf("%s listening on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}
+
+func or(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}

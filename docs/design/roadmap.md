@@ -176,7 +176,18 @@ Starters that balance across replicas and route by host and path, with health ch
 
 ### Wave D: API-gateway examples
 
-Starters for gateway patterns: routing, authentication at the edge, rate limiting, request transformation.
+Starters for gateway patterns: routing, request transformation, versioning, rate limiting, resilience, authentication at the edge, aggregation and gRPC (D-163 onward).
+
+**Scope:** ten starters in the `gw` area, each with a commented native gateway config the learner owns, a README with exercises, a web narrative and an integration test of its lesson: `gw/path-host-routing`, `gw/request-transformation`, `gw/forward-auth` and `gw/bff-aggregation` (Traefik), `gw/api-versioning` (NGINX), `gw/rate-limiting` (Envoy and NGINX), `gw/circuit-breaking`, `gw/retries-and-timeouts`, `gw/jwt-auth` and `gw/grpc-routing` (Envoy); no private key, token or password committed (the JWT issuer and the auth service generate theirs at runtime); an "API gateways" docs section with seven concept guides, each starter listed in the section of the proxy it runs on (D-176 to D-178).
+
+**Completion criteria:**
+
+- [ ] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift after commit.
+- [ ] Every starter renders and applies; its native config passes the image's own check (`envoy --mode validate`, `nginx -t`, Traefik loading its routers), for Envoy v1.40, Traefik v3.7 and NGINX 1.30.
+- [ ] Integration (real Docker): each starter's test asserts its lesson: each path and Host route reaches its own service and an unknown path gets the default; the backend sees the added and rewritten headers and path and never a removed header; v1 and v2 answer from their own backends and v1 answers carry the deprecation headers; under a burst, each rate limiter's accepted and rejected counts match its configuration within tolerance; under overload, circuit-breaker overflow answers are immediate 503s and the backend's concurrency never exceeds the threshold; retries raise a flaky backend's success rate, and a retry budget bounds backend load under failure; a missing or forged JWT gets 401 and a valid one 200 with its claims forwarded; forward auth answers 401 for an unauthorised request and the backend sees the identity header for an authorised one; one BFF call returns merged data and both services logged a request; two gRPC services are reached by name through one listener and a method timeout returns `DEADLINE_EXCEEDED`.
+- [ ] Every integration test leaves no labelled containers, networks or volumes; the full suite (`go test -tags integration ./internal/core/`) passes on the top of the wave D stack.
+- [ ] Docs pages render (HTTP 200 through `bb serve`), are in search, link only registered starters and existing docs pages; facts match the implementation and the official docs for the pinned versions; every starter's guide link resolves to its `/docs/api-gateways` guide.
+- [ ] README starters table and AGENTS stage updated; docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated (D-163 to D-179).
 
 ### Wave E: `*.localhost` host access
 

@@ -1,0 +1,46 @@
+// Command route-orders is the orders service behind the gateway. Unlike
+// route-users, it owns its full path: the gateway forwards /orders/... as
+// it came, and this service routes on /orders/ and /orders/<id>.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // route-orders
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /orders/{$}", func(w http.ResponseWriter, r *http.Request) {
+		answer(w, r, name, http.StatusOK, "orders: 7, 8, 9")
+	})
+	mux.HandleFunc("GET /orders/{id}", func(w http.ResponseWriter, r *http.Request) {
+		answer(w, r, name, http.StatusOK, "order "+r.PathValue("id"))
+	})
+	// Anything else is not an orders path: strip the prefix at the gateway
+	// and every request ends up here.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		answer(w, r, name, http.StatusNotFound, "no such orders path")
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Printf("%s listening on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), mux))
+}
+
+// answer names this service and what it received: the path, the prefix the
+// gateway removed (none here) and the Host the client asked for.
+func answer(w http.ResponseWriter, r *http.Request, name string, status int, body string) {
+	w.Header().Set("X-Instance", name)
+	w.WriteHeader(status)
+	fmt.Fprintf(w, "%s path=%s prefix=%s host=%s | %s\n", name, r.URL.Path, or(r.Header.Get("X-Forwarded-Prefix")), r.Host, body)
+	log.Printf("%s %s (prefix %s, host %s) -> %d", r.Method, r.URL.Path, or(r.Header.Get("X-Forwarded-Prefix")), r.Host, status)
+}
+
+func or(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}

@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/brian-nunez/breadboard/internal/errs"
@@ -47,6 +49,56 @@ func TestMissingDockerIsUnavailable(t *testing.T) {
 		if !errors.Is(err, errs.ErrDockerUnavailable) {
 			t.Fatalf("Logs error = %v", err)
 		}
+	}
+}
+
+func TestUpReportsATakenSubnet(t *testing.T) {
+	c := &Compose{}
+	for _, msg := range []string{
+		"failed to create network bb-lab_default: Error response from daemon: invalid pool request: Pool overlaps with other one on this address space",
+		"failed to create network bb-lab_plain-api: Error response from daemon: cannot create network ed30 (br-ed30): conflicts with network b1ab (br-b1ab): networks have overlapping IPv4",
+	} {
+		bin := filepath.Join(t.TempDir(), "docker")
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\necho '"+msg+"' >&2\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		c.Bin = bin
+		if err := c.Up(context.Background(), Project{Name: "bb-lab"}); !errors.Is(err, ErrSubnetTaken) {
+			t.Fatalf("Up error = %v, want ErrSubnetTaken", err)
+		}
+	}
+
+	other := filepath.Join(t.TempDir(), "docker")
+	if err := os.WriteFile(other, []byte("#!/bin/sh\necho 'no such image' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c.Bin = other
+	if err := c.Up(context.Background(), Project{Name: "bb-lab"}); err == nil || errors.Is(err, ErrSubnetTaken) {
+		t.Fatalf("Up error = %v, want a plain failure", err)
+	}
+}
+
+// TestSubnetsSkipsANetworkRemovedMidway: another lab's down can remove a
+// network between network ls and network inspect; the networks that remain
+// are still listed, and any other inspect failure is still an error.
+func TestSubnetsSkipsANetworkRemovedMidway(t *testing.T) {
+	inspect := `[{"Name":"bb-a_default","Labels":{"breadboard.experiment-id":"a"},"IPAM":{"Config":[{"Subnet":"10.213.0.0/24"}]}}]`
+	fake := func(stderr string) string {
+		bin := filepath.Join(t.TempDir(), "docker")
+		script := "#!/bin/sh\nif [ \"$2\" = ls ]; then echo n1; echo n2; exit 0; fi\necho '" + inspect + "'\necho '" + stderr + "' >&2\nexit 1\n"
+		if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return bin
+	}
+	c := &Compose{Bin: fake("Error response from daemon: network n2 not found")}
+	nets, err := c.Subnets(context.Background())
+	if err != nil || len(nets) != 1 || nets[0].Subnet.String() != "10.213.0.0/24" || nets[0].ExperimentID != "a" {
+		t.Fatalf("Subnets = %+v, %v; want the remaining network", nets, err)
+	}
+	c.Bin = fake("Cannot connect to the Docker daemon")
+	if _, err := c.Subnets(context.Background()); err == nil {
+		t.Fatal("Subnets hid a failure that is not a missing network")
 	}
 }
 

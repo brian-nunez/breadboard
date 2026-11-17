@@ -22,9 +22,11 @@ type fakeRuntime struct {
 	mu          sync.Mutex
 	unavailable error
 	upErr       error
-	calls       []string
-	projects    []runtime.Project
-	containers  map[string][]runtime.Container // by experiment
+	// onUp runs at the start of each Up; a non-nil error fails that Up.
+	onUp       func() error
+	calls      []string
+	projects   []runtime.Project
+	containers map[string][]runtime.Container // by experiment
 	// healthOf overrides the health of a service after Up.
 	healthOf map[string]string
 	stateOf  map[string]string
@@ -64,6 +66,11 @@ func (f *fakeRuntime) Available(ctx context.Context) error {
 
 func (f *fakeRuntime) Up(ctx context.Context, p runtime.Project) error {
 	f.record("up")
+	if f.onUp != nil {
+		if err := f.onUp(); err != nil {
+			return err
+		}
+	}
 	if f.upErr != nil {
 		return f.upErr
 	}

@@ -64,6 +64,43 @@ func (e *Engine) Up(ctx context.Context, req UpRequest) (*UpResult, error) {
 	if err := e.checkOwnership(ctx, p); err != nil {
 		return nil, err
 	}
+	// Subnets are chosen from the networks that exist now, and created by
+	// compose up later; another process can create a network on the same
+	// subnet in between. Docker then refuses ours, and choosing again sees
+	// the newcomer and avoids it (D-181).
+	var pr *prepared
+	for attempt := 1; ; attempt++ {
+		pr, err = e.start(ctx, p, ev)
+		if !errors.Is(err, runtime.ErrSubnetTaken) || attempt == subnetAttempts {
+			break
+		}
+		ev.emit(Event{Kind: EventInfo, Message: "Another network took a chosen subnet; choosing again"})
+	}
+	if err != nil {
+		return nil, err
+	}
+	ev.step("Waiting for health checks")
+	timeout := req.Timeout
+	if timeout == 0 {
+		timeout = e.healthTimeout
+	}
+	if err := e.waitHealthy(ctx, pr.model, timeout, ev); err != nil {
+		return nil, err
+	}
+	statuses, warnings, err := e.status(ctx, pr.model)
+	if err != nil {
+		return nil, err
+	}
+	return &UpResult{Experiment: p.spec.Name, Services: statuses, Warnings: warnings}, nil
+}
+
+// subnetAttempts bounds how often Up chooses subnets again after Docker
+// reports one taken.
+const subnetAttempts = 5
+
+// start reconciles state, writes the runtime bundle and runs compose up.
+// The caller holds the project lock.
+func (e *Engine) start(ctx context.Context, p *project, ev EventSink) (*prepared, error) {
 	pr, err := e.prepare(ctx, p, ev)
 	if err != nil {
 		return nil, err
@@ -109,19 +146,7 @@ func (e *Engine) Up(ctx context.Context, req UpRequest) (*UpResult, error) {
 	if err := e.rt.Up(ctx, rp); err != nil {
 		return nil, err
 	}
-	ev.step("Waiting for health checks")
-	timeout := req.Timeout
-	if timeout == 0 {
-		timeout = e.healthTimeout
-	}
-	if err := e.waitHealthy(ctx, pr.model, timeout, ev); err != nil {
-		return nil, err
-	}
-	statuses, warnings, err := e.status(ctx, pr.model)
-	if err != nil {
-		return nil, err
-	}
-	return &UpResult{Experiment: p.spec.Name, Services: statuses, Warnings: warnings}, nil
+	return pr, nil
 }
 
 // checkCaptureUsers builds every transparent app's image and refuses one

@@ -34,7 +34,9 @@ type graph struct {
 	Width, Height int
 	Nodes         []node
 	Edges         []edge
-	CodeX, InfraX int // column header positions
+	CodeX, InfraX int // the code and infrastructure columns
+	// Columns are the headed columns, left to right.
+	Columns []column
 	// Static graphs (starter pages) have no live nodes to select.
 	Static bool
 }
@@ -61,6 +63,12 @@ type chip struct {
 	X, Y, W     int
 }
 
+// column is a headed column of the graph.
+type column struct {
+	Title string
+	X     int
+}
+
 type edge struct {
 	Path        string // SVG path data
 	LabelX      int
@@ -70,6 +78,8 @@ type edge struct {
 	Reason      string
 	Registering bool // a sidecar registering its app
 	ToApp       bool // app to app, through an Envoy sidecar
+	// fixedLabel keeps the label where the edge put it (in the gutter).
+	fixedLabel bool
 }
 
 func (n node) CX() int { return n.X + nodeW }
@@ -112,10 +122,18 @@ type appGroup struct {
 // order, one card per app with its sidecars as chips; each infra service
 // gets the average row of the apps that use it, and unused ones go last.
 func layout(rows []row, selected string) graph {
-	var groups []*appGroup
+	if hasProxies(rows) {
+		return flowLayout(rows, selected)
+	}
+	groups, infra, sidecars := groupRows(rows)
+	return layoutTwoColumns(selected, groups, infra, sidecars)
+}
+
+// groupRows sorts rows into apps (with their instances), infra services,
+// and sidecars by parent instance.
+func groupRows(rows []row) (groups []*appGroup, infra []row, sidecars map[string][]row) {
 	byGroup := map[string]*appGroup{}
-	var infra []row
-	sidecars := map[string][]row{}
+	sidecars = map[string][]row{}
 	for _, r := range rows {
 		switch r.Kind {
 		case "infra":
@@ -133,6 +151,12 @@ func layout(rows []row, selected string) graph {
 			g.instances = append(g.instances, r)
 		}
 	}
+	return groups, infra, sidecars
+}
+
+// layoutTwoColumns is the layout without proxies: your code, then
+// infrastructure.
+func layoutTwoColumns(selected string, groups []*appGroup, infra []row, sidecars map[string][]row) graph {
 	appEdges := false
 	for _, g := range groups {
 		for _, e := range g.instances[0].Uses {
@@ -144,6 +168,7 @@ func layout(rows []row, selected string) graph {
 		codeX += appGutter
 	}
 	g := graph{CodeX: codeX, InfraX: codeX + nodeW + colGap}
+	g.Columns = []column{{"YOUR CODE", g.CodeX}, {"INFRASTRUCTURE", g.InfraX}}
 	top := graphPad + headerH
 	pos := map[string]node{} // by app, instance, and infra name
 	y := top

@@ -30,7 +30,7 @@ templ architectureBody(d dashboardData, selected string) {
 						<div class="overflow-x-auto p-4">
 							@graphSVG(layout(d.Services, selected), true)
 						</div>
-						@legend()
+						@legend(hasProxies(d.Services))
 					}
 				</div>
 				@connectionList(d)
@@ -62,8 +62,9 @@ templ graphSVG(g graph, labels bool) {
 				<path d="M0 0 L8 4 L0 8 z" class="fill-red-600"></path>
 			</marker>
 		</defs>
-		<text x={ itoa(g.CodeX) } y="36" class="fill-slate-500 text-[11px] font-semibold tracking-wider">YOUR CODE</text>
-		<text x={ itoa(g.InfraX) } y="36" class="fill-slate-500 text-[11px] font-semibold tracking-wider">INFRASTRUCTURE</text>
+		for _, c := range g.Columns {
+			<text x={ itoa(c.X) } y="36" class="fill-slate-500 text-[11px] font-semibold tracking-wider">{ c.Title }</text>
+		}
 		for _, e := range g.Edges {
 			if e.Plaintext {
 				<path d={ e.Path } fill="none" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrow-plain)" class="stroke-red-600"></path>
@@ -160,7 +161,7 @@ func strokeWidth(selected bool) string {
 	return "1"
 }
 
-templ legend() {
+templ legend(proxies bool) {
 	<div class="mx-4 mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-slate-200 px-4 py-2.5 text-xs text-slate-600">
 		<span class="flex items-center gap-2"><svg viewBox="0 0 24 4" class="h-1 w-6"><line x1="0" y1="2" x2="24" y2="2" stroke-width="1.5" class="stroke-slate-400"></line></svg>TLS, verified</span>
 		<span class="flex items-center gap-2"><svg viewBox="0 0 24 4" class="h-1 w-6"><line x1="0" y1="2" x2="24" y2="2" stroke-width="1.5" stroke-dasharray="6 4" class="stroke-red-600"></line></svg>Plaintext (intentional)</span>
@@ -169,6 +170,11 @@ templ legend() {
 		<span class="flex items-center gap-2"><span class="rounded border border-dashed border-slate-300 px-1.5 font-mono text-[10px] text-slate-700">envoy</span>sidecar in the app's pod</span>
 		<span class="flex items-center gap-2"><span class="rounded bg-slate-800 px-1.5 font-mono text-[10px] text-white">transparent</span>captures all the app's traffic</span>
 		<span class="flex items-center gap-2"><span class="font-semibold text-slate-700">×3</span>replicas, one dot each</span>
+		if proxies {
+			<span class="flex items-center gap-2"><span class="rounded border border-slate-300 px-1.5 font-mono text-[10px] text-slate-600">TLS :8443</span>proxy re-encrypts to the backend</span>
+			<span class="flex items-center gap-2"><span class="rounded border border-red-300 bg-red-50 px-1.5 font-mono text-[10px] text-red-700">terminate :8080</span>plaintext hop on a private segment</span>
+			<span class="flex items-center gap-2"><span class="rounded border border-slate-300 px-1.5 font-mono text-[10px] text-slate-600">passthrough :8443</span>client's TLS forwarded by SNI</span>
+		}
 	</div>
 }
 
@@ -190,8 +196,11 @@ templ inspector(d dashboardData, r row) {
 				for _, e := range r.Uses {
 					<a href={ templ.SafeURL("/architecture?node=" + e.To) } class={ "flex items-center justify-between rounded-lg border px-3 py-2 text-sm", templ.KV("border-red-200 bg-red-50", !e.TLS), templ.KV("border-slate-200", e.TLS) }>
 						<span class="font-semibold">{ e.To }</span>
-						<span class={ "font-mono text-xs", templ.KV("text-red-700", !e.TLS), templ.KV("text-slate-600", e.TLS) }>{ edgeLabel(e.TLS, e.Port) }</span>
+						<span class={ "font-mono text-xs", templ.KV("text-red-700", !e.TLS), templ.KV("text-slate-600", e.TLS) }>{ edgeText(e) }</span>
 					</a>
+					if e.Mode != "" {
+						<p class={ "text-xs", templ.KV("text-red-700", !e.TLS), templ.KV("text-slate-500", e.TLS) }>{ modeWords(e) }</p>
+					}
 					if !e.TLS && e.Reason != "" {
 						<p class="text-xs text-red-700">Reason: { e.Reason }</p>
 					}
@@ -262,7 +271,7 @@ templ connectionList(d dashboardData) {
 			for _, e := range firstInstanceUses(r) {
 				<a href={ templ.SafeURL("/architecture?node=" + r.Name) } class={ "flex items-center justify-between rounded-xl border px-4 py-3 text-sm", templ.KV("border-red-200 bg-red-50", !e.TLS), templ.KV("border-slate-200 bg-white", e.TLS) }>
 					<span><span class="font-semibold">{ r.Label() }</span> → { e.To }</span>
-					<span class={ "font-mono text-xs", templ.KV("text-red-700", !e.TLS), templ.KV("text-slate-600", e.TLS) }>{ edgeLabel(e.TLS, e.Port) }</span>
+					<span class={ "font-mono text-xs", templ.KV("text-red-700", !e.TLS), templ.KV("text-slate-600", e.TLS) }>{ edgeText(e) }</span>
 				</a>
 			}
 		}

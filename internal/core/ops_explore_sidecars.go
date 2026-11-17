@@ -77,10 +77,14 @@ func findSidecar(m *model.Model, name, typ string) (sc, inst *model.Service) {
 
 // --- Envoy ------------------------------------------------------------------
 
-// EnvoyClusters is what an Envoy sidecar knows about where it sends traffic.
+// EnvoyClusters is what an Envoy sidecar, or an infra Envoy proxy, knows
+// about where it sends traffic.
 type EnvoyClusters struct {
-	Sidecar   string // the sidecar's service name, e.g. caller-envoy
-	App       string // the app instance it serves
+	Sidecar string // the sidecar's service name, e.g. caller-envoy
+	App     string // the app instance it serves
+	// Proxy is the infra Envoy service's name; Sidecar and App are empty
+	// then.
+	Proxy     string
 	Listeners []EnvoyListener
 	Clusters  []EnvoyCluster
 }
@@ -96,9 +100,13 @@ type EnvoyCluster struct {
 	Name string
 	// Role is what the cluster is for: outbound (to Target over TLS),
 	// inbound (to the app on loopback), egress (transparent passthrough
-	// to original destinations), or inbound passthrough (transparent).
+	// to original destinations), or inbound passthrough (transparent); for
+	// an infra proxy, upstream.
 	Role   string
 	Target string // the app or service it reaches, when known
+	// Mode is an infra proxy's upstream TLS mode: spec.TLSOn, spec.TLSOff
+	// or spec.TLSPassthrough.
+	Mode string
 	// Counters over the whole cluster.
 	Retries           int64 // upstream_rq_retry
 	EjectionsActive   int64 // hosts ejected by outlier detection right now
@@ -146,9 +154,16 @@ echo '### stats'; get '/stats?filter=^cluster\.[^.]+\.(upstream_rq_retry|outlier
 echo '### listeners'; get '/listeners?format=json'; echo
 echo '### hosts'; [ $# -eq 0 ] || getent hosts "$@" || true`
 
-// EnvoyClusters reads an Envoy sidecar's clusters, per-host health and
-// counters, and listeners from its admin API on 127.0.0.1:15000.
+// EnvoyClusters reads an Envoy's clusters, per-host health and counters,
+// and listeners from its admin API on 127.0.0.1:15000. It takes an infra
+// envoy service, or a sidecar as exploreSidecar finds one.
 func (e *Engine) EnvoyClusters(ctx context.Context, req ExploreRequest) (*EnvoyClusters, error) {
+	if m, svc, run, ok, err := e.infraProxy(ctx, req, "envoy"); err != nil || ok {
+		if err != nil {
+			return nil, err
+		}
+		return e.envoyInfra(m, svc, run)
+	}
 	m, sc, inst, run, err := e.exploreSidecar(ctx, req, spec.SidecarEnvoy)
 	if err != nil {
 		return nil, err
@@ -415,14 +430,18 @@ func httpBody(raw string) ([]byte, error) {
 
 // --- PgBouncer --------------------------------------------------------------
 
-// PgBouncerPools is a PgBouncer sidecar's pools and traffic.
+// PgBouncerPools is a PgBouncer sidecar's, or an infra PgBouncer's,
+// pools and traffic.
 type PgBouncerPools struct {
-	Sidecar  string // the sidecar's service name, e.g. api-pgbouncer
-	App      string // the app instance it serves
+	Sidecar string // the sidecar's service name, e.g. api-pgbouncer
+	App     string // the app instance it serves
+	// Proxy is the infra pgbouncer service's name, shared by every app
+	// that uses it; Sidecar and App are empty then.
+	Proxy    string
 	Service  string // the Postgres service it pools
 	PoolMode string
 	PoolSize int
-	Port     int // where the app reaches it, on 127.0.0.1
+	Port     int // where apps reach it: on 127.0.0.1 for a sidecar
 	Pools    []PgBouncerPool
 }
 
@@ -460,8 +479,15 @@ const pgbouncerScript = `q() { PGPASSWORD="$BB_PG_PASSWORD" psql -X -h 127.0.0.1
 echo '### pools'; q "$1" 'SHOW POOLS'
 echo '### stats'; q "$1" 'SHOW STATS'`
 
-// PgBouncerPools reads a PgBouncer sidecar's pools with psql inside it.
+// PgBouncerPools reads a PgBouncer's pools with psql inside it: an infra
+// pgbouncer service, or a sidecar as exploreSidecar finds one.
 func (e *Engine) PgBouncerPools(ctx context.Context, req ExploreRequest) (*PgBouncerPools, error) {
+	if _, svc, run, ok, err := e.infraProxy(ctx, req, "pgbouncer"); err != nil || ok {
+		if err != nil {
+			return nil, err
+		}
+		return e.pgbouncerInfra(svc, run)
+	}
 	_, sc, inst, run, err := e.exploreSidecar(ctx, req, spec.SidecarPgBouncer)
 	if err != nil {
 		return nil, err

@@ -38,7 +38,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Breadboard is early.** Phases 1 to 4 work: the core engine and CLI, five services including S3 Compatible, Compose export, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`). Phase 5 has begun: sidecars (Envoy, PgBouncer, Fluent Bit) that share an app's network namespace, transparent proxying with egress policy, and app replicas, with twelve starters in all. Proxies as services, mTLS and other exporters are later phases. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
+> **Breadboard is early.** Phases 1 to 4 work: the core engine and CLI, five services including S3 Compatible, Compose export, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`). Phase 5 has begun: reverse proxies and load balancers as services (Envoy, Traefik, HAProxy, NGINX, PgBouncer) with re-encrypt, terminate and passthrough per upstream; sidecars (Envoy, PgBouncer, Fluent Bit) that share an app's network namespace, with transparent proxying and egress policy; and app replicas. Load-balancing and gateway examples, mTLS and other exporters are next. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
 
 <p align="center">
   <a href="#why-breadboard">Why Breadboard</a> ·
@@ -98,7 +98,11 @@ Other clients take the same command in their config: `{"command": "bb", "args": 
 | **Redis** | Official `redis` image | 1 |
 | **Consul** | Official `hashicorp/consul` image | 1 |
 | **S3 Compatible** | SeaweedFS | 2 |
-| **Proxies** | Traefik, Envoy, HAProxy, PgBouncer | 5 |
+| **Envoy** | Official `envoyproxy/envoy` image, as a proxy service or a sidecar | 5 |
+| **Traefik** | Official `traefik` image, file provider only | 5 |
+| **HAProxy** | Official `haproxy` image | 5 |
+| **NGINX** | Official `nginx` image (Alpine) | 5 |
+| **PgBouncer** | `edoburu/pgbouncer`, as a shared pool or a sidecar | 5 |
 
 Each catalog entry pins an exact image version, configures TLS, sets resource limits and a health check, and ships learning notes. See the [catalog](docs/design/catalog.md).
 

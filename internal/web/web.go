@@ -260,6 +260,16 @@ func (s *Server) explore(ctx context.Context, tab, typ, name string) (any, error
 		return s.eng.KafkaTopics(ctx, req)
 	case "s3-compatible":
 		return s.eng.S3Buckets(ctx, req)
+	case "haproxy":
+		return s.eng.HAProxyStats(ctx, req)
+	case "traefik":
+		return s.eng.TraefikRoutes(ctx, req)
+	case "nginx":
+		return s.eng.NginxStatus(ctx, req)
+	case "envoy":
+		return s.eng.EnvoyClusters(ctx, req)
+	case "pgbouncer":
+		return s.eng.PgBouncerPools(ctx, req)
 	}
 	return nil, fmt.Errorf("no explorer for %s", typ)
 }
@@ -336,7 +346,8 @@ func (s *Server) dashboard(ctx context.Context) dashboardData {
 				continue
 			}
 			for i := range d.Services {
-				if d.Services[i].Name == e.To {
+				// The target by name, or every instance of an app target.
+				if d.Services[i].Name == e.To || (d.Services[i].Kind == "app" && d.Services[i].App == e.To) {
 					d.Services[i].TLS = false
 				}
 			}

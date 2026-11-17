@@ -29,6 +29,11 @@ var explorerTabs = map[string]string{
 	"consul":   "Catalog",
 	"kafka":    "Topics & groups",
 	"s3-compatible": "Buckets",
+	"haproxy":  "HAProxy stats",
+	"traefik":  "Traefik routes",
+	"nginx":    "NGINX status",
+	"envoy":    "Envoy clusters",
+	"pgbouncer": "PgBouncer pools",
 }
 
 // sidecarTabs names the explorer tab of each sidecar type that has one; an
@@ -176,6 +181,9 @@ templ serviceOverview(p servicePage) {
 					</div>
 				</div>
 			}
+			if len(p.Details.Upstreams) > 0 {
+				@upstreamsCard(p)
+			}
 			if p.Details.Kind == "app" && len(p.Details.Replicas) > 1 {
 				@replicasCard(p)
 			}
@@ -212,6 +220,49 @@ func usesList(uses []core.Edge) string {
 		}
 	}
 	return strings.Join(names, ", ")
+}
+
+// upstreamsCard lists a proxy's upstreams: where each route goes, in which
+// TLS mode, to which port.
+templ upstreamsCard(p servicePage) {
+	@card() {
+		<div class="px-6 pt-6 pb-4">
+			<h2 class="text-base font-semibold">Upstreams</h2>
+			<p class="mt-1 text-sm text-slate-600">Where { p.Row.Name } sends traffic. Apps reach it with <code class="font-mono text-[13px]">uses: [{ p.Row.Name }]</code>; an app upstream is balanced over every replica.</p>
+		</div>
+		<table class="w-full text-left text-sm">
+			<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+				<tr>
+					@th("Target")
+					@th("Mode")
+					@th("Port")
+					@th("Route")
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-slate-200">
+				for _, u := range p.Details.Upstreams {
+					<tr class={ templ.KV("bg-red-50", u.Mode == "off") }>
+						<td class="px-5 py-2.5">
+							<a href={ templ.SafeURL(serviceLink(p.Dash.Services, u.Service)) } class="font-semibold hover:text-indigo-700">{ proxyTargetLabel(u) }</a>
+							if u.Name != u.Service {
+								<div class="font-mono text-xs text-slate-500">route { u.Name }</div>
+							}
+						</td>
+						<td class="px-5 py-2.5">
+							@modeBadge(u.Mode)
+							<div class={ "mt-1 text-xs", templ.KV("text-red-700", u.Mode == "off"), templ.KV("text-slate-500", u.Mode != "off") }>{ modeHelp(u.Mode) }</div>
+							if u.Reason != "" {
+								<div class="mt-1 text-xs text-red-700">Reason: { u.Reason }</div>
+							}
+						</td>
+						<td class="px-5 py-2.5 font-mono text-[13px]">:{ itoa(u.Port) }</td>
+						<td class="px-5 py-2.5 text-slate-700">{ u.Route }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+		<div class="p-5 text-xs text-slate-500">Live state of each backend: the <a href={ templ.SafeURL("/services/" + p.Row.Name + "?tab=explore") } class="text-indigo-600 hover:text-indigo-800">{ explorerTabs[p.Details.Type] }</a> tab.</div>
+	}
 }
 
 // replicasCard lists an app's instances with their live state.

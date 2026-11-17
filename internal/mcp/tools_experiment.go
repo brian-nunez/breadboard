@@ -102,6 +102,7 @@ type serviceDetailsOut struct {
 	Address     string       `json:"address,omitempty"`
 	Listeners   []listener   `json:"listeners"`
 	UsedBy      []string     `json:"used_by"`
+	Upstreams   []upstream   `json:"upstreams,omitempty" jsonschema:"a proxy's backends with their TLS mode and route"`
 	Env         []envGroup   `json:"env" jsonschema:"secret values are empty; call creds for them"`
 	Certificate *certificate `json:"certificate,omitempty" jsonschema:"absent before the first up"`
 	Path        string       `json:"path,omitempty"`
@@ -196,7 +197,7 @@ type s3Out struct {
 
 type sidecarIn struct {
 	Dir     string `json:"dir,omitempty" jsonschema:"directory of the experiment, inside the one bb mcp was started in; empty means that directory"`
-	Service string `json:"service" jsonschema:"an app (its first instance), an app instance such as api-2, or the sidecar's service name such as api-2-envoy"`
+	Service string `json:"service" jsonschema:"an infra service of the type (a proxy), an app (its first instance's sidecar), an app instance such as api-2, or the sidecar's service name such as api-2-envoy"`
 }
 
 type envoyListener struct {
@@ -222,8 +223,9 @@ type envoyHost struct {
 
 type envoyCluster struct {
 	Name              string      `json:"name"`
-	Role              string      `json:"role,omitempty" jsonschema:"outbound, inbound, egress (transparent passthrough), or inbound passthrough"`
+	Role              string      `json:"role,omitempty" jsonschema:"outbound, inbound, egress (transparent passthrough), or inbound passthrough; upstream for an infra Envoy proxy"`
 	Target            string      `json:"target,omitempty" jsonschema:"the app or service the cluster reaches"`
+	Mode              string      `json:"mode,omitempty" jsonschema:"an infra proxy's upstream TLS mode: on (re-encrypt), off (terminate) or passthrough"`
 	Retries           int64       `json:"retries"`
 	EjectionsActive   int64       `json:"ejections_active"`
 	EjectionsEnforced int64       `json:"ejections_enforced"`
@@ -232,8 +234,9 @@ type envoyCluster struct {
 }
 
 type envoyOut struct {
-	Sidecar   string          `json:"sidecar"`
-	App       string          `json:"app" jsonschema:"the app instance the sidecar serves"`
+	Sidecar   string          `json:"sidecar,omitempty"`
+	App       string          `json:"app,omitempty" jsonschema:"the app instance the sidecar serves"`
+	Proxy     string          `json:"proxy,omitempty" jsonschema:"the infra Envoy service, when service named one instead of a sidecar"`
 	Listeners []envoyListener `json:"listeners"`
 	Clusters  []envoyCluster  `json:"clusters"`
 }
@@ -258,12 +261,13 @@ type pgbouncerPool struct {
 }
 
 type pgbouncerOut struct {
-	Sidecar  string          `json:"sidecar"`
-	App      string          `json:"app"`
+	Sidecar  string          `json:"sidecar,omitempty"`
+	App      string          `json:"app,omitempty"`
+	Proxy    string          `json:"proxy,omitempty" jsonschema:"the infra pgbouncer service shared by apps, when service named one instead of a sidecar"`
 	Service  string          `json:"service" jsonschema:"the Postgres service it pools"`
 	PoolMode string          `json:"pool_mode"`
 	PoolSize int             `json:"pool_size"`
-	Port     int             `json:"port" jsonschema:"where the app reaches it, on 127.0.0.1"`
+	Port     int             `json:"port" jsonschema:"where apps reach it: on 127.0.0.1 for a sidecar, on the service's name for an infra pool"`
 	Pools    []pgbouncerPool `json:"pools"`
 }
 
@@ -349,7 +353,8 @@ func (s *Server) addExperimentTools() {
 			Listeners: mapSlice(d.Listeners, func(l core.Listener) listener {
 				return listener{Name: l.Name, Protocol: l.Protocol, Port: l.Port, PlaintextPort: l.PlaintextPort}
 			}),
-			UsedBy: orEmpty(d.UsedBy),
+			UsedBy:    orEmpty(d.UsedBy),
+			Upstreams: mapSlice(d.Upstreams, upstreamView),
 			Env: mapSlice(d.Env, func(g core.EnvGroup) envGroup {
 				return envGroup{Service: g.Service, Title: g.Title, Plaintext: g.Plaintext, Reason: g.Reason, Sidecar: g.Sidecar, Vars: mapSlice(g.Vars, envVarView)}
 			}),
@@ -455,7 +460,7 @@ func (s *Server) addExplorers() {
 
 	add(s, readTool, true, &sdk.Tool{
 		Name:        "envoy_clusters",
-		Description: "What an app's running Envoy sidecar sees: its listeners, and each upstream cluster with its hosts (address, the replica or service at that address, health flags, outlier ejection, request, error and connection counts). Read from Envoy's admin API inside the sidecar. Use it to see which replica got traffic and why a host is failing.",
+		Description: "What a running Envoy sees, an app's sidecar or an infra envoy proxy: its listeners, and each upstream cluster with its hosts (address, the replica or service at that address, health flags, outlier ejection, request, error and connection counts); an infra proxy's clusters carry the upstream's TLS mode. Read from Envoy's admin API inside the container. Use it to see which replica got traffic and why a host is failing.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in sidecarIn) (envoyOut, error) {
 		req, err := sidecarReq(in)
 		if err != nil {
@@ -466,11 +471,11 @@ func (s *Server) addExplorers() {
 			return envoyOut{}, err
 		}
 		return envoyOut{
-			Sidecar: res.Sidecar, App: res.App,
+			Sidecar: res.Sidecar, App: res.App, Proxy: res.Proxy,
 			Listeners: mapSlice(res.Listeners, func(l core.EnvoyListener) envoyListener { return envoyListener{Name: l.Name, Address: l.Address} }),
 			Clusters: mapSlice(res.Clusters, func(c core.EnvoyCluster) envoyCluster {
 				return envoyCluster{
-					Name: c.Name, Role: c.Role, Target: c.Target, Retries: c.Retries,
+					Name: c.Name, Role: c.Role, Target: c.Target, Mode: c.Mode, Retries: c.Retries,
 					EjectionsActive: c.EjectionsActive, EjectionsEnforced: c.EjectionsEnforced, EjectionsOverflow: c.EjectionsOverflow,
 					Hosts: mapSlice(c.Hosts, func(h core.EnvoyHost) envoyHost {
 						return envoyHost{
@@ -486,7 +491,7 @@ func (s *Server) addExplorers() {
 
 	add(s, readTool, true, &sdk.Tool{
 		Name:        "pgbouncer_pools",
-		Description: "Pools of an app's running PgBouncer sidecar (SHOW POOLS and SHOW STATS through psql inside it): client connections active and waiting, server connections to Postgres, transactions, queries and wait times.",
+		Description: "Pools of a running PgBouncer, an app's sidecar or an infra pgbouncer shared by apps (SHOW POOLS and SHOW STATS through psql inside it): client connections active and waiting, server connections to Postgres, transactions, queries and wait times.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in sidecarIn) (pgbouncerOut, error) {
 		req, err := sidecarReq(in)
 		if err != nil {
@@ -497,7 +502,7 @@ func (s *Server) addExplorers() {
 			return pgbouncerOut{}, err
 		}
 		return pgbouncerOut{
-			Sidecar: res.Sidecar, App: res.App, Service: res.Service, PoolMode: res.PoolMode, PoolSize: res.PoolSize, Port: res.Port,
+			Sidecar: res.Sidecar, App: res.App, Proxy: res.Proxy, Service: res.Service, PoolMode: res.PoolMode, PoolSize: res.PoolSize, Port: res.Port,
 			Pools: mapSlice(res.Pools, func(p core.PgBouncerPool) pgbouncerPool {
 				return pgbouncerPool{
 					Database: p.Database, User: p.User, PoolMode: p.PoolMode,
@@ -526,4 +531,6 @@ func (s *Server) addExplorers() {
 			return s3Bucket{Name: b.Name, Objects: b.Objects, Bytes: b.Bytes, Truncated: b.Truncated}
 		})}, nil
 	})
+
+	s.addProxyExplorers(explore)
 }

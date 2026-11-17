@@ -48,6 +48,12 @@ templ exploreResult(p servicePage) {
 				@envoyClusters(p.Dash.Experiment, x)
 			case *core.PgBouncerPools:
 				@pgbouncerPools(p.Dash.Experiment, x)
+			case *core.HAProxyStats:
+				@haproxyStats(x)
+			case *core.TraefikRoutes:
+				@traefikRoutes(x)
+			case *core.NginxStatus:
+				@nginxStatus(x)
 		}
 	}
 }
@@ -316,7 +322,7 @@ templ s3Buckets(x *core.S3Buckets) {
 templ envoyClusters(experiment string, x *core.EnvoyClusters) {
 	<div class="flex flex-col gap-6">
 		for _, c := range x.Clusters {
-			@explorerCardTab(clusterTitle(c), "GET /clusters on Envoy's admin API", "envoy") {
+			@explorerCardTab(clusterTitle(c), "GET /clusters on Envoy's admin API", infraTab(x.Proxy, "envoy")) {
 				<div class="flex flex-wrap gap-x-6 gap-y-1 px-5 pb-4 text-sm text-slate-600">
 					<span>{ clusterRole(c) }</span>
 					<span>Retries <span class="font-medium text-slate-900">{ commas(c.Retries) }</span></span>
@@ -363,14 +369,14 @@ templ envoyClusters(experiment string, x *core.EnvoyClusters) {
 						}
 					</tbody>
 				</table>
-				<p class="px-5 pt-3 text-xs text-slate-500">Counts are since the sidecar started. Errors are 5xx responses and resets; with retries on, a request a replica failed may still have succeeded on another. Envoy's access log shows each request:</p>
+				<p class="px-5 pt-3 text-xs text-slate-500">Counts are since { envoyName(x) } started. Errors are 5xx responses and resets; with retries on, a request a replica failed may still have succeeded on another. Envoy's access log shows each request:</p>
 				<div class="p-5">
-					@terminal("bb logs " + x.Sidecar + " -f")
+					@terminal("bb logs " + envoyName(x) + " -f")
 				</div>
 			}
 		}
 		if len(x.Listeners) > 0 {
-			@explorerCardTab("Listeners of "+x.Sidecar, "GET /listeners", "envoy") {
+			@explorerCardTab("Listeners of "+envoyName(x), "GET /listeners", infraTab(x.Proxy, "envoy")) {
 				<table class="w-full text-left text-sm">
 					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
 						<tr>
@@ -391,7 +397,7 @@ templ envoyClusters(experiment string, x *core.EnvoyClusters) {
 		}
 		if len(x.Clusters) == 0 {
 			@card() {
-				<p class="p-6 text-sm text-slate-600">{ x.Sidecar } has no upstream clusters.</p>
+				<p class="p-6 text-sm text-slate-600">{ envoyName(x) } has no upstream clusters.</p>
 			}
 		}
 	</div>
@@ -399,7 +405,7 @@ templ envoyClusters(experiment string, x *core.EnvoyClusters) {
 
 // pgbouncerPools shows a PgBouncer sidecar's pools.
 templ pgbouncerPools(experiment string, x *core.PgBouncerPools) {
-	@explorerCardTab(fmt.Sprintf("Pools of %s → %s", x.Sidecar, x.Service), "psql -c 'SHOW POOLS' -c 'SHOW STATS'", "pgbouncer") {
+	@explorerCardTab(fmt.Sprintf("Pools of %s → %s", pgbouncerName(x), x.Service), "psql -c 'SHOW POOLS' -c 'SHOW STATS'", infraTab(x.Proxy, "pgbouncer")) {
 		<div class="flex flex-wrap gap-x-6 gap-y-1 px-5 pb-4 text-sm text-slate-600">
 			<span>Pool mode <span class="font-medium text-slate-900">{ x.PoolMode }</span></span>
 			<span>Pool size <span class="font-medium text-slate-900">{ itoa(x.PoolSize) }</span> server connections per database and user</span>
@@ -441,9 +447,295 @@ templ pgbouncerPools(experiment string, x *core.PgBouncerPools) {
 				}
 			</tbody>
 		</table>
-		<p class="px-5 pt-3 text-xs text-slate-500">Clients are the app's connections to 127.0.0.1; servers are PgBouncer's TLS connections to Postgres. Averages cover the last stats period (a minute).</p>
+		if x.Proxy != "" {
+			<p class="px-5 pt-3 text-xs text-slate-500">Clients are the TLS connections of every app that uses { x.Proxy } (port { itoa(x.Port) }); they share one pool per database and user. Servers are PgBouncer's connections to { x.Service }. Averages cover the last stats period (a minute).</p>
+		} else {
+			<p class="px-5 pt-3 text-xs text-slate-500">Clients are the app's connections to 127.0.0.1; servers are PgBouncer's TLS connections to Postgres. Averages cover the last stats period (a minute).</p>
+		}
 		<div class="p-5">
 			@terminal(pgbouncerConsole(experiment, x))
 		</div>
 	}
+}
+
+// modeBadge is an upstream's TLS mode: red for a plaintext hop.
+templ modeBadge(mode string) {
+	if mode != "" {
+		<span title={ modeHelp(mode) } class={ "rounded border px-1.5 py-0.5 font-mono text-[11px] font-normal", templ.KV("border-red-300 bg-red-50 text-red-700", mode == "off"), templ.KV("border-slate-300 text-slate-600", mode != "off") }>{ modeName(mode) }</span>
+	}
+}
+
+// haproxyStats shows HAProxy's stats page: each backend's servers with
+// the replica DNS gave each slot, their health, and how many sessions
+// each got.
+templ haproxyStats(x *core.HAProxyStats) {
+	<div class="flex flex-col gap-6">
+		for _, b := range x.Backends {
+			@card() {
+				<div class="flex items-start justify-between gap-4 px-5 pt-5 pb-4">
+					<div>
+						<h2 class="flex items-center gap-2 text-base font-semibold">
+							{ upstreamTitle(b.Name, b.Upstream) }
+							@modeBadge(b.Upstream.Mode)
+						</h2>
+						<p class="mt-1 text-xs text-slate-500">Read with <code class="font-mono">GET /stats;csv</code> on HAProxy's loopback monitor frontend inside the container.</p>
+					</div>
+					<a href={ templ.SafeURL("?tab=explore") } class="text-sm text-indigo-600 hover:text-indigo-800">Refresh</a>
+				</div>
+				<div class="flex flex-wrap gap-x-6 gap-y-1 px-5 pb-4 text-sm text-slate-600">
+					<span>Balance <span class="font-medium text-slate-900">{ b.Balance }</span></span>
+					<span>Mode <span class="font-medium text-slate-900">{ b.Mode }</span></span>
+					<span>Sessions <span class="font-medium text-slate-900">{ commas(b.TotalSessions) }</span></span>
+					<span>Now <span class="font-medium text-slate-900">{ commas(b.CurrentSessions) }</span></span>
+					if b.Upstream.Mode != "" {
+						<span>{ modeHelp(b.Upstream.Mode) }</span>
+					}
+				</div>
+				<table class="w-full text-left text-sm">
+					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+						<tr>
+							@th("Server")
+							@th("State")
+							@th("Last check")
+							@th("Sessions")
+							@th("Share")
+							@th("Errors")
+							@th("In / out")
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-200">
+						for _, s := range b.Servers {
+							<tr>
+								<td class="px-5 py-2.5">
+									<div class="font-semibold">{ haproxyServerName(s) }</div>
+									<div class="font-mono text-xs text-slate-500">
+										{ s.Name }
+										if s.Address != "" {
+											· { s.Address }
+										}
+									</div>
+								</td>
+								<td class="px-5 py-2.5">
+									@statusWord(haproxyServerStatus(s))
+								</td>
+								<td class="px-5 py-2.5 font-mono text-xs text-slate-600">{ checkText(s) }</td>
+								<td class="px-5 py-2.5">
+									{ commas(s.TotalSessions) }
+									if s.CurrentSessions > 0 {
+										<div class="text-xs text-slate-500">{ commas(s.CurrentSessions) } now</div>
+									}
+								</td>
+								<td class="px-5 py-2.5">
+									@bar(float64(s.TotalSessions), float64(backendSessions(b)), false)
+									<div class="mt-1 text-xs text-slate-500">{ pct(float64(s.TotalSessions), float64(backendSessions(b))) }%</div>
+								</td>
+								<td class={ "px-5 py-2.5", templ.KV("font-medium text-red-700", serverErrors(s) > 0) }>{ commas(serverErrors(s)) }</td>
+								<td class="px-5 py-2.5 text-slate-600">{ size(s.BytesIn) } / { size(s.BytesOut) }</td>
+							</tr>
+						}
+						if len(b.Servers) == 0 {
+							@emptyRow(7, "No servers in this backend.")
+						}
+					</tbody>
+				</table>
+				<p class="px-5 py-3 text-xs text-slate-500">Each server is a <code class="font-mono">server-template</code> slot that HAProxy fills from DNS, so slot numbers need not match replica numbers. In http mode a session is one request; counts are since HAProxy started.</p>
+			}
+		}
+		if len(x.Frontends) > 0 {
+			@explorerCard("Frontends of "+x.Service, "GET /stats;csv") {
+				<table class="w-full text-left text-sm">
+					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+						<tr>
+							@th("Frontend")
+							@th("Mode")
+							@th("State")
+							@th("Sessions")
+							@th("Requests")
+							@th("In / out")
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-200">
+						for _, f := range x.Frontends {
+							<tr>
+								<td class="px-5 py-2.5 font-mono text-[13px]">{ f.Name }</td>
+								<td class="px-5 py-2.5 text-slate-600">{ f.Mode }</td>
+								<td class="px-5 py-2.5 text-slate-600">{ f.Status }</td>
+								<td class="px-5 py-2.5">{ commas(f.TotalSessions) }</td>
+								<td class="px-5 py-2.5">{ commas(f.Requests) }</td>
+								<td class="px-5 py-2.5 text-slate-600">{ size(f.BytesIn) } / { size(f.BytesOut) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<p class="px-5 pt-3 text-xs text-slate-500">monitor is the loopback frontend the health check and this page read. The access log shows each request:</p>
+				<div class="p-5">
+					@terminal("bb logs " + x.Service + " -f")
+				</div>
+			}
+		}
+	</div>
+}
+
+// traefikRoutes shows Traefik's routers and the services they send to,
+// with each server's health status.
+templ traefikRoutes(x *core.TraefikRoutes) {
+	<div class="flex flex-col gap-6">
+		@explorerCard("Routers of "+x.Service, "GET /api/http/routers and /api/tcp/routers") {
+			<table class="w-full text-left text-sm">
+				<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+					<tr>
+						@th("Router")
+						@th("Rule")
+						@th("Service")
+						@th("TLS")
+						@th("State")
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-200">
+					for _, r := range x.Routers {
+						<tr>
+							<td class="px-5 py-2.5">
+								<div class="font-mono text-[13px]">{ r.Name }</div>
+								<div class="text-xs text-slate-500">{ r.Protocol } · { strings.Join(r.EntryPoints, ", ") }</div>
+							</td>
+							<td class="px-5 py-2.5 font-mono text-xs text-slate-700">
+								{ r.Rule }
+								if len(r.Middlewares) > 0 {
+									<div class="text-slate-500">then { strings.Join(r.Middlewares, ", ") }</div>
+								}
+							</td>
+							<td class="px-5 py-2.5 font-mono text-[13px]">{ r.Service }</td>
+							<td class="px-5 py-2.5 text-slate-600">{ traefikTLS(r) }</td>
+							<td class={ "px-5 py-2.5", templ.KV("text-red-700", len(r.Errors) > 0), templ.KV("text-slate-600", len(r.Errors) == 0) }>
+								{ r.Status }
+								for _, e := range r.Errors {
+									<div class="text-xs">{ e }</div>
+								}
+							</td>
+						</tr>
+					}
+					if len(x.Routers) == 0 {
+						@emptyRow(5, "No routers.")
+					}
+				</tbody>
+			</table>
+			<p class="px-5 py-3 text-xs text-slate-500">A longer rule has a higher priority, so the path prefixes win over the catch-all. Traefik's own routers (the API, the dashboard and ping on the loopback entrypoint) are left out.</p>
+		}
+		for _, s := range x.Services {
+			@card() {
+				<div class="flex items-start justify-between gap-4 px-5 pt-5 pb-4">
+					<div>
+						<h2 class="flex items-center gap-2 text-base font-semibold">
+							{ upstreamTitle(s.Name, s.Upstream) }
+							@modeBadge(s.Upstream.Mode)
+						</h2>
+						<p class="mt-1 text-xs text-slate-500">Read with <code class="font-mono">GET /api/{ s.Protocol }/services</code> on Traefik's loopback entrypoint inside the container.</p>
+					</div>
+					<a href={ templ.SafeURL("?tab=explore") } class="text-sm text-indigo-600 hover:text-indigo-800">Refresh</a>
+				</div>
+				<div class="flex flex-wrap gap-x-6 gap-y-1 px-5 pb-4 text-sm text-slate-600">
+					if s.Strategy != "" {
+						<span>Strategy <span class="font-medium text-slate-900">{ s.Strategy }</span></span>
+					}
+					if s.HealthCheck != "" {
+						<span>Health check <span class="font-medium text-slate-900">{ s.HealthCheck }</span></span>
+					}
+					<span>Used by <span class="font-mono text-slate-900">{ strings.Join(s.UsedBy, ", ") }</span></span>
+				</div>
+				<table class="w-full text-left text-sm">
+					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+						<tr>
+							@th("Server")
+							@th("Address")
+							@th("Health")
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-200">
+						for _, sv := range s.Servers {
+							<tr>
+								<td class="px-5 py-2.5 font-semibold">{ sv.Instance }</td>
+								<td class="px-5 py-2.5 font-mono text-xs text-slate-600">{ sv.Address }</td>
+								<td class="px-5 py-2.5">
+									@statusWord(traefikServerStatus(sv))
+								</td>
+							</tr>
+						}
+						if len(s.Servers) == 0 {
+							@emptyRow(3, "No servers.")
+						}
+					</tbody>
+				</table>
+				for _, e := range s.Errors {
+					<p class="px-5 pt-3 text-xs text-red-700">{ e }</p>
+				}
+			}
+		}
+		@card() {
+			<div class="p-5">
+				<p class="text-sm text-slate-600">Traefik's API reports each server's health but keeps no per-server request counter. Its access log shows every request and the server that answered it:</p>
+				<div class="mt-3">
+					@terminal("bb logs " + x.Service + " -f")
+				</div>
+			</div>
+		}
+	</div>
+}
+
+// nginxStatus shows NGINX's stub_status counters and the instances behind
+// each upstream. Open-source NGINX has no per-server statistics.
+templ nginxStatus(x *core.NginxStatus) {
+	<div class="flex flex-col gap-6">
+		@explorerCard("Connections and requests of "+x.Service, "wget http://127.0.0.1:8404/stub_status") {
+			<div class="grid grid-cols-2 gap-4 px-5 pb-5 md:grid-cols-4">
+				@stat("Active connections", commas(x.Active))
+				@stat("Reading", commas(x.Reading))
+				@stat("Writing", commas(x.Writing))
+				@stat("Waiting (keep-alive)", commas(x.Waiting))
+				@stat("Accepted", commas(x.Accepts))
+				@stat("Handled", commas(x.Handled))
+				@stat("Requests", commas(x.Requests))
+			</div>
+			<p class="px-5 pb-5 text-xs text-slate-500">Totals since NGINX started, over every listener (this page's reads included). Fewer handled than accepted connections means a limit such as <code class="font-mono">worker_connections</code> was hit.</p>
+		}
+		@explorerCard("Upstreams of "+x.Service, "getent hosts") {
+			<p class="px-5 pb-4 text-sm text-slate-600">Open-source NGINX has no per-upstream or per-server statistics: those come from the NGINX Plus API. Below is where each upstream's servers resolve inside the container, which is where NGINX sends traffic; the access log shows each request.</p>
+			<table class="w-full text-left text-sm">
+				<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+					<tr>
+						@th("Upstream")
+						@th("Server")
+						@th("Resolves to")
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-200">
+					for _, u := range x.Upstreams {
+						for i, b := range u.Backends {
+							<tr>
+								<td class="px-5 py-2.5">
+									if i == 0 {
+										<div class="flex items-center gap-2 font-semibold">
+											{ u.Target }
+											@modeBadge(u.Mode)
+										</div>
+										<div class="font-mono text-xs text-slate-500">{ u.Route } · :{ itoa(u.Port) }</div>
+									}
+								</td>
+								<td class="px-5 py-2.5">
+									<div class="font-semibold">{ b.Instance }</div>
+									<div class="font-mono text-xs text-slate-500">{ b.Name }</div>
+								</td>
+								<td class={ "px-5 py-2.5 font-mono text-xs", templ.KV("text-slate-600", b.Address != ""), templ.KV("text-amber-700", b.Address == "") }>{ resolvedText(b) }</td>
+							</tr>
+						}
+					}
+					if len(x.Upstreams) == 0 {
+						@emptyRow(3, "No upstreams: every request gets 503.")
+					}
+				</tbody>
+			</table>
+			<div class="p-5">
+				@terminal("bb logs " + x.Service + " -f")
+			</div>
+		}
+	</div>
 }

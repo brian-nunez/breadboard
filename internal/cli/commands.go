@@ -243,14 +243,7 @@ func serviceRows(services []core.ServiceStatus) [][]string {
 		name, kind := indent+s.Name, s.Kind
 		var uses []string
 		for _, e := range s.Uses {
-			to := e.To
-			if e.Via != "" {
-				to += " (via " + e.Via + ")"
-			}
-			if !e.TLS {
-				to += " (PLAINTEXT)"
-			}
-			uses = append(uses, to)
+			uses = append(uses, edgeText(e))
 		}
 		if s.Kind == "sidecar" {
 			prefix := "  └ "
@@ -271,6 +264,29 @@ func serviceRows(services []core.ServiceStatus) [][]string {
 		rows = append(rows, []string{name, kind, s.Health, cpu, mem, s.Address, join(uses)})
 	}
 	return rows
+}
+
+// edgeText is one edge in the USES column. A proxy's upstream edges carry
+// their mode and target port: web (TLS :8443), api (terminate :8080,
+// PLAINTEXT), payments (passthrough :8443).
+func edgeText(e core.Edge) string {
+	to := e.To
+	if e.Via != "" {
+		to += " (via " + e.Via + ")"
+	}
+	switch e.Mode {
+	case "":
+		if !e.TLS {
+			to += " (PLAINTEXT)"
+		}
+	case "off":
+		to += fmt.Sprintf(" (terminate :%d, PLAINTEXT)", e.Port)
+	case "passthrough":
+		to += fmt.Sprintf(" (passthrough :%d)", e.Port)
+	default:
+		to += fmt.Sprintf(" (TLS :%d)", e.Port)
+	}
+	return to
 }
 
 // isInstance reports whether name is an instance of an app with replicas

@@ -148,16 +148,16 @@ Reverse proxies, load balancers and a connection pooler as infra services in fro
 
 **Completion criteria:**
 
-- [ ] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift.
-- [ ] Golden tests: experiments without proxies render byte-identical to `main`; a golden fixture per proxy type covers every mode the type supports.
-- [ ] Unit tests check each generated config with its pinned image: `haproxy -c`, `envoy --mode validate`, `nginx -t`; Traefik's file config is loaded by a running container in an integration test.
-- [ ] Integration (real Docker), for each HTTP proxy (HAProxy, Envoy, Traefik, NGINX): re-encrypt to an app with 3 replicas reaches more than one replica, and the client verified the proxy's certificate.
-- [ ] Integration, for each HTTP proxy: terminate makes the app's plaintext port reachable from the proxy and from no other container.
-- [ ] Integration: passthrough (at least HAProxy and Envoy) shows the client the backend's own certificate.
-- [ ] Integration: PgBouncer infra: two apps share the pool, and Postgres sees connections only from PgBouncer, over TLS.
+- [x] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift.
+- [x] Golden tests: experiments without proxies render byte-identical to `main`; a golden fixture per proxy type covers every mode the type supports.
+- [x] Unit tests check each generated config with its pinned image: `haproxy -c`, `envoy --mode validate`, `nginx -t`; Traefik's file config is loaded by a running container in an integration test.
+- [x] Integration (real Docker), for each HTTP proxy (HAProxy, Envoy, Traefik, NGINX): re-encrypt to an app with 3 replicas reaches more than one replica, and the client verified the proxy's certificate.
+- [x] Integration, for each HTTP proxy: terminate makes the app's plaintext port reachable from the proxy and from no other container.
+- [x] Integration: passthrough (at least HAProxy and Envoy) shows the client the backend's own certificate.
+- [x] Integration: PgBouncer infra: two apps share the pool, and Postgres sees connections only from PgBouncer, over TLS.
 - [x] Integration: each explorer returns real data (`TestIntegrationProxyExplorers`: HAProxy, Traefik, NGINX, infra Envoy and infra PgBouncer).
-- [ ] Every integration test leaves no labelled containers, networks or volumes; the full suite (`go test -tags integration ./internal/core/`) passes on the top of the wave B stack.
-- [ ] Docs in `docs/design/` match what was built: catalog entries, spec fields, security modes, architecture operations and MCP tools; [`decisions.md`](decisions.md) updated.
+- [x] Every integration test leaves no labelled containers, networks or volumes; the full suite (`go test -tags integration ./internal/core/`) passes on the top of the wave B stack.
+- [x] Docs in `docs/design/` match what was built: catalog entries, spec fields, security modes, architecture operations and MCP tools; [`decisions.md`](decisions.md) updated.
 
 ### Wave C: Load-balancing and reverse-proxy examples
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -90,15 +91,12 @@ func randomSuffix(t *testing.T) string {
 	return hex.EncodeToString(b)
 }
 
-// Lab names with one prefix never collide, so parallel subtests cannot
-// share a project, its images or its cleanup (review of D-183).
-func TestIntegrationLabNamesAreUnique(t *testing.T) {
-	seen := map[string]bool{}
-	for range 50 {
-		n := "same-" + randomSuffix(t)
-		if seen[n] {
-			t.Fatalf("lab name %s repeated", n)
-		}
-		seen[n] = true
+// Lab names end in 6 random hex characters (24 bits), so parallel
+// subtests with one prefix get distinct projects, images and cleanup
+// (review of D-183), and stay valid experiment names.
+func TestIntegrationLabNamesAreRandom(t *testing.T) {
+	re := regexp.MustCompile(`^same-[0-9a-f]{6}$`)
+	if n := "same-" + randomSuffix(t); !re.MatchString(n) {
+		t.Fatalf("lab name %q does not end in 6 hex characters", n)
 	}
 }

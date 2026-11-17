@@ -8,8 +8,9 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,7 +81,12 @@ func TestAgentRunsAStarterOverStdio(t *testing.T) {
 
 	// Unique, so this test can run beside the core integration tests or
 	// another run of itself.
-	experiment := fmt.Sprintf("mcp-it-%d", time.Now().UnixNano()%1000000000)
+	suffix := make([]byte, 3)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	// Random, so two runs at once never share a project or its images.
+	experiment := "mcp-it-" + hex.EncodeToString(suffix)
 	call("init", map[string]any{"name": experiment})
 	defer func() {
 		// Leave nothing behind, even when the test fails part way: the

@@ -1,0 +1,98 @@
+package web
+
+import "strings"
+
+// Shared pieces of the proxies' docs sections (D-158): every HTTP proxy's
+// overview draws the same picture, labelled in that proxy's own terms.
+
+// proxyFig labels the overview diagram for one proxy.
+type proxyFig struct {
+	ID   string // prefix for the SVG marker id, unique per page
+	Name string // the proxy, as the diagram's title
+	L7   string // what handles :8443, in the proxy's terms
+	L4   string // what handles :9443, in the proxy's terms
+}
+
+// The example upstreams the overview diagrams show, as in the compose goldens.
+var proxyFigUpstreams = []struct{ Service, Mode, Hop string }{
+	{"web ×3", "re-encrypt", "TLS, verified as web"},
+	{"api ×2", "terminate", "plaintext, private segment"},
+	{"payments", "passthrough", "the client's own TLS"},
+}
+
+templ proxyDiagram(f proxyFig) {
+	<svg viewBox="0 0 900 250" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label={ "An app reaches " + f.Name + " on 8443 (decrypted, routed by path) and 9443 (routed by SNI). Behind it: web re-encrypted, api terminated on a private segment, payments passed through" }>
+		<defs>
+			<marker id={ f.ID + "-arrow" } viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<rect x="20" y="90" width="150" height="70" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="36" y="118" class="fill-slate-900 font-mono text-[13px] font-semibold">client</text>
+		<text x="36" y="140" class="fill-slate-500 text-[11px]">uses: [edge]</text>
+		<line x1="170" y1="112" x2="256" y2="88" stroke-width="1.5" marker-end={ "url(#" + f.ID + "-arrow)" } class="stroke-slate-400"></line>
+		<text x="212" y="88" text-anchor="middle" class="fill-slate-500 text-[11px]">EDGE_URL</text>
+		<line x1="170" y1="140" x2="256" y2="176" stroke-width="1.5" marker-end={ "url(#" + f.ID + "-arrow)" } class="stroke-slate-400"></line>
+		<text x="212" y="178" text-anchor="middle" class="fill-slate-500 text-[11px]">SNI</text>
+		<rect x="260" y="20" width="330" height="210" rx="12" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="276" y="46" class="fill-indigo-800 font-mono text-[13px] font-semibold">edge: { f.Name }</text>
+		<rect x="276" y="60" width="298" height="64" rx="8" class="fill-white stroke-indigo-200"></rect>
+		<text x="290" y="84" class="fill-slate-900 text-[13px] font-semibold">:8443 TLS, L7</text>
+		<text x="290" y="106" class="fill-slate-500 font-mono text-[11px]">{ f.L7 }</text>
+		<rect x="276" y="146" width="298" height="64" rx="8" class="fill-white stroke-indigo-200"></rect>
+		<text x="290" y="170" class="fill-slate-900 text-[13px] font-semibold">:9443 SNI, L4</text>
+		<text x="290" y="192" class="fill-slate-500 font-mono text-[11px]">{ f.L4 }</text>
+		for i, u := range proxyFigUpstreams {
+			if u.Mode == "terminate" {
+				<rect x="680" y={ itoa(24 + i*78) } width="200" height="52" rx="10" stroke-dasharray="5 4" class="fill-white stroke-red-300"></rect>
+			} else {
+				<rect x="680" y={ itoa(24 + i*78) } width="200" height="52" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+			}
+			<text x="694" y={ itoa(46 + i*78) } class="fill-slate-900 font-mono text-[13px] font-semibold">{ u.Service }</text>
+			<text x="694" y={ itoa(66 + i*78) } class="fill-slate-500 text-[11px]">{ u.Mode }: { u.Hop }</text>
+		}
+		<line x1="574" y1="84" x2="676" y2="52" stroke-width="2" marker-end={ "url(#" + f.ID + "-arrow)" } class="stroke-indigo-400"></line>
+		<line x1="574" y1="100" x2="676" y2="128" stroke-width="2" stroke-dasharray="6 4" marker-end={ "url(#" + f.ID + "-arrow)" } class="stroke-red-400"></line>
+		<line x1="574" y1="178" x2="676" y2="206" stroke-width="2" marker-end={ "url(#" + f.ID + "-arrow)" } class="stroke-slate-400"></line>
+	</svg>
+}
+
+// proxyUpstreamsSpec is the experiment.yaml every proxy section's "in
+// Breadboard" guide starts from; the proxy-specific directives follow.
+const proxyUpstreamsSpec = `services:
+  edge:
+    type: {type}
+    upstreams:
+      - web                   # re-encrypt to web's TLS port, every replica
+      - service: api
+        port: 9090            # api's plaintext port
+        name: v1              # route: /v1/ (prefix stripped)
+        tls: {mode: off, reason: practice TLS termination}
+      - service: payments
+        tls: {mode: passthrough}
+    file: ./edge/{file}   # optional: your own copy replaces the generated config
+apps:
+  client:
+    path: ./client
+    uses: [edge]`
+
+// proxyExampleSpec is proxyUpstreamsSpec for one proxy type and its config file.
+func proxyExampleSpec(typ, file string) string {
+	return strings.NewReplacer("{type}", typ, "{file}", file).Replace(proxyUpstreamsSpec)
+}
+
+templ proxyRoutes() {
+	@docList(
+		"One decrypted upstream (re-encrypt or terminate) receives every request on 8443.",
+		"With several, requests under /<name>/ go to that upstream with the prefix stripped, and the first one also takes every other path. name defaults to the service's name.",
+		"With none, the proxy still starts and answers 503.",
+		"Passthrough upstreams are not on 8443 at all: 9443 opens when there is one, and routes by the SNI the client sends, <target>.<domain>.",
+		"An app upstream means every replica; an infra upstream (Consul, another proxy) is reached on its catalog listener.",
+	)
+}
+
+templ proxyEnv() {
+	@docList(
+		"<NAME>_URL=https://<name>.<domain>:8443, the service's name upper-cased with - as _ (edge gives EDGE_URL).",
+		"<NAME>_PASSTHROUGH_ADDR=<name>.<domain>:9443, when an upstream is passthrough. Connect with TLS and send the target's name as SNI.",
+		"SSL_CERT_FILE, as for every service: the client trusts the proxy's certificate through the lab CA.",
+	)
+}

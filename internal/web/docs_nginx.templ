@@ -1,0 +1,293 @@
+package web
+
+// NGINX docs (Phase 5, wave C; D-157, D-158). Config excerpts are the
+// generated nginx.conf (internal/catalog/nginx.go, compose golden
+// nginx.golden); directives follow nginx.org for open-source NGINX 1.30.
+
+func init() {
+	registerTech(tech{
+		ID:      "nginx",
+		Name:    "NGINX",
+		Tagline: "A web server and reverse proxy: http for requests, stream for raw TCP, in one familiar config.",
+		Order:   74,
+		Intro:   nginxIntro(),
+		GoodFit: []string{"Serving static files and proxying in one place", "A widely known config language", "Simple HTTP load balancing", "Response caching", "SNI routing with stream and ssl_preread"},
+		PoorFit: []string{"Active health checks (NGINX Plus only)", "Per-server live metrics in open source", "Config changed often by an API"},
+		Diagram: proxyDiagram(proxyFig{ID: "ng", Name: "NGINX", L7: "server :8443 → location → upstream", L4: "stream: ssl_preread → map → upstream"}),
+		Official: []link{
+			{"NGINX documentation", nginxDocs},
+			{"NGINX: upstream module", nginxUp},
+			{"NGINX: proxy module", nginxDocs + "http/ngx_http_proxy_module.html"},
+			{"NGINX: stream ssl_preread module", nginxDocs + "stream/ngx_stream_ssl_preread_module.html"},
+			{"NGINX: HTTP load balancing", nginxDocs + "http/load_balancing.html"},
+		},
+		Starters: []string{stRoundRobin.URL, stBlueGreen.URL},
+		Guides: []guide{
+			{
+				Slug: "config-anatomy", Title: "Anatomy of nginx.conf", Summary: "Contexts, upstreams, the HTTPS server, locations and the stream block.",
+				Starter:  stRoundRobin.URL,
+				Sections: []docSection{{"contexts", "Contexts and directives"}, {"main", "The main context"}, {"upstreams", "Upstreams"}, {"server", "The HTTPS server"}, {"locations", "Locations and proxy_pass"}, {"stream", "The stream block"}, {"change", "Changing it"}, {"validate", "Checking a config"}},
+				Body:     nginxAnatomy(),
+			},
+			{
+				Slug: "in-breadboard", Title: "NGINX in Breadboard", Summary: "The image, 8443 and 9443, upstreams and modes, file:, the status tab.",
+				Sections: []docSection{{"image", "Image and limits"}, {"upstreams", "Upstreams and routes"}, {"modes", "The three TLS modes"}, {"health", "Health checks"}, {"env", "What your app receives"}, {"see", "Seeing it work"}, {"own", "Owning the config"}},
+				Body:     nginxInBreadboard(),
+			},
+		},
+	})
+}
+
+const nginxMainCode = `daemon off;
+user nginx;
+# One worker keeps round robin easy to watch; raise it for throughput.
+worker_processes 1;
+pid /run/nginx.pid;
+error_log /dev/stderr notice;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    # Docker's embedded DNS. Upstream servers marked resolve keep resolving
+    # their name here (every 5s), so NGINX follows replicas.
+    resolver 127.0.0.11 valid=5s ipv6=off;
+
+    # Loopback only: the health check and the stub_status counters.
+    server {
+        listen 127.0.0.1:8404;
+        location = /healthz { return 200 "ok\n"; }
+        location = /stub_status { stub_status; }
+    }
+    # ... upstreams and the HTTPS server
+}`
+
+const nginxUpstreamCode = `# re-encrypt: TLS to every replica of web, verified against the lab CA as web.bb.internal.
+upstream be_web {
+    # Round robin (the default) across every address web.bb.internal resolves to.
+    zone be_web 64k;
+    # Passive health: after 3 failed attempts within 10s, an address rests
+    # for 10s. (Active health_check is NGINX Plus only.)
+    server web.bb.internal:8443 resolve max_fails=3 fail_timeout=10s;
+    # Idle connections kept open per worker, so requests skip the handshake.
+    keepalive 16;
+}`
+
+const nginxServerCode = `server {
+    listen 8443 ssl;
+    http2 on;
+    server_name edge.bb.internal;
+    ssl_certificate /etc/bb/tls/tls.crt;
+    ssl_certificate_key /etc/bb/tls/tls.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_connect_timeout 5s;
+    # ... locations
+}`
+
+const nginxLocationCode = `# Every other request -> web.
+location / {
+    proxy_pass https://be_web;
+    # Re-encrypt: verify the backend against the lab CA as web.bb.internal,
+    # and send that name as SNI.
+    proxy_ssl_verify on;
+    proxy_ssl_trusted_certificate /etc/bb/ca.pem;
+    proxy_ssl_verify_depth 2;
+    proxy_ssl_server_name on;
+    proxy_ssl_name web.bb.internal;
+    proxy_ssl_protocols TLSv1.2 TLSv1.3;
+    proxy_ssl_session_reuse on;
+}
+
+# /v1/ -> api, with the prefix replaced by /.
+location /v1/ {
+    proxy_pass http://be_v1/;
+}`
+
+const nginxStreamCode = `stream {
+    resolver 127.0.0.11 valid=5s ipv6=off;
+
+    map $ssl_preread_server_name $bb_passthrough {
+        payments.bb.internal tls_payments;
+        # Names no upstream claims go nowhere: the connection is closed.
+        default bb_unknown_sni;
+    }
+
+    upstream bb_unknown_sni {
+        server 127.0.0.1:1 down;
+    }
+
+    upstream tls_payments {
+        zone tls_payments 64k;
+        server payments.bb.internal:8443 resolve max_fails=3 fail_timeout=10s;
+    }
+
+    server {
+        listen 9443;
+        ssl_preread on;
+        proxy_connect_timeout 5s;
+        proxy_pass $bb_passthrough;
+    }
+}`
+
+const nginxChangeCode = `upstream be_web {
+    zone be_web 64k;
+    least_conn;                      # or one of the methods below
+    server web.bb.internal:8443 resolve max_fails=3 fail_timeout=10s;
+    keepalive 16;
+}
+
+# Other open-source methods, one per upstream:
+#   ip_hash;                         client IP (http only)
+#   hash $http_x_user consistent;    ketama consistent hashing on a key
+#   random two least_conn;           power of two choices
+#   sticky cookie srv_id expires=1h; a cookie per client (since 1.29.6)`
+
+// nginxNextUpstreamCode opts a learner-owned config into counting HTTP
+// error statuses as failed attempts; the generated config keeps the default.
+const nginxNextUpstreamCode = `location / {
+    proxy_pass https://be_web;
+    # Count these answers as failed attempts too (towards max_fails), and
+    # retry the request on the next server. error and timeout always count.
+    proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
+    # At most one retry, within 5 seconds.
+    proxy_next_upstream_tries 2;
+    proxy_next_upstream_timeout 5s;
+}`
+
+templ nginxIntro() {
+	@docP() {
+		NGINX is a web server, reverse proxy and load balancer. A master process reads the configuration and a few event-driven worker processes handle the connections; it serves a large share of the web's traffic, often as the first hop in front of applications.
+	}
+	@docP() {
+		Its configuration is nested blocks of directives. The @docCodeWord("http") block handles requests: servers listen on ports, locations match paths, and @docCodeWord("proxy_pass") sends requests to an @docCodeWord("upstream") group, balanced round robin unless told otherwise. The @docCodeWord("stream") block does the same for raw TCP and UDP, without looking inside.
+	}
+	@docP() {
+		Choose it when you also serve static files or cache responses, when you want the config most engineers already recognise, or for straightforward HTTP balancing. Know the line between open source and NGINX Plus: re-resolving upstream names (since 1.27.3) and sticky cookies (since 1.29.6) are open source; active health checks and the live API with per-server counters are Plus only.
+	}
+}
+
+templ nginxAnatomy() {
+	@docLead() {
+		Breadboard generates a commented @docCodeWord("nginx.conf") per NGINX service. These are its parts, from the example in @docLink("/docs/nginx/in-breadboard", "NGINX in Breadboard"): web re-encrypted, api terminated as /v1/, payments passed through.
+	}
+	@docH2("contexts", "Contexts and directives")
+	@docList(
+		"A directive is a name, arguments and a semicolon. A block directive such as http { … } is a context that holds others.",
+		"Settings inherit downwards: a proxy_set_header in server applies to every location in it that sets none of its own.",
+		"main (the top level) holds process settings; events holds connection processing; http and stream hold the proxying.",
+	)
+	@docH2("main", "The main context")
+	@docCode("nginx.conf", nginxMainCode)
+	@docList(
+		"daemon off keeps NGINX in the foreground, so the container lives as long as it does. The container runs nginx -c on this file directly, skipping the image's conf.d scripts.",
+		"worker_processes 1: one worker, so round robin is one sequence you can watch.",
+		"resolver points at Docker's DNS with a 5-second validity, so names are re-resolved every 5 seconds.",
+		"The loopback server on 8404 answers /healthz for the container's health check and /stub_status for the NGINX status tab.",
+	)
+	@docH2("upstreams", "Upstreams")
+	@docCode("nginx.conf", nginxUpstreamCode)
+	@docList(
+		"zone puts the group in shared memory, which resolve requires.",
+		"resolve re-resolves web.bb.internal at runtime (open source since 1.27.3): every replica's address becomes a server, and NGINX follows scaling.",
+		"max_fails=3 fail_timeout=10s is passive health: 3 failed attempts within 10 seconds and the address rests for 10 seconds; the failed request is tried on the next server. A failed attempt is what proxy_next_upstream says it is, error timeout by default: a connection, send or response-header error or timeout, or an invalid response, not an HTTP 5xx (see Health checks).",
+		"keepalive 16 keeps idle connections to the backends per worker; it needs proxy_http_version 1.1 and an empty Connection header, set in the server.",
+	)
+	@docH2("server", "The HTTPS server")
+	@docCode("nginx.conf", nginxServerCode)
+	@docP() {
+		The server decrypts with the service's certificate and offers HTTP/2. The headers tell the backend the client spoke HTTPS, who it was, and which host it asked for. The container's health check sends a @docCodeWord("TRACE") to 8443 with a verified handshake; NGINX refuses that method itself with 405, so no backend is called, and the access log leaves the check out by its user agent.
+	}
+	@docH2("locations", "Locations and proxy_pass")
+	@docCode("nginx.conf", nginxLocationCode)
+	@docList(
+		"The longest matching prefix location wins, so /v1/ beats /.",
+		"proxy_pass with a URI part (the trailing / in http://be_v1/) replaces the matched prefix: /v1/users reaches the app as /users. Without one (https://be_web) the path passes unchanged.",
+		"Re-encrypt: proxy_ssl_verify on checks the chain against the lab CA, proxy_ssl_server_name on sends SNI, and proxy_ssl_name sets both the SNI and the name verified, the target's name rather than the upstream group's.",
+		"Terminate: proxy_pass http:// to an upstream that resolves the segment alias, api.plain.bb.internal.",
+	)
+	@docH2("stream", "The stream block")
+	@docCode("nginx.conf", nginxStreamCode)
+	@docP() {
+		@docCodeWord("ssl_preread on") reads the ClientHello without terminating TLS and sets @docCodeWord("$ssl_preread_server_name")&#46; The @docCodeWord("map") turns the name into an upstream group, and @docCodeWord("proxy_pass $bb_passthrough") forwards the connection still encrypted. Unknown names map to a group whose only server is down, so the connection is closed. The official image builds the stream and ssl_preread modules in.
+	}
+	@docH2("change", "Changing it")
+	@docCode("nginx.conf", nginxChangeCode)
+	@docList(
+		"weight=3 on a server gives it three times the share; backup makes it take traffic only when the others are down; down takes it out.",
+		"split_clients hashes a key into percentages, for a canary that keeps each user on one version.",
+		"mirror sends a copy of each request to another location; its responses are ignored.",
+		"Not in open source 1.30: health_check (active checks), slow_start, least_time, and the API with per-server counters.",
+	)
+	@docH2("validate", "Checking a config")
+	@docP() {
+		NGINX tests a configuration without starting:
+	}
+	@docTerminal("docker run --rm -v \"$PWD/edge:/cfg:ro\" nginx:1.30.6-alpine nginx -t -c /cfg/nginx.conf")
+	@docP() {
+		Outside Breadboard the certificate files and DNS names do not exist, so @docCodeWord("-t") reports them; run it with @docCodeWord("docker exec") in the running service against @docCodeWord("/etc/bb/config/nginx.conf") to check everything.
+	}
+}
+
+templ nginxInBreadboard() {
+	@docLead() {
+		What Breadboard runs for @docCodeWord("type: nginx"), and how its upstreams, TLS modes and health checks are wired.
+	}
+	@docH2("image", "Image and limits")
+	@docList(
+		"Image nginx:1.30.6-alpine (stream and ssl_preread built in; wget and curl, no openssl), 64m of memory and 0.25 CPU.",
+		"The container runs nginx -c /etc/bb/config/nginx.conf with daemon off. Logs go to stdout and stderr: bb logs <name>.",
+		"Listeners: 8443 for TLS at L7 with the service's certificate; 9443 in the stream block, only when an upstream is passthrough; 127.0.0.1:8404 for /healthz and /stub_status, unreachable from other containers.",
+	)
+	@docH2("upstreams", "Upstreams and routes")
+	@docCode("experiment.yaml", proxyExampleSpec("nginx", "nginx.conf"))
+	@proxyRoutes()
+	@docP() {
+		Each decrypted upstream becomes an @docCodeWord("upstream be_<route>") group; each passthrough upstream a stream group @docCodeWord("tls_<route>")&#46;
+	}
+	@docH2("modes", "The three TLS modes")
+	@docTable([]string{"Mode", "What the generated config does"},
+		[]string{"re-encrypt (on)", "proxy_pass https://be_<route>; proxy_ssl_verify on, proxy_ssl_trusted_certificate /etc/bb/ca.pem, proxy_ssl_server_name on, proxy_ssl_name <target>"},
+		[]string{"terminate (off)", "proxy_pass http://be_<route>; the group resolves <app>.plain.<domain> on the app's private segment"},
+		[]string{"passthrough", "stream server on 9443 with ssl_preread on; map $ssl_preread_server_name to tls_<route>"},
+	)
+	@docH2("health", "Health checks")
+	@docList(
+		"Passive only: max_fails=3 fail_timeout=10s per server. A stopped replica is noticed by the requests that hit it (and retried elsewhere), and it leaves the rotation when DNS stops returning it.",
+		"What counts as a failure is set by proxy_next_upstream, which the generated config leaves at its default, error timeout: failing to connect, to send the request or to read the response header, a timeout at any of those steps, or an empty or invalid response. Transport and protocol failures only. A replica that answers HTTP 500 to every request has answered, so it is never ejected and keeps its share.",
+		"Active health_check is NGINX Plus only, so open-source NGINX cannot probe a replica; a running but broken replica is caught only by failures that proxy_next_upstream counts.",
+		"The container's own health check: /healthz on loopback answers 200, and curl completes a verified handshake on 8443 with a TRACE that NGINX refuses itself (405).",
+	)
+	@docP() {
+		To eject on application errors too, own the config (below) and list the statuses in @docCodeWord("proxy_next_upstream")&#46; The same directive decides retries, so every listed answer is also retried on the next server.
+	}
+	@docCode("nginx.conf", nginxNextUpstreamCode)
+	@docList(
+		"A retry repeats the request. NGINX never passes a POST, PATCH or LOCK to the next server once it has been sent (unless you add non_idempotent), but a GET or PUT is retried, so its handler must be safe to run twice.",
+		"A retry is possible only while nothing has reached the client, and it adds the failed attempt's latency to the request. Cap it with proxy_next_upstream_tries and proxy_next_upstream_timeout (both unlimited by default).",
+		"http_403 and http_404 are never failed attempts, and http_429 counts only when listed: a replica shedding load would otherwise be ejected for doing its job.",
+	)
+	@docH2("env", "What your app receives")
+	@proxyEnv()
+	@docH2("see", "Seeing it work")
+	@docList(
+		"In bb serve, the service's NGINX status tab reads stub_status (active, reading, writing and waiting connections; accepts, handled, requests) and shows, per upstream, what each instance's name resolves to inside the container. MCP clients use nginx_status.",
+		"Open-source NGINX has no per-upstream or per-server counters; the access log in bb logs <name> has every request.",
+	)
+	@docTerminal("docker exec bb-lab-edge-1 wget -qO- http://127.0.0.1:8404/stub_status")
+	@docH2("own", "Owning the config")
+	@docP() {
+		The generated file is at @docCodeWord(".bb/runtime/config/<name>/nginx.conf")&#46; Copy it next to @docCodeWord("experiment.yaml"), edit it, and set @docCodeWord("file:") on the service; it is copied in at every @docCodeWord("bb up"), and an edit recreates the service. From then on your file wins over the spec's upstreams.
+	}
+	@docList(
+		"Keep the status server on 127.0.0.1:8404 with /healthz answering 200 and /stub_status for the status tab.",
+		"Keep a TLS listener on 8443 with /etc/bb/tls/tls.crt and tls.key that answers the health check's TRACE.",
+		"The lab CA (/etc/bb/ca.pem) and the trust bundle stay mounted.",
+	)
+}

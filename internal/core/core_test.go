@@ -230,7 +230,13 @@ func TestApplyStarterRefusesAnAppNameClash(t *testing.T) {
 
 func setupStarter(t *testing.T) *harness {
 	t.Helper()
-	h := newHarness(t)
+	return withStarter(newHarness(t))
+}
+
+// withStarter initialises h's project with kafka/producer-consumer.
+func withStarter(h *harness) *harness {
+	t := h.t
+	t.Helper()
 	h.init()
 	if _, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: "kafka/producer-consumer"}); err != nil {
 		t.Fatal(err)

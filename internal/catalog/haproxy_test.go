@@ -142,6 +142,7 @@ func TestHAProxyConfigChecks(t *testing.T) {
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Skip("Docker is not available")
 	}
+	t.Parallel()
 	e, _ := Lookup("haproxy")
 	now := time.Now()
 	ca, err := pki.NewCA("bb.internal", now)

@@ -156,6 +156,10 @@ func TestUpFailures(t *testing.T) {
 			// Poll 1 records the baseline (and, when all are healthy, starts
 			// the settle window); poll 3 sees the restart.
 			h.rt.restartOnPoll = map[string]int{"consumer": 3}
+			// A settle window far longer than three polls, so poll 3 falls
+			// inside it however slowly a loaded machine polls; Up still
+			// returns at poll 3.
+			h.eng.startupSettle = time.Minute
 			_, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir})
 			if !errors.Is(err, ErrUnhealthy) || !strings.Contains(err.Error(), "consumer restarted during startup") || !strings.Contains(err.Error(), "bb logs consumer") {
 				t.Fatalf("error = %v", err)
@@ -490,7 +494,7 @@ func TestDownStatusLogs(t *testing.T) {
 }
 
 func TestConfigAndDomainChange(t *testing.T) {
-	h := setupStarter(t)
+	h := withStarter(newEnvHarness(t)) // it sets BB_DOMAIN
 	got, err := h.eng.ConfigGet(h.ctx(), ConfigGetRequest{Key: "domain"})
 	if err != nil || got.Settings[0].Value != "bb.internal" || got.Settings[0].Source != "default" {
 		t.Fatalf("ConfigGet = %+v %v", got, err)

@@ -342,6 +342,7 @@ func needDocker(t *testing.T) {
 // real certificate from a lab CA. It needs Docker.
 func TestEnvoyConfigValidates(t *testing.T) {
 	needDocker(t)
+	t.Parallel()
 	e, _ := Lookup("envoy")
 	one, none, odd := haproxyServer(), haproxyServer(), haproxyServer()
 	one.Upstreams, none.Upstreams = one.Upstreams[:1], nil
@@ -371,7 +372,9 @@ func TestEnvoyConfigValidates(t *testing.T) {
 // It needs Docker.
 func TestTraefikConfigLoads(t *testing.T) {
 	needDocker(t)
+	t.Parallel()
 	t.Run("every mode", func(t *testing.T) {
+		t.Parallel()
 		run, api := runTraefik(t, haproxyServer(), "default-web@file")
 		for _, want := range []string{"route-web@file", "default-web@file", "route-api@file"} {
 			if body := api("/api/http/routers"); !strings.Contains(body, `"name":"`+want+`"`) {
@@ -389,6 +392,7 @@ func TestTraefikConfigLoads(t *testing.T) {
 	// A route named like the first route's fallback: every router still
 	// has its own key (review M2).
 	t.Run("route names", func(t *testing.T) {
+		t.Parallel()
 		_, api := runTraefik(t, traefikCollidingServer(), "default-web@file")
 		for _, want := range []string{"route-web@file", "route-web-default@file", "default-web@file"} {
 			if body := api("/api/http/routers"); !strings.Contains(body, `"name":"`+want+`"`) {
@@ -400,6 +404,7 @@ func TestTraefikConfigLoads(t *testing.T) {
 	// included: template text in a reason, valid or not, stays literal and
 	// every router loads (review M1).
 	t.Run("template text in reasons", func(t *testing.T) {
+		t.Parallel()
 		s := haproxyServer()
 		s.Upstreams[1].Reason = traefikTemplateReason
 		_, api := runTraefik(t, s, "default-web@file")
@@ -410,6 +415,7 @@ func TestTraefikConfigLoads(t *testing.T) {
 		}
 	})
 	t.Run("no upstream", func(t *testing.T) {
+		t.Parallel()
 		none := haproxyServer()
 		none.Upstreams = nil
 		run, _ := runTraefik(t, none, "no-upstream@file")

@@ -68,13 +68,24 @@ An Envoy sidecar with `transparent` captures all of its app's TCP traffic, so th
 
 ### Proxy and relay modes (Phase 5)
 
-Proxies are infra services with `upstream` edges to other infra services. Each upstream edge carries its own TLS policy, which yields the standard patterns:
+Proxies are infra services (catalog entries marked as proxies) with **upstream** edges to apps (every replica) and to other infra services, declared in `services.<name>.upstreams` ([`spec.md`](spec.md#proxies-and-upstreams)). Clients always reach a proxy over TLS: an HTTP proxy serves its own certificate on `8443`, and on `9443` routes passthrough TLS by SNI. Each upstream edge carries its own TLS mode:
 
-| Pattern | Client → proxy | Proxy → backend |
+| Mode (`tls.mode`) | Client → proxy | Proxy → backend |
 |---|---|---|
-| Terminate | TLS | `off` with reason; backend on a private segment |
-| Passthrough | TLS, routed by SNI without decrypting | same TLS session, backend's own cert |
-| Re-encrypt | TLS | TLS; proxy verifies backend against the CA |
+| `on`, re-encrypt (default) | TLS with the proxy's certificate | TLS; the proxy verifies the backend against the lab CA with SNI and the verified name set to the backend's shared name `<target>.<domain>` (on every replica's certificate) |
+| `off`, terminate | TLS with the proxy's certificate | plaintext, with a required `reason`, on the private segment `plain-<target>` shared only by the target and the proxies that asked for plaintext |
+| `passthrough` | TLS, routed by SNI without decrypting | the same TLS session; the client verifies the backend's own certificate |
+
+- **Plaintext hops to infra** use the target's existing plaintext listener and segment, exactly as a `tls.mode: off` `uses` edge does; the proxy is one more client on `plain-<target>`.
+- **Plaintext hops to apps.** The app (every replica) joins `plain-<app>`, an `internal` network with a `/24` from the same allocator and `.bb/state.json` record as other segments. Replica `n` gets the static address `.10 + (n-1)` (a single instance `.10`), the alias `<app>.plain.<domain>` and its own `<instance>.plain.<domain>`; Docker hands out only the upper half (`ip_range`, `.128/25`) to the proxies on it, so a replica added later always finds its address free (D-122). The app receives `BB_PLAIN_LISTEN_ADDR=<its segment address>:<port>` to bind its plaintext listener there.
+- **Confinement is enforced, not voluntary** (D-121). An app that is the target of a terminate hop runs as a pod (holder `<instance>-pod`), and its init container `<instance>-netinit` (built like transparent mode's, `FROM alpine:3.24.4` with iptables, the only container holding `NET_ADMIN`) installs a filter `INPUT` chain `BB_PLAIN` that drops TCP to the plaintext port unless it is addressed to the instance's segment address. It runs before the app starts (`service_completed_successfully`), and the app holds no `NET_ADMIN`, so it cannot remove the rule. An app that ignores `BB_PLAIN_LISTEN_ADDR` and binds every interface is still reachable on that port only through the segment, which holds only the app and the terminating proxies. The pod's `breadboard.capture` label is `guard`, so switching the guard on or off recreates the namespace. An app in transparent mode cannot be a terminate target (its pod admits only declared TLS listeners).
+- Every plaintext hop is reported like other plaintext edges: a warning in `bb up` and `bb status` (`plaintext edge <proxy> -> <target>:<port>`) and the reason on the segment in the compose file. (The UI draws proxy edges, dashed red for terminate, once the architecture graph learns them; wave B.)
+- A proxy's admin, stats or monitor endpoint binds to `127.0.0.1` only; explorers read it through `docker exec` (ADR-0012). PgBouncer's admin console shares its client port, so its HBA file admits the `pgbouncer` database from `127.0.0.1` only (D-120).
+- User text that reaches a generated config (a `tls.reason`) is rendered as comment lines through `catalog.Comment`, so a multi-line reason cannot become a directive (D-123).
+- **The PgBouncer pool** requires TLS from apps (`client_tls_sslmode = require`; apps use `verify-full` against the pool's name) and, in mode `on`, connects to Postgres with `verify-full`. Apps log in with the Postgres service's application role; the password reaches the pool only through its environment and a `0600` auth file written at start, never a generated file.
+- A user-owned `file` replaces only the proxy's config; its certificate, the CA and the trust bundle stay mounted by Breadboard.
+- No proxy gets the Docker socket. Traefik is configured by its file provider only, so a proxy compromised through its routing config cannot reach the Docker API.
+- In the generated Envoy and Traefik configs, text from `experiment.yaml` (an upstream's `reason`) appears only inside comments, and line breaks or control characters in it cannot end the comment (D-114).
 
 ## Extension points for mTLS and multiple CAs
 

@@ -41,15 +41,16 @@ Operations (Phase 1):
 |---|---|
 | `Init` | Create `experiment.yaml` and `.bb/`; create `BB_HOME` and the CA if missing. |
 | `Catalog`, `Learn` | List catalog entries; return an entry's learning notes. |
-| `AddService`, `RemoveService` | Edit `experiment.yaml`. |
+| `AddService`, `RemoveService` | Edit `experiment.yaml`. Removing a service or app still listed in an app's `uses` or a proxy's `upstreams` is refused. |
 | `Starters`, `ApplyStarter` | List starters; write starter code and update the spec. |
 | `Up`, `Down` | Reconcile, materialize, run, wait for health; stop and optionally delete data. |
-| `Status`, `Logs` | Per-service state, health, resources, TLS warnings; log stream. Each app instance row carries its app, instance number, replica count and sidecars, and is followed by its sidecars' rows (type, ports, env they give the app, transparent mode); the pod's namespace holder is never a row but decides the instance's state while it is down. Edges carry `Via` and `ToApp` for Envoy outbound targets (Phase 5). |
+| `Status`, `Logs` | Per-service state, health, resources, TLS warnings; log stream. Each app instance row carries its app, instance number, replica count and sidecars, and is followed by its sidecars' rows (type, ports, env they give the app, transparent mode); the pod's namespace holder is never a row but decides the instance's state while it is down. Edges carry `Via` and `ToApp` for Envoy outbound targets (Phase 5). A proxy's row lists its upstream edges, each with its `Mode` (`on`, `off`, `passthrough`); every terminate hop is a plaintext warning (Phase 5). |
 | `Creds`, `CA` | Generated credentials and connection strings; CA details. |
 | `PostgresTables`, `RedisKeys`, `ConsulCatalog`, `KafkaTopics`, `S3Buckets` | Read-only explorers for the web UI: each runs the service's own CLI tool with `docker exec` and parses its output (ADR-0012) (Phase 3). |
 | `EnvoyClusters`, `PgBouncerPools` | Read-only sidecar explorers (Phase 5): Envoy's admin API (`/clusters`, `/stats`, `/listeners` over bash `/dev/tcp`, host addresses mapped to replicas with `getent` inside the sidecar) and PgBouncer's `SHOW POOLS` / `SHOW STATS` through `psql` inside the sidecar, both with `docker exec` (ADR-0012). They take an app, an instance, or the sidecar's service name. |
+| `HAProxyStats`, `TraefikRoutes`, `NginxStatus` | Read-only proxy explorers (Phase 5), each through `docker exec` against the proxy's loopback-only endpoint (ADR-0012): HAProxy's stats CSV (per backend and server: the replica at its address, status, last check, sessions, picks, bytes, errors), Traefik's API (routers, services, each server's UP/DOWN), NGINX `stub_status` (open source has no per-server counters) with what each upstream resolves to. Backends are matched to upstreams through `catalog.Proxy.Unit`. `EnvoyClusters` and `PgBouncerPools` also take an infra `envoy` or `pgbouncer` service. |
 | `StarterDetails` | A starter's rendered files and apps without writing anything, for the web UI's starter pages (Phase 3). |
-| `ServiceDetails` | Read-only view of one service for the web UI: listeners, who uses it, the env apps receive (secret values never returned), its certificate (Phase 3). For an app: its instances and its sidecars (Phase 5); for a sidecar: what it is. |
+| `ServiceDetails` | Read-only view of one service for the web UI: listeners, who uses it (apps, and proxies with it as an upstream), the env apps receive (secret values never returned), its certificate (Phase 3). For an app: its instances and its sidecars (Phase 5); for a sidecar: what it is; for a proxy: its upstreams with mode, port, instances and route (Phase 5). |
 | `ConfigGet`, `ConfigSet` | Install settings. |
 | `Migrate` | Upgrade `experiment.yaml` to the current spec version. |
 | `ExportCompose` | Write a standalone compose stack. |
@@ -71,7 +72,7 @@ The web UI and MCP phases add no core logic of their own; if a wrapper needs som
 ## Pipeline
 
 1. **Load** `experiment.yaml` ([`spec.md`](spec.md)), the source of truth for the experiment. Validate with `gate` checks.
-2. **Resolve** the spec against the catalog into the resolved model: defaults applied, edges derived from `uses` (and from Envoy sidecars' outbound targets), listeners and segments computed, TLS policy evaluated ([`security.md`](security.md)), app replicas expanded into instances, sidecars resolved against the sidecar catalog.
+2. **Resolve** the spec against the catalog into the resolved model: defaults applied, edges derived from `uses` (and from Envoy sidecars' outbound targets and proxies' `upstreams`), listeners and segments computed, TLS policy evaluated ([`security.md`](security.md)), app replicas expanded into instances, sidecars resolved against the sidecar catalog.
 3. **Reconcile state**: ensure the CA, secrets, and leaf certificates exist; issue or reissue as needed.
 4. **Materialize** into a target: the runtime compose project, an export, or (later) another platform.
 5. **Run** (runtime target only): `docker compose -p bb-<experiment> -f … up -d`, then wait for health.
@@ -141,15 +142,16 @@ Every file Breadboard owns carries a format version, and every format only moves
 - Compose projects are named after the experiment, so two directories with the same experiment name would share one project. `bb up` and `bb down` refuse to run when Docker holds containers, networks, or volumes labeled with the same name but another experiment id.
 - Ports: nothing is published to the host by default. A port is published only when the spec asks for it, always bound to `127.0.0.1`.
 - Replicas: an app with `replicas: N` renders services `<app>-1` … `<app>-N` (ADR-0016), each with the aliases `<app>-<n>.<domain>` and `<app>.<domain>`.
+- Proxies (Phase 5): a proxy is an infra service with no data volume and no `depends_on` on its upstreams; it finds them through Docker's DNS at runtime. Its generated config (or the user's `file`, copied in at each render) is under `config/<proxy>/`. An app behind a terminating proxy runs as a pod: its holder joins `plain-<app>` with a static address per replica (the segment's `ip_range` is the upper half), and `<instance>-netinit` installs the plaintext guard (D-121). An existing network whose addressing changed (an app segment without its `ip_range`, like the default network's subnet) is recreated by `bb up`: containers stop, volumes stay.
 
 ### Pods
 
-An app with sidecars becomes a pod (ADR-0015). For each instance the compose file has:
+An app with sidecars becomes a pod (ADR-0015), and so does the target of a terminating proxy (D-121). For each instance the compose file has:
 
 | Service | Role |
 |---|---|
 | `<app>-pod` | Namespace holder (`alpine:3.24.4`, `sleep infinity` with `init: true`, health check `true`, `16m`). Owns the networks, aliases and published ports that the app container owns outside a pod. Label `breadboard.kind=pod`. |
-| `<app>-netinit` | Transparent mode only: one-shot init container built from a generated Dockerfile (`build/<app>-netinit/` in the bundle), the only holder of `NET_ADMIN`, `restart: "no"`. Label `breadboard.kind=init`. |
+| `<app>-netinit` | Transparent mode, or the plaintext guard of a terminate target: one-shot init container built from a generated Dockerfile (`build/<app>-netinit/` in the bundle), the only holder of `NET_ADMIN`, `restart: "no"`. Label `breadboard.kind=init`. |
 | `<app>-<sidecar>` | Each sidecar, from its type's `Render` hook, with the app's certificate. |
 | `<app>` | The app, name unchanged, so `bb logs <app>` keeps working. |
 
@@ -173,7 +175,7 @@ Not part of Phase 1. Both are wrappers over the core API above.
   | Kind | Tools |
   |---|---|
   | About bb | `guide` (embedded agent guide), `version`, `catalog`, `learn`, `starters`, `starter_details` (every file's content), `ca`, `config_get` |
-  | Inspect | `status`, `logs` (no follow; default 200, at most 2,000 lines per service), `creds` (with values, D-071), `service_details`, `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets`, `envoy_clusters`, `pgbouncer_pools` |
+  | Inspect | `status`, `logs` (no follow; default 200, at most 2,000 lines per service), `creds` (with values, D-071), `service_details`, `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets`, `envoy_clusters`, `pgbouncer_pools` (sidecars and infra services), `haproxy_stats`, `traefik_routes`, `nginx_status` |
   | Change | `init`, `add_service`, `apply_starter`, `migrate`, `config_set`, `export_compose`, `up` |
   | Destructive | `remove_service`, `down` (with `volumes`, deletes data) |
 

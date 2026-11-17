@@ -1,0 +1,64 @@
+# gw/grpc-routing
+
+gRPC through a gateway. A gRPC call is an HTTP/2 `POST` to `/<package>.<Service>/<Method>`, so a gateway that speaks HTTP/2 can route calls by service or method, balance them across replicas and put a deadline on one method, all on one listener. Here [Envoy](https://www.envoyproxy.io/docs/envoy/v1.40.2/intro/arch_overview/other_protocols/grpc) does it for two gRPC services.
+
+- `cmd/grpc-catalog`: serves `catalog.v1.Catalog` as two replicas: `GetItem` answers at once, `Search` takes 800 ms. Every answer names the replica in the `x-served-by` header.
+- `cmd/grpc-inventory`: serves `inventory.v1.Inventory/CheckStock`.
+- `cmd/grpc-client`: one client connection to `grpc-edge`, verified against the lab CA. Every 5 seconds it calls `GetItem` four times, `CheckStock` once, `Search` once, and `billing.v1.Billing/Charge`, a service nobody serves, with a 2-second deadline on each call.
+- `proto/*.proto`: the two contracts. The messages are protobuf well-known types (`StringValue` in, `Struct` out), so the starter needs no `protoc` step: each server describes its service to grpc-go with a `grpc.ServiceDesc`, which is what generated code does, and the client calls `conn.Invoke`, which is what generated stubs do.
+- `envoy.yaml`: the gateway's config, yours to edit. `experiment.yaml` points `services.grpc-edge.file` at it.
+
+Libraries: [`google.golang.org/grpc`](https://pkg.go.dev/google.golang.org/grpc) v1.85.0 and [`google.golang.org/protobuf`](https://pkg.go.dev/google.golang.org/protobuf) v1.36.12.
+
+## How it works
+
+```yaml
+routes:
+  - match: {path: /catalog.v1.Catalog/Search, grpc: {}}
+    route:
+      cluster: catalog
+      max_stream_duration:
+        max_stream_duration: 0.5s
+        grpc_timeout_header_max: 0.5s
+  - match: {prefix: /catalog.v1.Catalog/, grpc: {}}
+    route: {cluster: catalog, max_stream_duration: {grpc_timeout_header_max: 5s}}
+  - match: {prefix: /inventory.v1.Inventory/, grpc: {}}
+    route: {cluster: inventory, max_stream_duration: {grpc_timeout_header_max: 5s}}
+```
+
+1. The client and Envoy negotiate HTTP/2 by ALPN in the TLS handshake. Every call is a stream on that one connection.
+2. Envoy matches each call's path: by method first (the first match wins), then by service. `grpc: {}` matches only requests with `content-type: application/grpc`.
+3. The clusters speak HTTP/2 to the servers (`http2_protocol_options`, offering `h2` by ALPN), over TLS verified against the lab CA, and check them with the standard gRPC health service. Envoy balances **calls**, not connections, so the client's single connection reaches both catalog replicas. A layer 4 proxy would pin it to one.
+4. The client sends its 2-second deadline as the `grpc-timeout` header. On the `Search` route Envoy caps it at 500 ms (`grpc_timeout_header_max`), passes the tighter deadline on to the server, and when it passes, cancels the call upstream and answers the client itself: `DEADLINE_EXCEEDED`, "downstream duration timeout". Without a `grpc-timeout` header, `max_stream_duration` applies.
+5. A call to a service no route names gets `UNIMPLEMENTED` from Envoy (its 404, mapped to a gRPC status).
+6. The `grpc_stats` filter counts calls per service, method and status code.
+
+```sh
+bb up
+bb logs grpc-client -f
+#   catalog.v1.Catalog/GetItem x4        -> OK x4, served by grpc-catalog-1=2 grpc-catalog-2=2
+#   inventory.v1.Inventory/CheckStock    -> OK after 1ms from grpc-inventory: map[in_stock:true sku:SKU-100 warehouse:east]
+#   catalog.v1.Catalog/Search            -> DeadlineExceeded after 500ms: downstream duration timeout
+#   billing.v1.Billing/Charge            -> Unimplemented after 0ms
+bb logs grpc-catalog-1 -f
+#   GetItem SKU-100 (deadline in 1.968s)
+#   Search "widgets" started (deadline in 500ms)
+#   Search "widgets" abandoned after 499ms: context canceled
+```
+
+The catalog sees the deadline Envoy set, not the client's, and stops working the moment Envoy cancels: the work would be thrown away anyway.
+
+In `bb serve`, open **grpc-edge** and its **Envoy clusters** tab: `catalog` has two healthy hosts. The per-method counters, with gRPC status codes, are on Envoy's admin API: `docker exec bb-{{.Experiment}}-grpc-edge-1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/15000; printf "GET /stats?filter=grpc HTTP/1.0\r\n\r\n" >&3; cat <&3'` shows `cluster.catalog.grpc.catalog.v1.Catalog.Search.4` (status 4, `DEADLINE_EXCEEDED`), `...GetItem.0` (`OK`), `.success`, `.failure` and `.total`.
+
+## Try this
+
+- **Give Search more time.** Set the `Search` route's limits to `1s` and `bb up`: Search now answers OK after about 800 ms, and `Search.0` starts counting.
+- **Tighten the client's deadline.** Set `callDeadline` in `cmd/grpc-client/main.go` to 300 ms and `bb up`. Search now fails after 300 ms, not 500: Envoy takes the smaller of the client's deadline and its cap. The deadline belongs to the caller; the gateway can only shorten it.
+- **Route one method elsewhere.** Add a route for `/catalog.v1.Catalog/GetItem` to the `inventory` cluster, above the catalog rule. The client's `GetItem` calls now fail with `UNIMPLEMENTED`, from grpc-inventory this time: it does not serve that service. Routing by method is how one method moves to a new service.
+- **Scale the catalog.** Set `replicas: 3` on `grpc-catalog` in `experiment.yaml` and `bb up`. Within a few seconds Envoy's DNS refresh finds the third replica, and the client's tally shows three names.
+
+## Break this
+
+- **Lose every deadline.** Delete the `max_stream_duration` block of the `Search` route, set `callDeadline` to `time.Hour` in `cmd/grpc-client/main.go` and `searchLatency` to `time.Hour` in `cmd/grpc-catalog/main.go`, then `bb up`. Each Search now holds a stream and a server goroutine for 15 seconds, until Envoy's default route `timeout` gives up: `Unavailable after 15002ms: upstream request timeout`. That is a 504 mapped to gRPC, not `DEADLINE_EXCEEDED`, and it took 30 times longer than the method needed to fail. Put the deadline on the caller and the method, not on the gateway's default.
+- **Remove the method route.** Delete the `Search` route. The call now falls under the service route and the client's own 2-second deadline: Search succeeds after 800 ms. A per-method limit only works above its service's rule.
+- **Stop one replica.** `docker stop bb-{{.Experiment}}-grpc-catalog-2-1`. Within seconds the gRPC health check and the DNS refresh take it out, and the client's `GetItem` calls all go to `grpc-catalog-1`. Calls sent before Envoy notices can fail with `UNAVAILABLE`: these routes have no retry policy. `bb up` starts it again.

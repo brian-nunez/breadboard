@@ -1,0 +1,127 @@
+// Command jwt-issuer is a tiny token issuer. At startup it generates an
+// ECDSA P-256 signing key that never leaves its memory, and it publishes
+// the matching public key as a JWKS (JSON Web Key Set). It signs short-lived
+// JWTs for the demo users; Envoy fetches the JWKS and checks every token's
+// signature at the edge, so no other service ever needs the key.
+//
+// A real issuer (Keycloak, Auth0, Dex, ...) authenticates the user first,
+// with a password, a passkey or an upstream identity provider. This one
+// skips that step: it signs a token for any demo user who asks.
+package main
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+// tokenTTL is how long a token is valid. Short lifetimes limit the damage
+// of a stolen token: a JWT cannot be revoked once issued.
+const tokenTTL = 2 * time.Minute
+
+// scopes are the demo users and what their tokens allow.
+var scopes = map[string]string{
+	"alice": "orders:read orders:write",
+	"bob":   "orders:read",
+}
+
+// audiences are the APIs this issuer signs tokens for. jwt-edge accepts
+// only jwt-api; a reports-api token is real and correctly signed, but it is
+// meant for another API.
+var audiences = map[string]bool{"jwt-api": true, "reports-api": true}
+
+// claims are the token's payload: the registered claims (iss, sub, aud,
+// exp, iat) plus a scope the backend reads.
+type claims struct {
+	Scope string `json:"scope"`
+	jwt.RegisteredClaims
+}
+
+func main() {
+	// The signing key exists only in this process. Restart the issuer and
+	// every token it signed before stops verifying once Envoy refetches.
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		log.Fatal(err)
+	}
+	jwk, kid := publicJWK(&key.PublicKey)
+	jwks, _ := json.Marshal(map[string]any{"keys": []any{jwk}})
+	// The issuer is this service's own HTTPS address; Envoy's provider
+	// accepts tokens whose iss claim is exactly this string.
+	issuer := "https://" + os.Getenv("BB_FQDN")
+
+	// The public half, for anyone who verifies tokens: Envoy fetches it
+	// through its issuer cluster and caches it.
+	http.HandleFunc("GET /.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("served the JWKS (kid %s) to %s", kid, r.RemoteAddr)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(jwks)
+	})
+
+	// POST /token?user=alice signs a token for a demo user, for jwt-api
+	// unless aud names another API.
+	http.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
+		user := r.URL.Query().Get("user")
+		scope, ok := scopes[user]
+		if !ok {
+			http.Error(w, "unknown user", http.StatusForbidden)
+			return
+		}
+		aud := r.URL.Query().Get("aud")
+		if aud == "" {
+			aud = "jwt-api"
+		}
+		if !audiences[aud] {
+			http.Error(w, "unknown audience", http.StatusBadRequest)
+			return
+		}
+		now := time.Now()
+		t := jwt.NewWithClaims(jwt.SigningMethodES256, claims{
+			Scope: scope,
+			RegisteredClaims: jwt.RegisteredClaims{
+				Issuer:    issuer,
+				Subject:   user,
+				Audience:  jwt.ClaimStrings{aud},
+				IssuedAt:  jwt.NewNumericDate(now),
+				ExpiresAt: jwt.NewNumericDate(now.Add(tokenTTL)),
+			},
+		})
+		// kid names the key in the JWKS that verifies this token.
+		t.Header["kid"] = kid
+		signed, err := t.SignedString(key)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("issued a token for %s (aud %s, scope %q, kid %s, expires in %s)", user, aud, scope, kid, tokenTTL)
+		fmt.Fprint(w, signed)
+	})
+
+	log.Printf("%s issuing ES256 tokens as %s with key %s; serving TLS on :8443", os.Getenv("BB_SERVICE"), issuer, kid)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}
+
+// publicJWK encodes an ECDSA P-256 public key as a JWK (RFC 7518 §6.2) and
+// names it by the start of its RFC 7638 thumbprint, a hash of the key, so
+// a new key always gets a new kid.
+func publicJWK(pub *ecdsa.PublicKey) (map[string]string, string) {
+	b, err := pub.Bytes() // 0x04 || X || Y, 32 bytes each
+	if err != nil {
+		log.Fatal(err)
+	}
+	enc := base64.RawURLEncoding.EncodeToString
+	x, y := enc(b[1:33]), enc(b[33:65])
+	sum := sha256.Sum256([]byte(`{"crv":"P-256","kty":"EC","x":"` + x + `","y":"` + y + `"}`))
+	kid := enc(sum[:])[:16]
+	return map[string]string{"kty": "EC", "crv": "P-256", "alg": "ES256", "use": "sig", "kid": kid, "x": x, "y": y}, kid
+}

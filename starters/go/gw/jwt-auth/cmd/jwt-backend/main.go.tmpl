@@ -1,0 +1,34 @@
+// Command jwt-backend is the API behind the gateway. It has no JWT code:
+// Envoy has already verified the token's signature, issuer, audience and
+// expiry, and forwards the claims it needs as plain headers. The backend
+// trusts those headers because, in this design, only Envoy can reach it
+// with a request. Calling it directly breaks that assumption (see the
+// README's "Break this").
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	http.HandleFunc("GET /api/orders", func(w http.ResponseWriter, r *http.Request) {
+		// Set by Envoy's claim_to_headers from the verified token.
+		sub, scope := r.Header.Get("X-Jwt-Sub"), r.Header.Get("X-Jwt-Scope")
+		// forward: false (the default) strips the token itself, so it never
+		// reaches code that does not need it.
+		log.Printf("GET /api/orders for sub=%s scope=%q (values of X-Jwt-Sub: %d; Authorization forwarded: %t)",
+			sub, scope, len(r.Header.Values("X-Jwt-Sub")), r.Header.Get("Authorization") != "")
+		if !strings.Contains(" "+scope+" ", " orders:read ") {
+			http.Error(w, "missing scope orders:read", http.StatusForbidden)
+			return
+		}
+		fmt.Fprintf(w, "%s: orders of sub=%s scope=%q\n", name, sub, scope)
+	})
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

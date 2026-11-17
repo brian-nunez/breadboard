@@ -1,0 +1,115 @@
+// Command grpc-client calls two gRPC services through one Envoy listener,
+// grpc-edge, over one HTTP/2 connection, every 5 seconds:
+//
+//   - catalog.v1.Catalog/GetItem four times, logging which replica answered
+//     each (Envoy balances calls, not connections);
+//   - inventory.v1.Inventory/CheckStock, routed to the other service by
+//     its name;
+//   - catalog.v1.Catalog/Search, which takes longer than the 500 ms Envoy
+//     allows that method, and ends DEADLINE_EXCEEDED;
+//   - billing.v1.Billing/Charge, a service no route names, which Envoy
+//     answers UNIMPLEMENTED.
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"maps"
+	"os"
+	"slices"
+	"strings"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/wrapperspb"
+)
+
+// callDeadline is the deadline the client sets on every call. grpc-go
+// sends it to Envoy as the grpc-timeout header.
+const callDeadline = 2 * time.Second
+
+func main() {
+	// GRPC_EDGE_URL=https://grpc-edge.<domain>:8443, from uses: [grpc-edge].
+	target := strings.TrimPrefix(os.Getenv("GRPC_EDGE_URL"), "https://")
+	// Verify Envoy's certificate against the lab CA in SSL_CERT_FILE, for
+	// the name in target. TLS also negotiates HTTP/2, which gRPC needs.
+	creds, err := credentials.NewClientTLSFromFile(os.Getenv("SSL_CERT_FILE"), "")
+	if err != nil {
+		log.Fatal(err)
+	}
+	// One client connection: every call below is a stream on it.
+	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	for round := 1; ; round++ {
+		log.Printf("round %d", round)
+		served := map[string]int{}
+		var failed []string
+		for i := range 4 {
+			by, _, err := call(conn, "/catalog.v1.Catalog/GetItem", fmt.Sprintf("SKU-%d", 100+i))
+			if err != nil {
+				failed = append(failed, status.Code(err).String())
+				continue
+			}
+			served[by]++
+		}
+		log.Printf("  %-36s -> OK x%d, served by %s%s", "catalog.v1.Catalog/GetItem x4", 4-len(failed), tally(served), failures(failed))
+		report("inventory.v1.Inventory/CheckStock", conn, "/inventory.v1.Inventory/CheckStock", "SKU-100")
+		report("catalog.v1.Catalog/Search", conn, "/catalog.v1.Catalog/Search", "widgets")
+		report("billing.v1.Billing/Charge", conn, "/billing.v1.Billing/Charge", "order-1")
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// call invokes a unary method by its full name with a StringValue and
+// returns the replica that answered (the x-served-by header), the reply and
+// the error. conn.Invoke is what generated client stubs call.
+func call(conn *grpc.ClientConn, method, arg string) (string, *structpb.Struct, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), callDeadline)
+	defer cancel()
+	var header metadata.MD
+	out := new(structpb.Struct)
+	err := conn.Invoke(ctx, method, wrapperspb.String(arg), out, grpc.Header(&header))
+	return strings.Join(header.Get("x-served-by"), ","), out, err
+}
+
+// report calls method once and logs the gRPC status, how long it took and
+// who answered: a replica's name, or the status message from Envoy.
+func report(label string, conn *grpc.ClientConn, method, arg string) {
+	start := time.Now()
+	by, out, err := call(conn, method, arg)
+	took := time.Since(start).Milliseconds()
+	if err != nil {
+		s := status.Convert(err)
+		msg := s.Message()
+		if msg != "" {
+			msg = ": " + msg
+		}
+		log.Printf("  %-36s -> %s after %dms%s", label, s.Code(), took, msg)
+		return
+	}
+	log.Printf("  %-36s -> OK after %dms from %s: %v", label, took, by, out.AsMap())
+}
+
+func tally(served map[string]int) string {
+	var parts []string
+	for _, k := range slices.Sorted(maps.Keys(served)) {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, served[k]))
+	}
+	return strings.Join(parts, " ")
+}
+
+func failures(codes []string) string {
+	if len(codes) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (failed: %v)", codes)
+}

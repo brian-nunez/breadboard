@@ -1,0 +1,135 @@
+// Command bff-api is a backend for frontend: an API shaped for one client's
+// screen. GET /bff/home/<user> calls bff-profile and bff-orders at the same
+// time, waits for both, and answers with only what the home screen shows:
+// the user's name and tier, their three latest orders, and how many are
+// still open. The client makes one call instead of two, over its slow
+// network, and downloads a fraction of the bytes.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+)
+
+// callTimeout bounds each call to a service. A slow service costs the
+// screen its part, not the whole answer (see home).
+const callTimeout = 300 * time.Millisecond
+
+// The services' own addresses. bff-api calls them directly, not through
+// the gateway: the fan-out stays inside the lab, one hop each. The default
+// client verifies their certificates against SSL_CERT_FILE.
+var (
+	domain     = domainOf(os.Getenv("BB_FQDN")) // bff-api.<domain>
+	profileURL = "https://bff-profile." + domain + ":8443/profile/"
+	ordersURL  = "https://bff-orders." + domain + ":8443/orders/"
+	client     = &http.Client{}
+)
+
+// home is the screen's whole model.
+type home struct {
+	Name         string    `json:"name"`
+	Tier         string    `json:"tier"`
+	RecentOrders []summary `json:"recent_orders"`
+	OpenOrders   int       `json:"open_orders"`
+	// Degraded names the parts that are missing because a service failed
+	// or was too slow; the screen shows the rest.
+	Degraded []string `json:"degraded,omitempty"`
+}
+
+type summary struct {
+	ID     string  `json:"id"`
+	Status string  `json:"status"`
+	Total  float64 `json:"total"`
+}
+
+func main() {
+	http.HandleFunc("GET /bff/home/{user}", func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		user, id := r.PathValue("user"), r.Header.Get("X-Request-Id")
+
+		// Fan out: both calls start now and run at the same time, so the
+		// screen waits for the slower one, not for the sum of both.
+		var (
+			profile struct{ Name, Tier string }
+			orders  struct {
+				Orders []struct {
+					ID     string  `json:"id"`
+					Status string  `json:"status"`
+					Total  float64 `json:"total"`
+				} `json:"orders"`
+			}
+			profileErr, ordersErr   error
+			profileTook, ordersTook time.Duration
+			wg                      sync.WaitGroup
+		)
+		wg.Go(func() { profileTook, profileErr = fetch(r.Context(), profileURL+user, id, &profile) })
+		wg.Go(func() { ordersTook, ordersErr = fetch(r.Context(), ordersURL+user, id, &orders) })
+		wg.Wait()
+		took := time.Since(start)
+
+		// Merge. Without a profile there is no screen to show; without
+		// orders the screen still renders, with that part marked missing.
+		if profileErr != nil {
+			log.Printf("home for %s (request %s): profile failed: %v", user, id, profileErr)
+			http.Error(w, "profile unavailable", http.StatusBadGateway)
+			return
+		}
+		h := home{Name: profile.Name, Tier: profile.Tier, RecentOrders: []summary{}}
+		if ordersErr != nil {
+			h.Degraded = append(h.Degraded, "orders")
+		}
+		for i, o := range orders.Orders {
+			if i < 3 {
+				h.RecentOrders = append(h.RecentOrders, summary{o.ID, o.Status, o.Total})
+			}
+			if o.Status == "processing" || o.Status == "shipped" {
+				h.OpenOrders++
+			}
+		}
+		log.Printf("home for %s (request %s): fanned out to profile (%s) and orders (%s) concurrently, answered in %s%s",
+			user, id, profileTook.Round(time.Millisecond), ordersTook.Round(time.Millisecond), took.Round(time.Millisecond), note(ordersErr))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(h)
+	})
+	log.Printf("%s serving TLS on :8443; services at %s and %s", os.Getenv("BB_SERVICE"), profileURL, ordersURL)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}
+
+// fetch GETs url within callTimeout, passing the request ID on so every
+// service's log line can be tied to the client request, and decodes the
+// JSON answer into v.
+func fetch(ctx context.Context, url, id string, v any) (time.Duration, error) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req.Header.Set("X-Request-Id", id)
+	resp, err := client.Do(req)
+	if err != nil {
+		return time.Since(start), err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return time.Since(start), fmt.Errorf("%s", resp.Status)
+	}
+	return time.Since(start), json.NewDecoder(resp.Body).Decode(v)
+}
+
+func note(err error) string {
+	if err != nil {
+		return fmt.Sprintf(" without orders (%v)", err)
+	}
+	return ""
+}
+
+func domainOf(fqdn string) string {
+	_, d, _ := strings.Cut(fqdn, ".")
+	return d
+}

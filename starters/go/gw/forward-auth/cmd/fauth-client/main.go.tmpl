@@ -1,0 +1,102 @@
+// Command fauth-client calls the API through fauth-edge every 5 seconds and
+// logs what came back: with no token, with a made-up token, with alice's
+// session, with bob's session plus a header pretending to be admin, with
+// bob's session on an admin-only path, and with bob's session again once
+// it is revoked. fauth-auth decides each one; Traefik returns its 401s and
+// 403s unchanged, and only allowed requests reach fauth-backend.
+package main
+
+import (
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+// FAUTH_EDGE_URL=https://fauth-edge.<domain>:8443, from uses: [fauth-edge].
+// The default client verifies Traefik's certificate against SSL_CERT_FILE.
+var (
+	edge   = os.Getenv("FAUTH_EDGE_URL")
+	client = &http.Client{Timeout: 3 * time.Second}
+)
+
+func main() {
+	var alice string
+	for round := 1; ; round++ {
+		if alice == "" {
+			alice = login("alice")
+		}
+		// bob signs in every round, and out again at its end.
+		bob := login("bob")
+		log.Printf("round %d", round)
+		call("no token", "/api/orders", "", nil)
+		call("made-up token", "/api/orders", "not-a-session", nil)
+		// A 401 to alice's real session means it is gone (the auth service
+		// restarted, or it expired): sign in again next round.
+		if call("alice's session", "/api/orders", alice, nil) == http.StatusUnauthorized {
+			alice = ""
+		}
+		// Traefik sets X-Auth-User from the auth service's answer,
+		// replacing what the client sent, so the backend sees bob.
+		call("bob's session + X-Auth-User: admin", "/api/orders", bob, map[string]string{"X-Auth-User": "admin"})
+		call("bob's session on /api/admin/", "/api/admin/report", bob, nil)
+		logout(bob)
+		// Revocation is immediate: every request is checked, so a token
+		// stops working the moment its session is deleted.
+		call("bob's session after logout", "/api/orders", bob, nil)
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// login opens a session for user through the gateway's open /auth/ route.
+func login(user string) string {
+	resp, err := client.Post(edge+"/auth/login?user="+user, "", nil)
+	if err != nil {
+		log.Printf("login %s: %v", user, err)
+		return ""
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("login %s: %s %s", user, resp.Status, strings.TrimSpace(string(body)))
+		return ""
+	}
+	log.Printf("signed in as %s through fauth-edge", user)
+	return string(body)
+}
+
+// logout revokes a session.
+func logout(token string) {
+	req, _ := http.NewRequest(http.MethodPost, edge+"/auth/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("logout: %v", err)
+		return
+	}
+	resp.Body.Close()
+	log.Printf("signed out: %s", resp.Status)
+}
+
+// call sends GET path with an optional bearer token, logs the status and
+// body, and returns the status. Refusals carry the auth service's reason.
+func call(label, path, token string, headers map[string]string) int {
+	req, _ := http.NewRequest(http.MethodGet, edge+path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("  %-36s failed: %v", label, err)
+		return 0
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	log.Printf("  %-36s -> %d %s", label, resp.StatusCode, strings.TrimSpace(string(body)))
+	return resp.StatusCode
+}

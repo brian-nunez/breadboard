@@ -1,0 +1,70 @@
+# gw/jwt-auth
+
+Check who is calling once, at the edge, instead of in every service: [Envoy's JWT authentication filter](https://www.envoyproxy.io/docs/envoy/v1.40.2/configuration/http/http_filters/jwt_authn_filter) verifies each request's token against the issuer's public keys before anything reaches the backend.
+
+- `cmd/jwt-issuer`: a tiny token issuer. At startup it generates an ECDSA P-256 key that never leaves its memory, serves the public half as a JWKS at `/.well-known/jwks.json`, and signs 2-minute ES256 tokens for the demo users `alice` and `bob` on `POST /token?user=<name>`, for the audience `jwt-api` unless `&aud=reports-api` asks for another API. It is a demo: a real issuer authenticates the user first. No key or token is written anywhere.
+- `cmd/jwt-backend`: the API. It has no JWT code; it reads the claims Envoy forwards as headers and logs what it received.
+- `cmd/jwt-client`: every 5 seconds calls `GET /api/orders` through `jwt-edge` five ways (no token, a forged signature, a token of alice's issued for `reports-api`, alice's token, bob's token plus a header pretending to be admin) and logs each answer.
+- `envoy.yaml`: the gateway's config, yours to edit. `experiment.yaml` points `services.jwt-edge.file` at it.
+
+Library: [`github.com/golang-jwt/jwt/v5`](https://pkg.go.dev/github.com/golang-jwt/jwt/v5) v5.3.1 signs tokens in the issuer and forges one in the client. Envoy needs no library: verification is built in.
+
+## How it works
+
+```yaml
+providers:
+  issuer:
+    issuer: https://jwt-issuer.{{.Domain}}
+    audiences: [jwt-api]
+    remote_jwks:
+      http_uri:
+        uri: https://jwt-issuer.{{.Domain}}:8443/.well-known/jwks.json
+        cluster: issuer
+      cache_duration: 30s
+      async_fetch: {}
+    claim_to_headers:
+      - {header_name: x-jwt-sub, claim_name: sub}
+      - {header_name: x-jwt-scope, claim_name: scope}
+rules:
+  - match: {path: /token}
+  - match: {prefix: /api/}
+    requires: {provider_name: issuer}
+```
+
+1. At startup, Envoy fetches the issuer's JWKS through the `issuer` cluster: TLS, verified against the lab CA as `jwt-issuer.{{.Domain}}`. It caches the keys for 30 seconds, then fetches again.
+2. The client gets a token through the gateway's open `/token` route (the rule without `requires`).
+3. On `/api/`, the `jwt_authn` filter takes the token from `Authorization: Bearer …`, finds the key named by the token's `kid` in the JWKS, verifies the ES256 signature, and checks `iss`, `aud` and `exp` (with 60 seconds of clock skew).
+4. A missing or invalid token gets a 401 from Envoy itself, with the reason in the body. A correctly signed token whose `aud` does not include `jwt-api` gets a 403 instead: Envoy maps an audience mismatch to 403 and every other verification failure to 401. It checks the audience before the signature, so a 403 alone does not prove the token is genuine; here the client's `reports-api` token really is signed by the issuer, but it was issued for another API. Either way the backend never sees the request.
+5. A valid one goes on with `X-Jwt-Sub` and `X-Jwt-Scope` set from its claims, replacing any header of that name the client sent, and with the token itself removed (`forward: false`).
+
+```sh
+bb up
+bb logs jwt-client -f
+#   no token                         -> 401 Jwt is missing
+#   forged signature                 -> 401 Jwt verification fails
+#   alice's token for reports-api    -> 403 Audiences in Jwt are not allowed
+#   alice's token                    -> 200 jwt-backend: orders of sub=alice scope="orders:read orders:write"
+#   bob's token + X-Jwt-Sub: admin   -> 200 jwt-backend: orders of sub=bob scope="orders:read"
+bb logs jwt-backend -f   # GET /api/orders for sub=bob scope="orders:read" (values of X-Jwt-Sub: 1; Authorization forwarded: false)
+bb logs jwt-issuer -f    # served the JWKS (kid ...) to ...; issued a token for alice ...
+```
+
+The forged token carries the same header, `kid` and claims as alice's real one; only its signature is from another key. That is enough: nobody without the issuer's private key can mint a token Envoy accepts.
+
+In `bb serve`, open **jwt-edge** and its **Envoy clusters** tab: `backend` counts only verified requests, and `issuer` counts the token requests and the JWKS fetches. Envoy's own counters, `http.https.jwt_authn.allowed`, `denied` and `jwks_fetch_success`, are on its admin API: `docker exec bb-{{.Experiment}}-jwt-edge-1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/15000; printf "GET /stats?filter=jwt_authn HTTP/1.0\r\n\r\n" >&3; cat <&3'`.
+
+**JWT or a session lookup?** A JWT is checked with a public key alone: no call to the issuer per request, no shared session store. The price is revocation: a stolen token stays valid until it expires, which is why these tokens live 2 minutes. `gw/forward-auth` shows the other side: every request asks an auth service, which can revoke a session at once.
+
+## Try this
+
+- **Read a token.** `docker exec bb-{{.Experiment}}-jwt-client-1 sh -c 'wget -qO- --post-data= "$JWT_EDGE_URL/token?user=bob"'` prints a token. Paste the middle part (between the dots) into `echo <part> | base64 -d`: the claims are only encoded, not encrypted. Never put secrets in a JWT.
+- **Authorise in the backend.** Authentication (who is this?) happened at the edge; authorisation (may they do this?) is still the backend's call. Change its scope check to `orders:write` and `bb up`: bob now gets 403 from the backend while alice still gets 200.
+- **Rotate the key.** `docker restart bb-{{.Experiment}}-jwt-issuer-1`. The issuer starts with a new key. Within 30 seconds Envoy refetches the JWKS, and the client's old tokens fail with `401 Jwks doesn't have key to match kid or alg from Jwt`; the client drops them and gets new ones. Real issuers publish the next key in the JWKS before signing with it and keep the old one until its tokens expire, so rotation costs no request.
+- **Forward the token too.** Set `forward: true` and `bb up`. The backend now logs `Authorization forwarded: true`: useful when the backend calls another service on the user's behalf, a risk when it logs headers.
+
+## Break this
+
+- **Call the backend directly.** `docker exec bb-{{.Experiment}}-jwt-client-1 sh -c 'wget -qO- --header "X-Jwt-Sub: admin" --header "X-Jwt-Scope: orders:read" https://jwt-backend.{{.Domain}}:8443/api/orders'`. The backend believes it: it trusts the headers because it assumes only Envoy can reach it. In production that assumption is enforced (a private network, mTLS from the gateway, or the backend verifying the JWT again); here every container can reach it.
+- **Stop the issuer.** `docker stop bb-{{.Experiment}}-jwt-issuer-1`. Verified requests keep working with the cached keys and the tokens already issued, while new tokens fail with 503. `jwks_fetch_failed` grows on Envoy's admin API. `bb up` starts it again.
+- **Get the audience wrong.** Change `audiences` to `[other-api]` and `bb up`: every real token now gets `403 Audiences in Jwt are not allowed`, as the client's `reports-api` token already does. A token meant for one API must not open another. Envoy answers an audience mismatch with 403 and other failures with 401; since it checks the audience before the signature, the 403 does not on its own prove the token is genuine.
+- **Expire a token.** Set `tokenTTL` to 10 seconds in `cmd/jwt-issuer/main.go`, set `clock_skew_seconds: 1` in the provider (0 keeps the default of 60 in this Envoy version), and `bb up`. The client refreshes its tokens before they expire, so fetch one token by hand from the issuer and call `/api/orders` with it repeatedly: it works until `exp` plus one second, then Envoy answers `401 Jwt is expired`. With the default skew the same token keeps working for a minute past `exp`.

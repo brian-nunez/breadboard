@@ -1,0 +1,52 @@
+# gw/bff-aggregation
+
+A gateway routes one path to one service. A screen usually needs several. The **backend for frontend** (BFF) pattern puts an API shaped for one client behind the gateway: the client makes one call, and the BFF fans it out to the services, merges the answers and returns only what the screen shows. Here the same home screen loads both ways, side by side, through one [Traefik](https://doc.traefik.io/traefik/v3.7/reference/routing-configuration/http/routing/router/).
+
+- `cmd/bff-profile`: owns profiles; answers `GET /profile/<user>` with everything it knows (address, preferences, ...) after 80 ms.
+- `cmd/bff-orders`: owns orders; answers `GET /orders/<user>` with the full history, line items included, after 120 ms.
+- `cmd/bff-api`: the BFF. `GET /bff/home/<user>` calls both services at once, directly over TLS, each with a 300 ms timeout, and answers with the name, tier, three latest orders and the open-order count.
+- `cmd/bff-client`: plays a phone loading the home screen every 5 seconds: through gateway routing (two calls) and through the BFF (one call). Each call pays a simulated 150 ms mobile round trip (`mobileRTT`), because inside the lab a round trip costs under a millisecond.
+- `dynamic.yml`: the gateway's routing, yours to edit. `experiment.yaml` points `services.bff-edge.file` at it.
+
+No library: the standard library is enough.
+
+## How it works
+
+```text
+gateway routing                         backend for frontend
+phone --150ms--> bff-edge -> profile    phone --150ms--> bff-edge -> bff-api -+-> profile (80ms)
+phone --150ms--> bff-edge -> orders                                           +-> orders  (120ms)
+= 2 x 150 + 80 + 120 = about 500 ms     = 150 + max(80, 120)   = about 270 ms
+```
+
+1. Traefik routes `/profile/`, `/orders/` and `/bff/` to one service each. It does not combine answers: a gateway routes, the BFF composes.
+2. Through gateway routing, the client calls profile, then orders, downloads both full answers (about 2 KB) and picks out the four things the screen shows.
+3. Through the BFF, the client makes one call. `bff-api` starts both service calls at once (`sync.WaitGroup.Go`), so it waits for the slower one, not both in turn, and answers with about 240 bytes.
+4. Every call carries the client's `X-Request-Id`, and every service logs it, so one screen load can be followed across all three apps.
+5. If orders fails or takes longer than 300 ms, the BFF still answers, with `"degraded": ["orders"]` and no orders: one slow service costs the screen a part, not the whole screen. Without a profile there is no screen, so that is a 502.
+
+```sh
+bb up
+bb logs bff-client -f
+#   gateway routing (request direct-3): 2 calls in  506ms,  2047 bytes -> name="Alice Example" tier=gold recent_orders=3 open_orders=2
+#   backend for frontend (request home-3): 1 call  in  274ms,   237 bytes -> name="Alice Example" tier=gold recent_orders=3 open_orders=2
+bb logs bff-api -f      # home for alice (request home-3): fanned out to profile (80ms) and orders (121ms) concurrently, answered in 121ms
+bb logs bff-orders -f   # GET /orders/alice (request home-3) in 120ms
+```
+
+In `bb serve`, open **bff-edge** and its **Traefik routes** tab: three routers, three services. The BFF's own calls to the services never pass through it.
+
+**When a BFF, when not.** One BFF per kind of client (mobile, web, partner API), owned by the team that builds that client, keeps each screen's needs out of the services. The price is another service to run and keep in step with every backend it calls. If clients only need routing, authentication and limits, the gateway alone is enough; when they need composition, put it in a BFF rather than in the gateway's config.
+
+## Try this
+
+- **Load in parallel from the phone.** Change `viaRoutes` in `cmd/bff-client/main.go` to make both calls at once (a `sync.WaitGroup`, as in `bff-api`). The routed screen drops to about 270 ms: parallel calls hide latency, but the phone still downloads 2 KB, opens more streams and does the join itself.
+- **Make the network worse.** Set `mobileRTT` to 400 ms. The routed screen pays it twice, the BFF screen once. Then set it to 0: on a fast network the gap almost disappears, which is why a BFF matters most for mobile clients.
+- **Slow orders down.** Set `latency` in `cmd/bff-orders/main.go` to 500 ms and `bb up`. The BFF answers after its 300 ms timeout with `degraded=[orders]`, while the routed screen waits the full 500 ms for its data.
+- **Add a third service.** Give the screen recommendations from a new app: add a `cmd/bff-recs` app and its entry in `experiment.yaml` (copy `bff-orders`'s), call it in `bff-api` next to the other two, and watch the BFF time stay at the slowest call, not the sum.
+
+## Break this
+
+- **Fan out one after the other.** In `bff-api`, call `fetch` for profile, then orders, without `wg.Go`. The BFF still works, but its answer now takes 80 + 120 ms: the log's "answered in" grows to about 200 ms, and the BFF loses half its point.
+- **Remove the timeout.** Set `callTimeout` to an hour and slow orders to 5 seconds. Every home screen now waits 5 seconds, and the client's own 5-second timeout fails it: a BFF without timeouts makes every screen as slow as its slowest service.
+- **Stop profile.** `docker stop bb-{{.Experiment}}-bff-profile-1`. Both ways fail: the routed screen gets an error from Traefik (502: it cannot reach bff-profile), and the BFF answers 502 `profile unavailable`. Decide which parts a screen can live without, and degrade only those. `bb up` starts it again.

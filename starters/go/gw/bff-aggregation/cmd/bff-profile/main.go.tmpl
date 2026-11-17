@@ -1,0 +1,56 @@
+// Command bff-profile owns user profiles. Like most services, it answers
+// with everything it knows about a user, not just what one screen needs.
+// It is reachable two ways: through the gateway at /profile/<user>, and
+// from bff-api directly.
+package main
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+	"time"
+)
+
+// latency is how long a lookup takes. Change it and bb up to see what it
+// does to each way of loading the screen.
+const latency = 80 * time.Millisecond
+
+type profile struct {
+	User        string            `json:"user"`
+	Name        string            `json:"name"`
+	Email       string            `json:"email"`
+	Tier        string            `json:"tier"`
+	Address     map[string]string `json:"address"`
+	Preferences map[string]any    `json:"preferences"`
+	Created     time.Time         `json:"created"`
+}
+
+var profiles = map[string]profile{
+	"alice": {
+		User: "alice", Name: "Alice Example", Email: "alice@example.com", Tier: "gold",
+		Address:     map[string]string{"street": "1 Main St", "city": "Springfield", "postcode": "12345", "country": "US"},
+		Preferences: map[string]any{"language": "en", "currency": "USD", "newsletter": true, "theme": "dark"},
+		Created:     time.Date(2021, 3, 14, 9, 26, 0, 0, time.UTC),
+	},
+}
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	http.HandleFunc("GET /profile/{user}", func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		time.Sleep(latency)
+		p, ok := profiles[r.PathValue("user")]
+		// The request ID ties this call to the client request that caused
+		// it, whichever way it came.
+		log.Printf("GET %s (request %s) in %s", r.URL.Path, r.Header.Get("X-Request-Id"), time.Since(start).Round(time.Millisecond))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(p)
+	})
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

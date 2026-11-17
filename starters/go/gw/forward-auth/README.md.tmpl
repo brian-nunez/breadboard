@@ -1,0 +1,64 @@
+# gw/forward-auth
+
+Let one service decide who may call your API, and have the gateway ask it: [Traefik's ForwardAuth middleware](https://doc.traefik.io/traefik/v3.7/reference/routing-configuration/http/middlewares/forwardauth/) sends every `/api/` request's credential to an auth service first, and forwards the request only if the answer is a 2xx.
+
+- `cmd/fauth-auth`: the auth service. It keeps sessions in memory: `POST /auth/login?user=<name>` opens one for the demo users `alice` (roles `admin,orders`) and `bob` (`orders`) and returns a random opaque token; `POST /auth/logout` revokes it; `/verify`, which only Traefik calls, answers allow or deny. It is a demo: a real auth service signs the user in first. No token is written anywhere or logged.
+- `cmd/fauth-backend`: the API. It has no session code; it reads the identity Traefik forwards as headers and logs what it received.
+- `cmd/fauth-client`: every 5 seconds calls the API through `fauth-edge` six ways (no token, a made-up token, alice's session, bob's session plus a header pretending to be admin, bob's session on an admin-only path, bob's session after it was revoked) and logs each answer.
+- `dynamic.yml`: the gateway's routing, yours to edit. `experiment.yaml` points `services.fauth-edge.file` at it.
+
+No library: the standard library is enough on both sides, and the check is built into Traefik.
+
+## How it works
+
+```yaml
+middlewares:
+  check-session:
+    forwardAuth:
+      address: https://fauth-auth.{{.Domain}}:8443/verify
+      tls:
+        ca: /etc/bb/ca.pem
+      authRequestHeaders: [Authorization]
+      authResponseHeaders: [X-Auth-User, X-Auth-Roles]
+  drop-credentials:
+    headers:
+      customRequestHeaders:
+        Authorization: ""
+```
+
+1. The client signs in through the open `/auth/` route and gets a session token: 26 random characters that mean nothing outside the auth service.
+2. On `/api/`, the `check-session` middleware holds the request and sends `GET /verify` to `fauth-auth` over TLS, verified against the lab CA. It sends only the `Authorization` header (`authRequestHeaders`), plus `X-Forwarded-Method`, `-Uri`, `-Host`, `-Proto` and `-For`, so the auth service can decide by path.
+3. The auth service looks the session up. No credentials or an unknown session: **401**. A known session on `/api/admin/` without the `admin` role: **403**. Otherwise **200** with `X-Auth-User` and `X-Auth-Roles`.
+4. A non-2xx answer goes back to the client as it is, status, body and headers: the backend never sees the request.
+5. On a 2xx, Traefik copies `X-Auth-User` and `X-Auth-Roles` onto the request, replacing any the client sent (`authResponseHeaders`). Then `drop-credentials` removes the token, and the request reaches `fauth-backend`.
+
+```sh
+bb up
+bb logs fauth-client -f
+#   no token                             -> 401 fauth-auth: no credentials
+#   made-up token                        -> 401 fauth-auth: unknown or revoked session
+#   alice's session                      -> 200 fauth-backend: orders for user=alice roles=admin,orders
+#   bob's session + X-Auth-User: admin   -> 200 fauth-backend: orders for user=bob roles=orders
+#   bob's session on /api/admin/         -> 403 fauth-auth: bob lacks role admin
+#   bob's session after logout           -> 401 fauth-auth: unknown or revoked session
+bb logs fauth-backend -f  # GET /api/orders for user=bob roles=orders (values of X-Auth-User: 1; Authorization forwarded: false)
+bb logs fauth-auth -f     # allowed GET /api/orders for alice; denied GET /api/admin/report for bob: 403 ...
+```
+
+In `bb serve`, open **fauth-edge** and its **Traefik routes** tab: router `api@file` lists both middlewares in order, and the `backend` service counts only allowed requests.
+
+**Forward auth or a JWT?** Here every request costs a call to the auth service, and in return a session dies the moment it is revoked: bob's token fails on the very next request after logout. `gw/jwt-auth` shows the other side: the gateway checks a signed token on its own, with no call per request, but a token stays valid until it expires.
+
+## Try this
+
+- **Read what the auth service sees.** Add `log.Printf("%v", r.Header)` at the top of `/verify` in `cmd/fauth-auth/main.go` and `bb up`: only `Authorization` and the `X-Forwarded-*` headers arrive. Remove `authRequestHeaders` from `dynamic.yml` and `bb up` again: now every header the client sent arrives too, cookies included.
+- **Authorise by method.** The auth service gets the original method in `X-Forwarded-Method`. In `/verify`, refuse every method but `GET` to users without `admin`, add a `POST` call for bob in the client, and `bb up`: bob gets the auth service's 403, decided before Traefik even picks a route.
+- **Revoke alice.** `docker restart bb-{{.Experiment}}-fauth-auth-1` drops every session, since they live in memory. The client's next call with alice's session gets 401 and it signs in again. That is also why real auth services keep sessions in a shared store such as Redis.
+- **Change the rules in one place.** Add a user `carol` with no roles to `cmd/fauth-auth/main.go`, require the `orders` role on `/api/orders`, and have the client sign carol in. She gets 403 on every call, and the backend needed no change: the policy lives in the auth service, for every API behind the gateway.
+
+## Break this
+
+- **Call the backend directly.** `docker exec bb-{{.Experiment}}-fauth-client-1 sh -c 'wget -qO- --header "X-Auth-User: admin" --header "X-Auth-Roles: admin" https://fauth-backend.{{.Domain}}:8443/api/admin/report'`. The backend believes it: it trusts the headers because it assumes only Traefik can reach it. In production that assumption is enforced (a private network, mTLS from the gateway, or a signed identity header); here every container can reach it.
+- **Forget authResponseHeaders.** Remove `X-Auth-User` from the list and `bb up`. Bob's call with `X-Auth-User: admin` now reaches the backend as `user=admin`: the client's own header goes through, because nothing replaces it.
+- **Stop the auth service.** `docker stop bb-{{.Experiment}}-fauth-auth-1`. Every `/api/` request now fails, alice's included: forward auth fails closed, and the auth service is on the path of every call. `bb up` starts it again (and every session is gone).
+- **Skip certificate checks.** Replace `ca` with `insecureSkipVerify: true`. It still works, which is the trouble: anyone who can answer as `fauth-auth` now decides who gets in.

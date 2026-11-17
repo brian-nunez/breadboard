@@ -1,0 +1,13 @@
+// The inventory.v1.Inventory contract. grpc-inventory serves it and
+// grpc-client calls it, with well-known message types like catalog.proto.
+syntax = "proto3";
+
+package inventory.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+service Inventory {
+  // CheckStock reports whether a SKU is in stock, and where.
+  rpc CheckStock(google.protobuf.StringValue) returns (google.protobuf.Struct);
+}

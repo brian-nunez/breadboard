@@ -1,0 +1,124 @@
+// Command bff-client plays a mobile app loading its home screen, every 5
+// seconds, two ways through bff-edge:
+//
+//   - gateway routing: GET /profile/alice, then GET /orders/alice, and the
+//     app picks out what the screen needs from both answers itself;
+//   - backend for frontend: one GET /bff/home/alice, already merged and
+//     trimmed by bff-api.
+//
+// It logs, for each, the calls made, the time to a full screen, the bytes
+// downloaded and what the screen would show.
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"time"
+)
+
+// mobileRTT stands in for a phone's network: every call from the app pays
+// one round trip of it before the gateway even sees the request. Inside
+// the lab, between containers, a round trip is well under a millisecond.
+const mobileRTT = 150 * time.Millisecond
+
+// BFF_EDGE_URL=https://bff-edge.<domain>:8443, from uses: [bff-edge]. The
+// default client verifies Traefik's certificate against SSL_CERT_FILE.
+var (
+	edge   = os.Getenv("BFF_EDGE_URL")
+	client = &http.Client{Timeout: 5 * time.Second}
+)
+
+// screen is what the home screen shows, however it was loaded.
+type screen struct {
+	Name         string   `json:"name"`
+	Tier         string   `json:"tier"`
+	RecentOrders []any    `json:"recent_orders"`
+	OpenOrders   int      `json:"open_orders"`
+	Degraded     []string `json:"degraded"`
+}
+
+func (s screen) String() string {
+	out := fmt.Sprintf("name=%q tier=%s recent_orders=%d open_orders=%d", s.Name, s.Tier, len(s.RecentOrders), s.OpenOrders)
+	if len(s.Degraded) > 0 {
+		out += fmt.Sprintf(" degraded=%v", s.Degraded)
+	}
+	return out
+}
+
+func main() {
+	for round := 1; ; round++ {
+		log.Printf("round %d", round)
+		viaRoutes(fmt.Sprintf("direct-%d", round))
+		viaBFF(fmt.Sprintf("home-%d", round))
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// viaRoutes loads the screen from the two services through gateway
+// routing: two calls, one after the other as a simple app does, then the
+// app does the join.
+func viaRoutes(id string) {
+	start := time.Now()
+	var profile struct{ Name, Tier string }
+	var orders struct {
+		Orders []struct{ Status string } `json:"orders"`
+	}
+	n1, err := get("/profile/alice", id, &profile)
+	if err != nil {
+		log.Printf("  gateway routing (request %s): profile: %v", id, err)
+		return
+	}
+	n2, err := get("/orders/alice", id, &orders)
+	if err != nil {
+		log.Printf("  gateway routing (request %s): orders: %v", id, err)
+		return
+	}
+	s := screen{Name: profile.Name, Tier: profile.Tier}
+	for i, o := range orders.Orders {
+		if i < 3 {
+			s.RecentOrders = append(s.RecentOrders, o)
+		}
+		if o.Status == "processing" || o.Status == "shipped" {
+			s.OpenOrders++
+		}
+	}
+	log.Printf("  gateway routing (request %s): 2 calls in %4dms, %5d bytes -> %s", id, time.Since(start).Milliseconds(), n1+n2, s)
+}
+
+// viaBFF loads the screen with one call to the BFF.
+func viaBFF(id string) {
+	start := time.Now()
+	var s screen
+	n, err := get("/bff/home/alice", id, &s)
+	if err != nil {
+		log.Printf("  backend for frontend (request %s): %v", id, err)
+		return
+	}
+	log.Printf("  backend for frontend (request %s): 1 call  in %4dms, %5d bytes -> %s", id, time.Since(start).Milliseconds(), n, s)
+}
+
+// get pays the simulated mobile round trip, then GETs path through the
+// gateway with a request ID, decodes the JSON answer into v, and returns
+// the number of bytes downloaded.
+func get(path, id string, v any) (int, error) {
+	time.Sleep(mobileRTT)
+	req, _ := http.NewRequest(http.MethodGet, edge+path, nil)
+	req.Header.Set("X-Request-Id", id)
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return len(body), fmt.Errorf("%s %s", resp.Status, body)
+	}
+	return len(body), json.Unmarshal(body, v)
+}

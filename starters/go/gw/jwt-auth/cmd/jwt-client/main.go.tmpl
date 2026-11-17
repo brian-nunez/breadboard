@@ -1,0 +1,137 @@
+// Command jwt-client calls the API through jwt-edge every 5 seconds five
+// ways and logs what came back: with no token, with a token whose
+// signature is forged, with a real token of alice's issued for another API,
+// with alice's real token, and with bob's real token plus a header that
+// pretends to be admin. Envoy answers the first two itself with 401 and the
+// third with 403; only verified requests reach jwt-backend.
+package main
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+// JWT_EDGE_URL=https://jwt-edge.<domain>:8443, from uses: [jwt-edge]. The
+// default client verifies Envoy's certificate against SSL_CERT_FILE.
+var (
+	edge   = os.Getenv("JWT_EDGE_URL")
+	client = &http.Client{Timeout: 3 * time.Second}
+)
+
+// wanted are the tokens the client keeps: alice's and bob's for jwt-api,
+// and one of alice's for reports-api, another API this issuer signs for.
+var wanted = []struct{ user, aud string }{
+	{user: "alice", aud: "jwt-api"},
+	{user: "bob", aud: "jwt-api"},
+	{user: "alice", aud: "reports-api"},
+}
+
+func main() {
+	tokens := map[string]string{}
+	for round := 1; ; round++ {
+		for _, t := range wanted {
+			if err := refresh(tokens, t.user, t.aud); err != nil {
+				log.Printf("token for %s (aud %s): %v", t.user, t.aud, err)
+			}
+		}
+		log.Printf("round %d", round)
+		call("no token", "", nil)
+		call("forged signature", forge(tokens["alice"]), nil)
+		// Signed by the right key, but its aud is reports-api, not jwt-api:
+		// the token is authentic, just not for this API, so Envoy answers
+		// 403 rather than 401.
+		if call("alice's token for reports-api", tokens["alice@reports-api"], nil) == http.StatusUnauthorized {
+			delete(tokens, "alice@reports-api")
+		}
+		// A 401 to a real token means the issuer's keys changed: drop the
+		// token, and the next round fetches a new one.
+		if call("alice's token", tokens["alice"], nil) == http.StatusUnauthorized {
+			delete(tokens, "alice")
+		}
+		// Envoy sets X-Jwt-Sub from the verified token, replacing what the
+		// client sent, so the backend sees bob, not admin.
+		if call("bob's token + X-Jwt-Sub: admin", tokens["bob"], map[string]string{"X-Jwt-Sub": "admin"}) == http.StatusUnauthorized {
+			delete(tokens, "bob")
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// refresh gets a new token for user and audience from the issuer, through
+// the gateway's unauthenticated /token route, when the one it has expires
+// within 30s. Tokens for jwt-api are kept under the user's name, others
+// under user@aud.
+func refresh(tokens map[string]string, user, aud string) error {
+	key := user
+	if aud != "jwt-api" {
+		key = user + "@" + aud
+	}
+	if t := tokens[key]; t != "" {
+		var c jwt.RegisteredClaims
+		// ParseUnverified reads the claims without checking the signature:
+		// fine for the token's own holder, never for a server.
+		if _, _, err := jwt.NewParser().ParseUnverified(t, &c); err == nil && time.Until(c.ExpiresAt.Time) > 30*time.Second {
+			return nil
+		}
+	}
+	resp, err := client.Post(edge+"/token?user="+user+"&aud="+aud, "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	tokens[key] = string(body)
+	log.Printf("got a new token for %s (aud %s) from jwt-issuer through jwt-edge", user, aud)
+	return nil
+}
+
+// forge copies a real token's header and claims and signs them with a key
+// of its own. Everything looks right except the signature, which no key in
+// the issuer's JWKS can verify.
+func forge(real string) string {
+	c := jwt.MapClaims{}
+	t, _, err := jwt.NewParser().ParseUnverified(real, c)
+	if err != nil {
+		return "not-a-token"
+	}
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	f := jwt.NewWithClaims(jwt.SigningMethodES256, c)
+	f.Header["kid"] = t.Header["kid"]
+	s, _ := f.SignedString(key)
+	return s
+}
+
+// call sends GET /api/orders with an optional bearer token, logs the
+// status and body, and returns the status. Envoy's own 401s and 403s say
+// why the token was refused.
+func call(label, token string, headers map[string]string) int {
+	req, _ := http.NewRequest(http.MethodGet, edge+"/api/orders", nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("  %-32s failed: %v", label, err)
+		return 0
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	log.Printf("  %-32s -> %d %s", label, resp.StatusCode, strings.TrimSpace(string(body)))
+	return resp.StatusCode
+}

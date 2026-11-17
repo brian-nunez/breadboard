@@ -1,0 +1,91 @@
+// Command bg-client calls the proxy twenty times a second, one request after
+// another, and keeps score: which colour answered, and every failure. Every
+// 2 seconds it logs a tally; when the colour changes it logs the cutover.
+// A blue-green switch done right shows one cutover and no errors.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"slices"
+	"strings"
+	"time"
+)
+
+func main() {
+	url := os.Getenv("BG_EDGE_URL") // https://bg-edge.<domain>:8443, the proxy
+	// The default transport verifies the proxy's certificate against
+	// SSL_CERT_FILE, which Breadboard points at the lab CA. It keeps
+	// connections open between requests, as real clients do.
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	var live string
+	var ok, failed int
+	window := map[string]int{}
+	report := time.Tick(2 * time.Second)
+	for range time.Tick(50 * time.Millisecond) {
+		colour, err := call(client, url)
+		switch {
+		case err != nil:
+			failed++
+			window["errors"]++
+			log.Printf("error: %v", err)
+		case colour != live:
+			if live != "" {
+				log.Printf("cutover: %s -> %s after %d answers, %d errors so far", live, colour, ok, failed)
+			} else {
+				log.Printf("live colour: %s", colour)
+			}
+			live = colour
+			fallthrough
+		default:
+			ok++
+			window[colour]++
+		}
+		select {
+		case <-report:
+			log.Printf("last 2s: %s | total ok=%d errors=%d", format(window), ok, failed)
+			clear(window)
+		default:
+		}
+	}
+}
+
+// call sends one GET and returns the colour that answered: the first word
+// of the body ("bg-blue v1" or "bg-green v2 at=...").
+func call(client *http.Client, url string) (string, error) {
+	resp, err := client.Get(url + "/")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		// A 502 from NGINX is an HTML page; the status says enough.
+		return "", fmt.Errorf("%s from %s", resp.Status, url)
+	}
+	colour, _, _ := strings.Cut(strings.TrimSpace(string(body)), " ")
+	return colour, nil
+}
+
+func format(m map[string]int) string {
+	if len(m) == 0 {
+		return "none"
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s=%d", k, m[k])
+	}
+	return strings.Join(parts, " ")
+}

@@ -1,0 +1,126 @@
+# nginx.conf for bg-edge: blue-green deployment through NGINX.
+#
+# Two complete copies of the app run side by side: bg-blue (the version in
+# production) and bg-green (the next one). Every request goes to the live
+# colour, held in the variable $bg_live; the other colour is idle, ready to
+# be tested and switched to, or switched back to if the new one misbehaves.
+#
+# Cut over (and back) without failing a request:
+#   sh blue-green/switch.sh green
+# The script writes one line, "set $bg_live bg-green;", into
+# /etc/nginx/bg-live/live.conf inside this container (included below), checks
+# the result with nginx -t and runs nginx -s reload: NGINX's graceful reload.
+#
+# Why not edit this file and run bb up? Breadboard mounts this file read-only
+# and recreates the container when it changes: that is a restart, and requests
+# fail while the new container starts. A reload keeps the listening socket
+# open: new workers start with the new config, and the old ones finish the
+# requests they already accepted before they exit.
+#
+# Breadboard requires the status server on 127.0.0.1:8404 (the health check
+# reads /healthz) and the TLS listener on 8443 with the certificate under
+# /etc/bb/tls; the lab CA is /etc/bb/ca.pem.
+
+# Runs in the foreground: NGINX is the container's main process.
+daemon off;
+user nginx;
+worker_processes 1;
+pid /run/nginx.pid;
+# Logs go to the container's output: bb logs bg-edge.
+error_log /dev/stderr notice;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    # One access log line per request with the live colour and the address
+    # that answered. The health check's requests are left out.
+    log_format bluegreen '$remote_addr "$request" $status live=$bg_live upstream=$upstream_addr $request_time';
+    map $http_user_agent $bb_access_log {
+        bb-healthcheck 0;
+        default 1;
+    }
+    access_log /dev/stdout bluegreen if=$bb_access_log;
+    # Docker's embedded DNS: each colour's name is resolved again every 5s.
+    resolver 127.0.0.11 valid=5s ipv6=off;
+
+    # Loopback only: the health check and the stub_status counters.
+    server {
+        listen 127.0.0.1:8404;
+        access_log off;
+        location = /healthz {
+            return 200 "ok\n";
+        }
+        location = /stub_status {
+            stub_status;
+        }
+    }
+
+    # One upstream per colour. The names are the app names, so $bg_live can
+    # name the upstream directly in proxy_pass below.
+    upstream bg-blue {
+        zone bg-blue 64k;
+        server bg-blue.{{.Domain}}:8443 resolve max_fails=3 fail_timeout=10s;
+        keepalive 16;
+    }
+    upstream bg-green {
+        zone bg-green 64k;
+        server bg-green.{{.Domain}}:8443 resolve max_fails=3 fail_timeout=10s;
+        keepalive 16;
+    }
+
+    server {
+        listen 8443 ssl;
+        http2 on;
+        server_name bg-edge.{{.Domain}};
+        ssl_certificate /etc/bb/tls/tls.crt;
+        ssl_certificate_key /etc/bb/tls/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        # Every proxied request: HTTP/1.1 with keepalive to the colour, the
+        # client's Host, and who the client was.
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 5s;
+        # Re-encrypt: verify each colour against the lab CA (the name to
+        # check is set per location).
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/bb/ca.pem;
+        proxy_ssl_verify_depth 2;
+        proxy_ssl_server_name on;
+        proxy_ssl_protocols TLSv1.2 TLSv1.3;
+        proxy_ssl_session_reuse on;
+
+        # The live colour. Blue, unless the switch file says otherwise: the
+        # include runs after this line, and its "set" wins. The pattern
+        # matches nothing until switch.sh writes the file, and NGINX accepts
+        # an include pattern with no match. Change this default to make a
+        # colour live from the start (bb up then restarts NGINX).
+        set $bg_live bg-blue;
+        include /etc/nginx/bg-live/*.conf;
+
+        # Smoke tests: reach either colour by name, live or not, before you
+        # switch to it. The trailing / strips the prefix.
+        location /bg-blue/ {
+            proxy_pass https://bg-blue/;
+            proxy_ssl_name bg-blue.{{.Domain}};
+        }
+        location /bg-green/ {
+            proxy_pass https://bg-green/;
+            proxy_ssl_name bg-green.{{.Domain}};
+        }
+
+        # Everything else goes to the live colour. With a variable in
+        # proxy_pass, NGINX looks the name up among the upstream blocks above.
+        location / {
+            proxy_pass https://$bg_live;
+            proxy_ssl_name $bg_live.{{.Domain}};
+            # Tell the client which colour answered.
+            add_header X-Live-Colour $bg_live always;
+        }
+    }
+}

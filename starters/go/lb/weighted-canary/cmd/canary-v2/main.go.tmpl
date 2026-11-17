@@ -1,0 +1,25 @@
+// Command canary-v2 is the canary: the next release, taking a small share of
+// real traffic before everyone gets it. Its answer has a new field, the
+// change this release ships.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+const version = "v2"
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // canary-v2
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-App-Version", version)
+		// v2's change: it tells the caller which header opted it in.
+		fmt.Fprintf(w, "%s %s canary=%t\n", name, version, r.Header.Get("X-Canary") == "always")
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Printf("%s %s listening on :8443", name, version)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

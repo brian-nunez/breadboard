@@ -1,0 +1,23 @@
+// Command bg-blue is the version in production: v1 of the app. It serves
+// HTTPS on :8443 and names itself in every answer, so the client can tell
+// which colour served it.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+const version = "v1"
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // bg-blue
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%s %s\n", name, version)
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Printf("%s %s listening on :8443", name, version)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

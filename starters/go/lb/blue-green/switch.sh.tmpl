@@ -1,0 +1,56 @@
+#!/bin/sh
+# switch.sh: make one colour live, through NGINX's graceful reload.
+#
+#   sh blue-green/switch.sh green   # cut over to the new version
+#   sh blue-green/switch.sh blue    # roll back
+#
+# Run it from the directory that holds experiment.yaml, after bb up. It
+# changes nothing on disk here: the live colour is a one-line file inside
+# the bg-edge container, which nginx.conf includes. A new bg-edge container
+# (bb up after an edit to nginx.conf, or bb down) starts on the default
+# colour that nginx.conf sets.
+set -eu
+
+case "${1:-}" in
+blue | green) colour="bg-$1" ;;
+*)
+	echo "usage: sh $0 blue|green" >&2
+	exit 2
+	;;
+esac
+
+docker exec -i bb-{{.Experiment}}-bg-edge-1 sh -s "$colour" "{{.Domain}}" <<'SCRIPT'
+set -eu
+colour=$1
+domain=$2
+conf=/etc/bb/config/nginx.conf
+live=/etc/nginx/bg-live/live.conf
+
+# 1. Smoke test: the colour must answer through this proxy before it gets
+#    any real traffic. nginx.conf routes /bg-blue/ and /bg-green/ to each one.
+if ! answer=$(curl -fsS --max-time 3 --cacert /etc/bb/ca.pem "https://bg-edge.$domain:8443/$colour/"); then
+	echo "$colour does not answer; the live colour is unchanged" >&2
+	exit 1
+fi
+echo "smoke test: $answer"
+
+# 2. Write the new live colour, keeping the old file to restore.
+mkdir -p /etc/nginx/bg-live
+[ -f "$live" ] && cp "$live" "$live.previous"
+printf 'set $bg_live %s;\n' "$colour" > "$live.new"
+mv "$live.new" "$live"
+
+# 3. Check the whole config before NGINX loads it. A reload with a broken
+#    config would be refused anyway; restoring keeps the file in step.
+if ! nginx -t -q -c "$conf"; then
+	if [ -f "$live.previous" ]; then mv "$live.previous" "$live"; else rm -f "$live"; fi
+	echo "nginx -t failed; the live colour is unchanged" >&2
+	exit 1
+fi
+
+# 4. Graceful reload: the master process re-reads the config, starts new
+#    workers with it, and tells the old workers to finish the requests they
+#    hold and exit. The listening socket never closes.
+nginx -s reload -c "$conf"
+echo "bg-edge now sends every request to $colour"
+SCRIPT

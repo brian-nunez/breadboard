@@ -1,0 +1,129 @@
+// Command sticky-client plays three users and one anonymous caller against
+// the proxy. Each user has its own cookie jar, like a browser: it keeps the
+// app's session cookie and HAProxy's SERVERID cookie, so it lands on the
+// same replica every time. The anonymous caller sends no cookies and is
+// balanced round robin. Every 5 seconds the client logs where each user is;
+// when a user lands on another replica, it logs the move.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/http/cookiejar"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+)
+
+type user struct {
+	name   string
+	client *http.Client
+	mu     sync.Mutex
+	at     string // the replica that answered last
+	visits string // its visit count for this user's session
+}
+
+func main() {
+	url := os.Getenv("STICKY_EDGE_URL") // https://sticky-edge.<domain>:8443, the proxy
+	var users []*user
+	for _, name := range []string{"user-1", "user-2", "user-3"} {
+		jar, err := cookiejar.New(nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		// TLS is verified against SSL_CERT_FILE, the lab CA.
+		u := &user{name: name, client: &http.Client{Jar: jar, Timeout: 5 * time.Second}}
+		users = append(users, u)
+		go u.browse(url)
+	}
+
+	// No jar: every request is a stranger to HAProxy.
+	anonymous := &http.Client{Timeout: 5 * time.Second}
+	var mu sync.Mutex
+	spread := map[string]int{}
+	go func() {
+		for range time.Tick(200 * time.Millisecond) {
+			replica, _, err := get(anonymous, url)
+			mu.Lock()
+			if err != nil {
+				spread["errors"]++
+			} else {
+				spread[replica]++
+			}
+			mu.Unlock()
+		}
+	}()
+
+	for range time.Tick(5 * time.Second) {
+		var parts []string
+		for _, u := range users {
+			u.mu.Lock()
+			parts = append(parts, fmt.Sprintf("%s on %s visits=%s", u.name, u.at, u.visits))
+			u.mu.Unlock()
+		}
+		mu.Lock()
+		parts = append(parts, "no cookie: "+format(spread))
+		clear(spread)
+		mu.Unlock()
+		log.Print(strings.Join(parts, " | "))
+	}
+}
+
+// browse sends a request every 200ms with this user's cookies.
+func (u *user) browse(url string) {
+	for range time.Tick(200 * time.Millisecond) {
+		replica, visits, err := get(u.client, url)
+		if err != nil {
+			log.Printf("%s error: %v", u.name, err)
+			continue
+		}
+		u.mu.Lock()
+		if u.at != "" && replica != u.at {
+			log.Printf("%s moved: %s -> %s (visits=%s there: the session started over)", u.name, u.at, replica, visits)
+		}
+		u.at, u.visits = replica, visits
+		u.mu.Unlock()
+	}
+}
+
+// get returns the replica and visit count from an answer like
+// "sticky-backend-2 session=3f9a... visits=7".
+func get(client *http.Client, url string) (replica, visits string, err error) {
+	resp, err := client.Get(url + "/")
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("%s", resp.Status)
+	}
+	fields := strings.Fields(string(body))
+	if len(fields) != 3 {
+		return "", "", fmt.Errorf("unexpected answer %q", body)
+	}
+	return fields[0], strings.TrimPrefix(fields[2], "visits="), nil
+}
+
+func format(m map[string]int) string {
+	if len(m) == 0 {
+		return "none"
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s=%d", k, m[k])
+	}
+	return strings.Join(parts, " ")
+}

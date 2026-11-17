@@ -1,0 +1,25 @@
+// Command bg-green is the next version: v2 of the app, deployed beside v1
+// and idle until the proxy makes it live. Its answer carries a new field,
+// the change this release ships.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"time"
+)
+
+const version = "v2"
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // bg-green
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// v2's change: the answer says when it was made.
+		fmt.Fprintf(w, "%s %s at=%s\n", name, version, time.Now().UTC().Format(time.RFC3339))
+	})
+	// Breadboard mounts this app's own certificate and points these at it.
+	log.Printf("%s %s listening on :8443", name, version)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

@@ -513,6 +513,77 @@ var all = []Starter{
 			File:      "pgbouncer.ini",
 		}},
 	},
+	{
+		ID:       "gw/path-host-routing",
+		Title:    "Path and Host routing with Traefik",
+		Summary:  "One Traefik gateway in front of four services: routes by path prefix (one with its prefix stripped) and by Host header, and a default route for everything else.",
+		Language: "go",
+		Template: "go/gw/path-host-routing",
+		Dir:      "path-host-routing",
+		Apps: []App{
+			{Name: "route-users", Command: []string{"route-users"}},
+			{Name: "route-orders", Command: []string{"route-orders"}},
+			{Name: "route-admin", Command: []string{"route-admin"}},
+			{Name: "route-default", Command: []string{"route-default"}},
+			{Name: "route-client", Command: []string{"route-client"}, Uses: []string{"route-edge"}},
+		},
+		Services: []Service{{
+			Name: "route-edge",
+			Type: "traefik",
+			// Each upstream's name is its app's, so the explorers tag the
+			// Traefik service of the same name in dynamic.yml. The routes
+			// themselves (by path and Host) are the file's.
+			Upstreams: []spec.Upstream{
+				{Service: "route-users", Port: 8443},
+				{Service: "route-orders", Port: 8443},
+				{Service: "route-admin", Port: 8443},
+				{Service: "route-default", Port: 8443},
+			},
+			File: "dynamic.yml",
+		}},
+	},
+	{
+		ID:       "gw/request-transformation",
+		Title:    "Request transformation with Traefik middlewares",
+		Summary:  "Traefik middlewares add and remove headers both ways, strip and rewrite paths, and redirect retired URLs; an echo backend shows what arrived.",
+		Language: "go",
+		Template: "go/gw/request-transformation",
+		Dir:      "request-transformation",
+		Apps: []App{
+			{Name: "xform-backend", Command: []string{"xform-backend"}},
+			{Name: "xform-client", Command: []string{"xform-client"}, Uses: []string{"xform-edge"}},
+		},
+		Services: []Service{{
+			Name:      "xform-edge",
+			Type:      "traefik",
+			Upstreams: []spec.Upstream{{Service: "xform-backend", Port: 8443}},
+			File:      "dynamic.yml",
+		}},
+	},
+	{
+		ID:       "gw/api-versioning",
+		Title:    "API versioning with NGINX",
+		Summary:  "v1 and v2 of an API behind one NGINX, chosen by path or by an Api-Version header; the gateway marks every v1 answer deprecated with Deprecation, Sunset and Link headers.",
+		Language: "go",
+		Template: "go/gw/api-versioning",
+		Dir:      "api-versioning",
+		Apps: []App{
+			{Name: "ver-v1", Command: []string{"ver-v1"}},
+			{Name: "ver-v2", Command: []string{"ver-v2"}},
+			{Name: "ver-client", Command: []string{"ver-client"}, Uses: []string{"ver-edge"}},
+		},
+		Services: []Service{{
+			Name: "ver-edge",
+			Type: "nginx",
+			// Named v1 and v2, the routes the path prefixes give them
+			// (/v1/, /v2/), so service details match the file.
+			Upstreams: []spec.Upstream{
+				{Service: "ver-v1", Port: 8443, Name: "v1"},
+				{Service: "ver-v2", Port: 8443, Name: "v2"},
+			},
+			File: "nginx.conf",
+		}},
+	},
 }
 
 // envoyInbound is an Envoy sidecar terminating TLS on 8443 in front of an

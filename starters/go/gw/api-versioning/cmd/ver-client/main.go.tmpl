@@ -1,0 +1,101 @@
+// Command ver-client asks for the same order six ways every 5 seconds:
+// by path (/v1/, /v2/), by the Api-Version header (1, 2, none, and an
+// unsupported 3), and logs which version answered, the body's shape, and
+// the deprecation headers the gateway added. A client that reads those
+// headers can warn its owners long before the old version is switched off.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// probe is one request and the version that should answer it.
+type probe struct {
+	path       string
+	apiVersion string // the Api-Version header; empty sends none
+	want       string // the service that should answer, or "gateway"
+	status     int
+}
+
+func main() {
+	edge := os.Getenv("VER_EDGE_URL") // https://ver-edge.<domain>:8443
+	probes := []probe{
+		{"/v1/orders/7", "", "ver-v1", 200},
+		{"/v2/orders/7", "", "ver-v2", 200},
+		{"/orders/7", "1", "ver-v1", 200},
+		{"/orders/7", "2", "ver-v2", 200},
+		{"/orders/7", "", "ver-v1", 200},
+		{"/orders/7", "3", "gateway", 400},
+	}
+	// The lab CA is trusted through SSL_CERT_FILE.
+	client := &http.Client{Timeout: 5 * time.Second}
+	for round := 1; ; round++ {
+		unexpected := 0
+		for _, p := range probes {
+			line, ok := call(client, edge, p)
+			if !ok {
+				unexpected++
+				line = "UNEXPECTED " + line
+			}
+			log.Print(line)
+		}
+		log.Printf("round %d: %d requests, unexpected %d", round, len(probes), unexpected)
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func call(client *http.Client, edge string, p probe) (string, bool) {
+	req, err := http.NewRequest(http.MethodGet, edge+p.path, nil)
+	if err != nil {
+		return err.Error(), false
+	}
+	if p.apiVersion != "" {
+		req.Header.Set("Api-Version", p.apiVersion)
+	}
+	label := fmt.Sprintf("GET %s (Api-Version: %s)", p.path, or(p.apiVersion))
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Sprintf("%s -> error: %v", label, err), false
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	who := resp.Header.Get("X-Instance")
+	if who == "" {
+		who = "gateway" // NGINX answered by itself
+	}
+	dep := deprecation(resp.Header)
+	line := fmt.Sprintf("%s -> %s %d %s | %s", label, who, resp.StatusCode, dep, strings.TrimSpace(string(body)))
+	// v1 answers must carry the deprecation notice, and nothing else may.
+	deprecated := resp.Header.Get("Deprecation") != ""
+	return line, who == p.want && resp.StatusCode == p.status && deprecated == (who == "ver-v1")
+}
+
+// deprecation reads the deprecation headers: Deprecation (RFC 9745, a
+// structured-field date, @ and Unix seconds), Sunset (RFC 8594, an HTTP
+// date: when the version stops answering) and Link (the successor).
+func deprecation(h http.Header) string {
+	d := h.Get("Deprecation")
+	if d == "" {
+		return "current"
+	}
+	since := d
+	if secs, err := strconv.ParseInt(strings.TrimPrefix(d, "@"), 10, 64); err == nil {
+		since = time.Unix(secs, 0).UTC().Format(time.DateOnly)
+	}
+	return fmt.Sprintf("deprecated since %s (Deprecation: %s), sunset %s, link %s",
+		since, d, or(h.Get("Sunset")), or(h.Get("Link")))
+}
+
+func or(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}

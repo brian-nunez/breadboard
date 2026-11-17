@@ -1,0 +1,117 @@
+# dynamic.yml for route-edge: routing by path and by Host through Traefik.
+#
+# One gateway address, four services behind it. A router matches requests
+# with a rule and sends them to a service, optionally through middlewares:
+#
+#   /users and /users/...           -> route-users, with /users stripped
+#   /orders/...                     -> route-orders, path forwarded as is
+#   Host admin.route-edge.<domain>  -> route-admin, any path
+#   anything else                   -> route-default, which answers 404
+#
+# Which router wins when several match? Traefik sorts routers by priority,
+# and a router's priority is the length of its rule unless you set one: a
+# longer, more specific rule wins. Here the Host route and the default route
+# set theirs, so the order does not depend on how long the lab's domain is.
+#
+# This file replaces Traefik's dynamic configuration only. Breadboard keeps
+# traefik.yml (the websecure entrypoint on :8443, the API and ping on
+# 127.0.0.1:8080) and tls.yml (this service's certificate). Traefik reads
+# this file through Go templates, so it contains no double braces, not even
+# in comments.
+
+http:
+  routers:
+    # Path routing with a stripped prefix. Path(`/users`) matches exactly
+    # /users; PathPrefix(`/users/`) matches everything under it. The rule
+    # does not use PathPrefix(`/users`), which would also match
+    # /usersettings: prefixes match characters, not path segments.
+    users:
+      entryPoints:
+        - websecure
+      rule: Path(`/users`) || PathPrefix(`/users/`)
+      middlewares:
+        - strip-users
+      service: route-users
+
+    # Path routing without stripping: route-orders serves /orders/... itself,
+    # so the gateway forwards the path unchanged.
+    orders:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/orders/`)
+      service: route-orders
+
+    # Host routing (a virtual host). The client connects to the gateway as
+    # usual and sends Host: admin.route-edge.{{.Domain}}; every path on that
+    # host goes to the admin site, /users/42 included. Priority 100 is above
+    # every rule length here, so this host wins over the path routes.
+    admin:
+      entryPoints:
+        - websecure
+      rule: Host(`admin.route-edge.{{.Domain}}`)
+      priority: 100
+      service: route-admin
+
+    # The default route: every request no other router claims. PathPrefix(`/`)
+    # matches everything; priority 1 puts it last whatever other rules exist.
+    # Without it, Traefik answers unmatched requests with its own plain
+    # "404 page not found".
+    default:
+      entryPoints:
+        - websecure
+      rule: PathPrefix(`/`)
+      priority: 1
+      service: route-default
+
+  middlewares:
+    # Removes /users before forwarding (/users/42 -> /42, /users -> /) and
+    # tells the backend what it removed in X-Forwarded-Prefix, so a service
+    # can build links back through the gateway.
+    strip-users:
+      stripPrefix:
+        prefixes:
+          - /users
+
+  # One service per backend, named after the app. There is no health check:
+  # each service has one server, and a failed check would only turn a
+  # working route into a 503 (route-orders, for one, answers 404 on /).
+  services:
+    route-users:
+      loadBalancer:
+        servers:
+          - url: https://route-users.{{.Domain}}:8443
+        serversTransport: route-users
+    route-orders:
+      loadBalancer:
+        servers:
+          - url: https://route-orders.{{.Domain}}:8443
+        serversTransport: route-orders
+    route-admin:
+      loadBalancer:
+        servers:
+          - url: https://route-admin.{{.Domain}}:8443
+        serversTransport: route-admin
+    route-default:
+      loadBalancer:
+        servers:
+          - url: https://route-default.{{.Domain}}:8443
+        serversTransport: route-default
+
+  # Re-encrypt: TLS to each backend, verified against the lab CA by its name.
+  serversTransports:
+    route-users:
+      serverName: route-users.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem
+    route-orders:
+      serverName: route-orders.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem
+    route-admin:
+      serverName: route-admin.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem
+    route-default:
+      serverName: route-default.{{.Domain}}
+      rootCAs:
+        - /etc/bb/ca.pem

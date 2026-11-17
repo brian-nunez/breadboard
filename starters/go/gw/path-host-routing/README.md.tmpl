@@ -1,0 +1,76 @@
+# gw/path-host-routing
+
+An **API gateway** is the one address clients know. Behind it, separate services own separate parts of the API, and the gateway decides, request by request, which service gets each one. The two most common keys are the **path** (`/users/...` to the users service, `/orders/...` to the orders service) and the **Host** header (`admin.example.com` to the admin site, on the same address and port). Here [Traefik routers](https://doc.traefik.io/traefik/v3.7/reference/routing-configuration/http/routing/rules-and-priority/) do both, in a file you own.
+
+- `cmd/route-users`: the users service. It serves `/` and `/<id>`: the gateway strips `/users` before forwarding.
+- `cmd/route-orders`: the orders service. It owns its full path, `/orders/` and `/orders/<id>`, so the gateway forwards the path unchanged.
+- `cmd/route-admin`: the admin site, reached by Host (`admin.route-edge.{{.Domain}}`), any path.
+- `cmd/route-default`: the default route. It gets every request nothing else claims and answers a 404 of its own.
+- `cmd/route-client`: every 5 seconds sends the same seven requests to `ROUTE_EDGE_URL` and logs which service answered each and what it saw: the path after the gateway's rewrite, the stripped prefix and the Host. A request answered by the wrong service is logged `MISROUTED`.
+- `dynamic.yml`: Traefik's routing for `route-edge`, yours to read and change. `experiment.yaml` points the service's `file` at it.
+
+Every backend answers each request with its name and what it received, for example `route-users path=/42 prefix=/users host=route-edge.{{.Domain}}:8443 | user 42`.
+
+## How it works
+
+```yaml
+users:
+  rule: Path(`/users`) || PathPrefix(`/users/`)
+  middlewares: [strip-users]
+  service: route-users
+orders:
+  rule: PathPrefix(`/orders/`)
+  service: route-orders
+admin:
+  rule: Host(`admin.route-edge.{{.Domain}}`)
+  priority: 100
+  service: route-admin
+default:
+  rule: PathPrefix(`/`)
+  priority: 1
+  service: route-default
+```
+
+1. **A router is a rule, a service and optional middlewares.** For each request Traefik tries its routers in priority order and the first whose rule matches handles it.
+2. **Path routing.** `PathPrefix` matches characters, not path segments: ``PathPrefix(`/users`)`` would also match `/usersettings`. The `users` rule is ``Path(`/users`) || PathPrefix(`/users/`)``: exactly `/users`, or anything under `/users/`. The client sends `/usersettings` to prove it lands on the default route.
+3. **Strip the prefix, or not.** The `strip-users` middleware turns `/users/42` into `/42` and puts `/users` in `X-Forwarded-Prefix`, so route-users never needs to know where it is mounted (and can build links back through the gateway from the header). route-orders is written the other way, routing on `/orders/...` itself, so its router has no middleware. Both are common; what matters is that the gateway and the service agree.
+4. **Host routing.** The client connects to the gateway exactly as before (same address, same TLS handshake with SNI `route-edge.{{.Domain}}`) and sends `Host: admin.route-edge.{{.Domain}}`. The `admin` router matches on that header alone, so every path on that host goes to the admin site, `/users/42` included. In production DNS would point both names at the gateway and its certificate would cover both; in the lab only `route-edge.{{.Domain}}` resolves and is on the certificate, so the client keeps TLS on the gateway's name and changes only the header.
+5. **Priority.** By default a router's priority is the length of its rule, so longer, more specific rules win. Rule length is a poor tie-breaker between a Host and a path (it would depend on how long the domain is), so `admin` sets `priority: 100`, above every rule length here, and `default` sets `priority: 1` so it is tried last.
+6. **The default route.** ``PathPrefix(`/`)`` matches everything. Without it, Traefik answers unmatched requests itself with a plain `404 page not found`; with it, a service of yours owns the "not found" answer and can log every miss.
+7. **Re-encrypt.** Each backend has a `serversTransport` that verifies its certificate against the lab CA by name. There is no health check: each service has one server, and a failed check would only turn a working route into a 503 (route-orders answers 404 on `/`).
+
+## Run it
+
+```sh
+bb up
+bb logs route-client -f
+```
+
+Every 5 seconds, seven lines and a summary:
+
+```text
+GET /users/42 (host route-edge) -> route-users 200: path=/42 prefix=/users host=route-edge.{{.Domain}}:8443 | user 42
+GET /orders/7 (host route-edge) -> route-orders 200: path=/orders/7 prefix=- host=route-edge.{{.Domain}}:8443 | order 7
+GET / (host admin.route-edge.{{.Domain}}) -> route-admin 200: path=/ prefix=- host=admin.route-edge.{{.Domain}} | admin dashboard
+GET /nope (host route-edge) -> route-default 404: path=/nope prefix=- host=route-edge.{{.Domain}}:8443 | no route for /nope
+round 3: 7 requests, misrouted 0
+```
+
+## What to watch
+
+- `bb serve`: the **Traefik routes** tab of `route-edge` lists the four routers with their rule, priority and middlewares, and the four services with their server's status. MCP clients get the same from `traefik_routes` with `service: route-edge`.
+- `bb logs route-edge`: Traefik's access log, one line per request with the router that matched (`users@file`, `admin@file`, ...).
+- `bb logs route-default`: one `no route:` line per miss. A gateway's default route is where you find clients calling paths that do not exist.
+
+## Try this
+
+- **Ask by hand.** `docker exec bb-{{.Experiment}}-route-client-1 sh -c 'wget -qO- "$ROUTE_EDGE_URL/users/7"; wget -qO- --header "Host: admin.route-edge.{{.Domain}}" "$ROUTE_EDGE_URL/anything"'`: the users service, then the admin site.
+- **Mount a new route.** Route `/accounts/` to route-users too: add a router with ``PathPrefix(`/accounts/`)``, a `stripPrefix` middleware for `/accounts`, and `service: route-users`, then `bb up`. route-users now answers on two mount points and reports which one in `prefix=`.
+- **Route by path within a host.** Change the `admin` rule to ``Host(`admin.route-edge.{{.Domain}}`) && PathPrefix(`/reports/`)`` and run `bb up`. Admin-host requests outside `/reports/` now fall through to the other routers: the client's two admin-host lines turn `MISROUTED`, `/` answered by route-default and `/users/42` by route-users.
+
+## Break this
+
+- **Match too much.** Change the `users` rule to ``PathPrefix(`/users`)`` and run `bb up`. `/usersettings` now goes to route-users, which receives `/settings` and answers `user settings`, and the client logs `MISROUTED` for it.
+- **Strip a service that owns its path.** Add a `strip-orders` middleware (`stripPrefix` with `prefixes: [/orders]`) and list it under the `orders` router's `middlewares`, then `bb up`. route-orders now receives `/7`, answers `no such orders path` with a 404, and the client logs `MISROUTED`: the gateway and the service disagree about who owns the prefix.
+- **Lose the priorities.** Delete `priority: 100` from `admin` and run `bb up`. Priority is now rule length, so whether `GET /users/42` on the admin host reaches route-admin or route-users depends on whether ``Host(`admin.route-edge.{{.Domain}}`)`` is longer than the `users` rule. Count the characters, then check the client's log.
+- **Remove the default route.** Delete the `default` router and run `bb up`. `/nope` and `/usersettings` now get Traefik's own `404 page not found`, with no `X-Instance` header: the client logs them as answered by `gateway` and `MISROUTED`, and route-default logs nothing.

@@ -1,0 +1,175 @@
+// Command xform-client sends the same three requests through the gateway
+// every 5 seconds, each carrying headers a client should not be trusted
+// with, and logs what the backend saw and what came back. It checks each
+// transformation the gateway promises and flags any that did not happen as
+// UNEXPECTED.
+package main
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	edge := os.Getenv("XFORM_EDGE_URL") // https://xform-edge.<domain>:8443
+	// The lab CA is trusted through SSL_CERT_FILE. Redirects are not
+	// followed automatically, so the client sees the gateway's redirect
+	// itself and follows it by hand.
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	for round := 1; ; round++ {
+		unexpected := 0
+		for _, check := range []func(*http.Client, string) (string, []string){api, legacy, moved} {
+			line, problems := check(client, edge)
+			log.Print(line)
+			for _, p := range problems {
+				log.Printf("UNEXPECTED: %s", p)
+			}
+			unexpected += len(problems)
+		}
+		log.Printf("round %d: 3 requests, unexpected %d", round, unexpected)
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// api: /api/orders/7 with a forged identity and a forged client address.
+// The gateway strips /api, adds X-Gateway, removes X-User-Id, replaces
+// X-Forwarded-For with the real address and keeps the request ID.
+func api(client *http.Client, edge string) (string, []string) {
+	id := newID()
+	saw, resp, err := get(client, edge+"/api/orders/7", map[string]string{
+		"X-User-Id":       "admin",       // a client claiming to be someone
+		"X-Forwarded-For": "203.0.113.7", // a client claiming to be somewhere
+		"X-Request-Id":    id,
+	})
+	if err != nil {
+		return "GET /api/orders/7 -> error", []string{err.Error()}
+	}
+	var problems []string
+	want(&problems, saw["path"] == "/orders/7", "path %s, want /orders/7 (prefix stripped)", saw["path"])
+	want(&problems, saw["prefix"] == "/api", "X-Forwarded-Prefix %s, want /api", saw["prefix"])
+	want(&problems, saw["gateway"] == "xform-edge", "X-Gateway %s, want xform-edge (added)", saw["gateway"])
+	want(&problems, saw["user-id"] == "-", "X-User-Id %s arrived, want it removed", saw["user-id"])
+	want(&problems, !strings.Contains(saw["forwarded-for"], "203.0.113.7"), "the forged X-Forwarded-For arrived: %s", saw["forwarded-for"])
+	want(&problems, saw["request-id"] == id && resp.Header.Get("X-Request-Id") == id, "request ID %s came back as %s", id, resp.Header.Get("X-Request-Id"))
+	responseHeaders(&problems, resp)
+	return fmt.Sprintf("GET /api/orders/7 (sent X-User-Id: admin, X-Forwarded-For: 203.0.113.7, X-Request-Id: %s) -> %d | backend saw %s | response %s",
+		id, resp.StatusCode, saw["line"], respSummary(resp)), problems
+}
+
+// legacy: /legacy/orders/7, an old URL the gateway rewrites to /orders/7
+// without the client knowing; the original path travels in X-Replaced-Path.
+func legacy(client *http.Client, edge string) (string, []string) {
+	saw, resp, err := get(client, edge+"/legacy/orders/7", nil)
+	if err != nil {
+		return "GET /legacy/orders/7 -> error", []string{err.Error()}
+	}
+	var problems []string
+	want(&problems, saw["path"] == "/orders/7", "path %s, want /orders/7 (rewritten)", saw["path"])
+	want(&problems, saw["replaced"] == "/legacy/orders/7", "X-Replaced-Path %s, want /legacy/orders/7", saw["replaced"])
+	responseHeaders(&problems, resp)
+	return fmt.Sprintf("GET /legacy/orders/7 -> %d | backend saw %s | response %s", resp.StatusCode, saw["line"], respSummary(resp)), problems
+}
+
+// moved: /v0/orders/7, a retired URL. The gateway answers by itself with a
+// redirect to /api/orders/7; the backend never sees the first request.
+func moved(client *http.Client, edge string) (string, []string) {
+	resp, err := client.Get(edge + "/v0/orders/7")
+	if err != nil {
+		return "GET /v0/orders/7 -> error", []string{err.Error()}
+	}
+	resp.Body.Close()
+	var problems []string
+	loc := resp.Header.Get("Location")
+	want(&problems, resp.StatusCode == http.StatusMovedPermanently || resp.StatusCode == http.StatusPermanentRedirect,
+		"status %d, want a permanent redirect", resp.StatusCode)
+	want(&problems, resp.Header.Get("X-Instance") == "", "the backend answered the retired URL")
+	want(&problems, loc == edge+"/api/orders/7", "Location %s, want %s/api/orders/7", loc, edge)
+	if loc == "" {
+		return fmt.Sprintf("GET /v0/orders/7 -> %d, no Location", resp.StatusCode), problems
+	}
+	saw, next, err := get(client, loc, nil)
+	if err != nil {
+		return fmt.Sprintf("GET /v0/orders/7 -> %d Location: %s -> error", resp.StatusCode, loc), append(problems, err.Error())
+	}
+	want(&problems, saw["path"] == "/orders/7", "after the redirect, path %s, want /orders/7", saw["path"])
+	return fmt.Sprintf("GET /v0/orders/7 -> %d Location: %s -> %d | backend saw path=%s", resp.StatusCode, loc, next.StatusCode, saw["path"]), problems
+}
+
+// responseHeaders checks what the gateway does to every answer: X-Gateway
+// and the two security headers added, X-Powered-By (set by the backend)
+// removed.
+func responseHeaders(problems *[]string, resp *http.Response) {
+	want(problems, resp.Header.Get("X-Gateway") == "xform-edge", "response X-Gateway %q, want xform-edge", resp.Header.Get("X-Gateway"))
+	want(problems, resp.Header.Get("X-Powered-By") == "", "response X-Powered-By %q, want it removed", resp.Header.Get("X-Powered-By"))
+	want(problems, resp.Header.Get("Strict-Transport-Security") == "max-age=31536000", "response Strict-Transport-Security %q", resp.Header.Get("Strict-Transport-Security"))
+	want(problems, resp.Header.Get("X-Content-Type-Options") == "nosniff", "response X-Content-Type-Options %q", resp.Header.Get("X-Content-Type-Options"))
+}
+
+func respSummary(resp *http.Response) string {
+	return fmt.Sprintf("gateway=%s powered-by=%s", or(resp.Header.Get("X-Gateway")), or(resp.Header.Get("X-Powered-By")))
+}
+
+// get sends a GET with extra headers and parses the backend's echo line
+// (key=value fields) into a map; "line" holds the whole line.
+func get(client *http.Client, url string, headers map[string]string) (map[string]string, *http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, err
+	}
+	line := strings.TrimSpace(string(body))
+	saw := map[string]string{"line": line}
+	for _, f := range strings.Fields(line) {
+		if k, v, ok := strings.Cut(f, "="); ok {
+			saw[k] = v
+		}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return saw, resp, fmt.Errorf("%s: %s", resp.Status, line)
+	}
+	return saw, resp, nil
+}
+
+func want(problems *[]string, ok bool, format string, args ...any) {
+	if !ok {
+		*problems = append(*problems, fmt.Sprintf(format, args...))
+	}
+}
+
+// newID returns a random request ID. Traefik has no middleware that makes
+// one, so here the client is the request's first hop and assigns it.
+func newID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func or(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}

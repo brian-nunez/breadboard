@@ -1,0 +1,1224 @@
+package web
+
+// API gateway docs: the concept guides behind the wave D starters (Phase 5,
+// wave D; D-176 to D-178), written in the load-balancing docs' style. Facts
+// about Breadboard's proxies follow internal/catalog and the compose goldens;
+// directives follow the official docs for Envoy v1.40, Traefik v3.7 and
+// open-source NGINX 1.30.
+
+// Official documentation the guides link, for the pinned versions.
+const (
+	envoyLocalRL   = envoyDocs + "configuration/http/http_filters/local_rate_limit_filter"
+	envoyGlobalRL  = envoyDocs + "intro/arch_overview/other_features/global_rate_limiting"
+	envoyBreakers  = envoyDocs + "intro/arch_overview/upstream/circuit_breaking"
+	envoyRouting   = envoyDocs + "intro/arch_overview/http/http_routing"
+	envoyTimeouts  = envoyDocs + "faq/configuration/timeouts"
+	envoyJWT       = envoyDocs + "configuration/http/http_filters/jwt_authn_filter"
+	envoyExtAuthz  = envoyDocs + "configuration/http/http_filters/ext_authz_filter"
+	envoyGRPC      = envoyDocs + "intro/arch_overview/other_protocols/grpc"
+	envoyGRPCStats = envoyDocs + "configuration/http/http_filters/grpc_stats_filter"
+	envoyHeaders   = envoyDocs + "configuration/http/http_conn_man/headers"
+	traefikMW      = traefikDocs + "reference/routing-configuration/http/middlewares/"
+	traefikRules   = traefikDocs + "reference/routing-configuration/http/routing/rules-and-priority/"
+	nginxLimitReq  = nginxDocs + "http/ngx_http_limit_req_module.html"
+	nginxAuthReq   = nginxDocs + "http/ngx_http_auth_request_module.html"
+	nginxGRPC      = nginxDocs + "http/ngx_http_grpc_module.html"
+	nginxMap       = nginxDocs + "http/ngx_http_map_module.html"
+	nginxLocation  = nginxDocs + "http/ngx_http_core_module.html#location"
+	nginxProxy     = nginxDocs + "http/ngx_http_proxy_module.html"
+	nginxHeaders   = nginxDocs + "http/ngx_http_headers_module.html"
+	envoyOutlier   = envoyDocs + "intro/arch_overview/upstream/outlier"
+	envoyCBProto   = envoyDocs + "api-v3/config/cluster/v3/circuit_breaker.proto"
+	traefikHeaders = traefikMW + "headers/"
+	traefikStrip   = traefikMW + "stripprefix/"
+	traefikRedir   = traefikMW + "redirectregex/"
+	traefikReplace = traefikMW + "replacepathregex/"
+	traefikRL      = traefikMW + "ratelimit/"
+	traefikRetry   = traefikMW + "retry/"
+	traefikCB      = traefikMW + "circuitbreaker/"
+	traefikFwdAuth = traefikMW + "forwardauth/"
+	traefikMWList  = traefikMW + "overview/"
+	traefikST      = traefikDocs + "reference/routing-configuration/http/load-balancing/serverstransport/"
+)
+
+// Official documentation each guide links at its end: the pinned proxies'
+// pages for what the guide uses, and the specifications it names.
+var (
+	gwWhatDocs = []link{
+		{"Envoy v1.40: HTTP routing", envoyRouting},
+		{"Traefik v3.7: HTTP middlewares", traefikMWList},
+		{"NGINX: proxy module", nginxProxy},
+	}
+	gwRoutingDocs = []link{
+		{"Envoy v1.40: HTTP routing", envoyRouting},
+		{"Envoy v1.40: HTTP header manipulation", envoyHeaders},
+		{"Traefik v3.7: rules and priority", traefikRules},
+		{"Traefik v3.7: Headers middleware", traefikHeaders},
+		{"Traefik v3.7: StripPrefix middleware", traefikStrip},
+		{"Traefik v3.7: ReplacePathRegex middleware", traefikReplace},
+		{"Traefik v3.7: RedirectRegex middleware", traefikRedir},
+		{"NGINX: location", nginxLocation},
+		{"NGINX: map module", nginxMap},
+		{"NGINX: headers module (add_header)", nginxHeaders},
+		{"RFC 9745: the Deprecation header", "https://www.rfc-editor.org/rfc/rfc9745"},
+		{"RFC 8594: the Sunset header", "https://www.rfc-editor.org/rfc/rfc8594"},
+	}
+	gwAuthDocs = []link{
+		{"Envoy v1.40: JWT authentication filter", envoyJWT},
+		{"Envoy v1.40: external authorization filter", envoyExtAuthz},
+		{"Traefik v3.7: ForwardAuth middleware", traefikFwdAuth},
+		{"NGINX: auth_request module", nginxAuthReq},
+		{"RFC 7519: JSON Web Token", "https://www.rfc-editor.org/rfc/rfc7519"},
+	}
+	gwRateLimitDocs = []link{
+		{"Envoy v1.40: local rate limit filter", envoyLocalRL},
+		{"Envoy v1.40: global rate limiting", envoyGlobalRL},
+		{"Traefik v3.7: RateLimit middleware", traefikRL},
+		{"NGINX: limit_req module", nginxLimitReq},
+	}
+	gwResilienceDocs = []link{
+		{"Envoy v1.40: timeouts", envoyTimeouts},
+		{"Envoy v1.40: HTTP routing (retry semantics)", envoyRouting + "#retry-semantics"},
+		{"Envoy v1.40: circuit breaking", envoyBreakers},
+		{"Envoy v1.40: circuit breaker thresholds and retry budgets", envoyCBProto},
+		{"Envoy v1.40: outlier detection", envoyOutlier},
+		{"Traefik v3.7: Retry middleware", traefikRetry},
+		{"Traefik v3.7: CircuitBreaker middleware", traefikCB},
+		{"Traefik v3.7: serversTransport (forwarding timeouts)", traefikST},
+		{"NGINX: proxy module (timeouts, proxy_next_upstream)", nginxProxy},
+	}
+	gwBFFDocs = []link{
+		{"Sam Newman: Backends For Frontends", "https://samnewman.io/patterns/architectural/bff/"},
+		{"Traefik v3.7: rules and priority", traefikRules},
+		{"Envoy v1.40: HTTP routing", envoyRouting},
+	}
+	gwGRPCDocs = []link{
+		{"Envoy v1.40: gRPC", envoyGRPC},
+		{"Envoy v1.40: gRPC statistics filter", envoyGRPCStats},
+		{"Envoy v1.40: timeouts", envoyTimeouts},
+		{"NGINX: grpc module", nginxGRPC},
+		{"gRPC: deadlines", "https://grpc.io/docs/guides/deadlines/"},
+		{"gRPC: status codes", "https://grpc.io/docs/guides/status-codes/"},
+	}
+)
+
+// The wave D starters, by id, with what each one shows.
+var (
+	stPathHost   = link{"Routing by path prefix and by Host to different services, with a stripped prefix and a default route, on Traefik.", "gw/path-host-routing"}
+	stTransform  = link{"Headers added and removed, a path rewrite, a redirect and a client's request ID kept, with Traefik middlewares.", "gw/request-transformation"}
+	stVersioning = link{"/v1 and /v2 by path and by header, with a deprecation header on v1, on NGINX.", "gw/api-versioning"}
+	stRateLimit  = link{"Envoy's token bucket beside NGINX's leaky bucket under the same burst, counting 429s per client.", "gw/rate-limiting"}
+	stBreaking   = link{"Envoy circuit breakers turning overload into fast 503s while a slow backend stays under its limit.", "gw/circuit-breaking"}
+	stRetries    = link{"Per-try timeouts and retries against a flaky backend, and a retry storm with and without a budget, on Envoy.", "gw/retries-and-timeouts"}
+	stJWT        = link{"An issuer that signs tokens and serves a JWKS; Envoy verifies them and forwards a claim.", "gw/jwt-auth"}
+	stFwdAuth    = link{"Traefik asks an auth service about every request and passes its identity header on.", "gw/forward-auth"}
+	stBFF        = link{"One client call fanned out to two services and merged by a BFF app behind Traefik.", "gw/bff-aggregation"}
+	stGRPC       = link{"Two gRPC services by name through one Envoy listener, with a per-method timeout.", "gw/grpc-routing"}
+	stSidecarCB  = link{"Envoy outlier detection in a caller's sidecar: a flaky replica ejected, then let back.", "sidecar/circuit-breaking"}
+)
+
+// gwStarters lists every wave D starter, in the guides' order.
+var gwStarters = []link{stPathHost, stTransform, stVersioning, stRateLimit, stBreaking, stRetries, stJWT, stFwdAuth, stBFF, stGRPC}
+
+// Diagram data.
+var (
+	gwConcerns   = []string{"authenticate", "rate limit", "route", "transform", "retry, time out"}
+	gwServices   = []string{"orders", "users", "catalog"}
+	gwTokens     = []int{1, 1, 1, 1, 0, 0}
+	gwRetryHops  = []string{"gateway", "service A", "service B", "database"}
+	gwRetryLoads = []string{"1", "3", "9", "27"}
+)
+
+func init() {
+	ids := make([]string, len(gwStarters))
+	for i, l := range gwStarters {
+		ids[i] = l.URL
+	}
+	registerTech(tech{
+		ID:       "api-gateways",
+		Name:     "API gateways",
+		Tagline:  "One front door for many services: routing, authentication, rate limits and resilience applied at the edge.",
+		Order:    76,
+		Intro:    gwIntro(),
+		GoodFit:  []string{"One public entry point for many services", "Authentication before traffic reaches a service", "Protecting services from bursts and overload", "Versioning and reshaping an API without touching services", "Per-client policy: keys, quotas, tiers"},
+		PoorFit:  []string{"Business logic (it belongs in the services)", "Traffic between services inside the system (a mesh's job)", "Hiding a slow service: a gateway adds a hop, it never removes one"},
+		Diagram:  gwDiagram(),
+		Starters: ids,
+		Official: []link{
+			{"Envoy v1.40: HTTP routing", envoyRouting},
+			{"Envoy v1.40: local rate limit filter", envoyLocalRL},
+			{"Envoy v1.40: JWT authentication filter", envoyJWT},
+			{"Traefik v3.7: HTTP middlewares", traefikMWList},
+			{"Traefik v3.7: rules and priority", traefikRules},
+			{"NGINX: limit_req module", nginxLimitReq},
+		},
+		Guides: []guide{
+			{
+				Slug: "what-is-a-gateway", Title: "What an API gateway is", Summary: "How a gateway differs from a reverse proxy, a load balancer and a service mesh.",
+				Starter:  stPathHost.URL,
+				Sections: []docSection{{"front-door", "A front door for many services"}, {"compare", "Gateway, reverse proxy, load balancer, mesh"}, {"north-south", "North-south and east-west"}, {"what-belongs", "What belongs at the gateway"}, {"breadboard", "Gateways in Breadboard"}, {"try", "Try them"}, {"official", "Official documentation"}},
+				Body:     gwWhat(),
+			},
+			{
+				Slug: "routing-and-transformation", Title: "Routing and transformation", Summary: "Matching by host, path and header; prefixes, rewrites, headers, redirects and versions.",
+				Starter:  stTransform.URL,
+				Sections: []docSection{{"match", "What a route matches"}, {"order", "Which route wins"}, {"rewrite", "Prefixes and rewrites"}, {"headers", "Adding and removing headers"}, {"request-id", "Request IDs"}, {"redirects", "Redirects"}, {"versioning", "API versions"}, {"try", "Try them"}, {"official", "Official documentation"}},
+				Body:     gwRouting(),
+			},
+			{
+				Slug: "authentication", Title: "Authentication at the edge", Summary: "Verifying JWTs at the gateway, or asking an auth service with forward auth.",
+				Starter:  stJWT.URL,
+				Sections: []docSection{{"why", "Why authenticate at the edge"}, {"jwt", "JWTs and JWKS"}, {"envoy-jwt", "Verifying JWTs in Envoy"}, {"forward", "Forward auth"}, {"compare", "JWT or forward auth"}, {"trust", "Trusting identity headers"}, {"try", "Try them"}, {"official", "Official documentation"}},
+				Body:     gwAuth(),
+			},
+			{
+				Slug: "rate-limiting", Title: "Rate limiting algorithms", Summary: "Token bucket, leaky bucket, fixed and sliding windows; local and global limits.",
+				Starter:  stRateLimit.URL,
+				Sections: []docSection{{"why", "What a limit protects"}, {"token-bucket", "Token bucket"}, {"leaky-bucket", "Leaky bucket"}, {"fixed-window", "Fixed window"}, {"sliding-window", "Sliding window"}, {"compare", "Side by side"}, {"keys", "Whose limit: keys"}, {"local-global", "Local and global limits"}, {"answer", "What the client gets back"}, {"try", "Try it"}, {"official", "Official documentation"}},
+				Body:     gwRateLimit(),
+			},
+			{
+				Slug: "resilience", Title: "Resilience at the gateway", Summary: "Timeouts, retries, retry budgets and circuit breakers, and how they interact.",
+				Starter:  stRetries.URL,
+				Sections: []docSection{{"failure", "How failure spreads"}, {"timeouts", "Timeouts"}, {"retries", "Retries"}, {"storms", "Retry storms and budgets"}, {"breakers", "Circuit breakers"}, {"together", "Putting them together"}, {"breadboard", "What Breadboard generates"}, {"try", "Try them"}, {"official", "Official documentation"}},
+				Body:     gwResilience(),
+			},
+			{
+				Slug: "bff-and-aggregation", Title: "Backend for frontend and aggregation", Summary: "One call fanned out to several services and merged, and when that is the gateway's job.",
+				Starter:  stBFF.URL,
+				Sections: []docSection{{"chatty", "The chatty client"}, {"aggregation", "Aggregation"}, {"bff", "Backend for frontend"}, {"routing-vs", "Gateway routing or a BFF"}, {"failure", "Latency and partial failure"}, {"try", "Try it"}, {"official", "Official documentation"}},
+				Body:     gwBFF(),
+			},
+			{
+				Slug: "grpc", Title: "gRPC through a gateway", Summary: "HTTP/2, routing by service and method, deadlines, and gRPC status codes.",
+				Starter:  stGRPC.URL,
+				Sections: []docSection{{"wire", "gRPC on the wire"}, {"l7", "Why gRPC needs an L7 proxy"}, {"routing", "Routing by service and method"}, {"http2", "HTTP/2 to the backend"}, {"deadlines", "Deadlines and timeouts"}, {"status", "Status codes and metrics"}, {"try", "Try it"}, {"official", "Official documentation"}},
+				Body:     gwGRPC(),
+			},
+		},
+	})
+}
+
+templ gwIntro() {
+	@docP() {
+		An API gateway is the single entry point clients use to reach a system's services. It is a reverse proxy that understands requests well enough to apply policy to them: who is calling, how often they may call, which service and which version should answer, and what to do when that service is slow or failing.
+	}
+	@docP() {
+		Putting that policy in one place means each service does not reimplement it, and changing it does not mean redeploying every service. The cost is a hop on every request and a component every request depends on.
+	}
+	@docP() {
+		Breadboard's HTTP proxies are the same software teams run as gateways. The configs Breadboard generates make them reverse proxies and load balancers; the gateway starters ship native configs that add one gateway idea each, on the proxy that teaches it best: Envoy, Traefik or NGINX.
+	}
+}
+
+templ gwDiagram() {
+	<svg viewBox="0 0 900 250" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Clients reach one gateway, which authenticates, rate limits, routes, transforms and retries before sending each request to orders, users or catalog">
+		<defs>
+			<marker id="gw-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		for i, name := range []string{"web app", "mobile app", "partner"} {
+			<rect x="20" y={ itoa(40 + i*65) } width="130" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="36" y={ itoa(67 + i*65) } class="fill-slate-700 text-[13px]">{ name }</text>
+			<line x1="150" y1={ itoa(62 + i*65) } x2="296" y2="125" stroke-width="1.5" marker-end="url(#gw-arrow)" class="stroke-slate-400"></line>
+		}
+		<text x="222" y="30" text-anchor="middle" class="fill-slate-500 text-[12px]">one address, TLS</text>
+		<rect x="300" y="20" width="300" height="210" rx="12" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="316" y="46" class="fill-indigo-800 font-mono text-[13px] font-semibold">gateway</text>
+		for i, c := range gwConcerns {
+			<rect x="316" y={ itoa(58 + i*33) } width="268" height="26" rx="6" class="fill-white stroke-indigo-200"></rect>
+			<text x="330" y={ itoa(76 + i*33) } class="fill-slate-700 text-[12px]">{ itoa(i + 1) }. { c }</text>
+		}
+		for i, s := range gwServices {
+			<rect x="700" y={ itoa(40 + i*65) } width="180" height="44" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="716" y={ itoa(67 + i*65) } class="fill-slate-900 font-mono text-[13px] font-semibold">{ s }</text>
+			<line x1="600" y1="125" x2="696" y2={ itoa(62 + i*65) } stroke-width="1.5" marker-end="url(#gw-arrow)" class="stroke-slate-400"></line>
+		}
+	</svg>
+}
+
+// --- What an API gateway is ------------------------------------------------------
+
+templ gwWhat() {
+	@docLead() {
+		An API gateway, a reverse proxy, a load balancer and a service mesh are often the same software, configured for different jobs. What separates them is where they sit, which traffic they see, and how much of each request they act on.
+	}
+	@docFigure("A gateway stands at the edge, between clients and the system, and applies policy to traffic coming in (north-south). A mesh puts a proxy beside every service and handles traffic between services (east-west).") {
+		@gwWhatDiagram()
+	}
+	@docH2("front-door", "A front door for many services")
+	@docP() {
+		Without a gateway every client needs to know every service: its address, its authentication, its quirks. A gateway gives clients one hostname and one API surface, and maps it onto services that can move, split, merge and change versions behind it. Each request passes a pipeline of steps, each able to answer on its own (401, 429, 503) before the request ever reaches a service.
+	}
+	@docH2("compare", "Gateway, reverse proxy, load balancer, mesh")
+	@docTable([]string{"", "Sits", "Acts on", "Typical features"},
+		[]string{"Reverse proxy", "in front of one or more servers", "connections and requests", "TLS, routing by host and path, caching, compression"},
+		[]string{"Load balancer", "in front of replicas of one service", "connections (L4) or requests (L7)", "strategies, health checks, draining"},
+		[]string{"API gateway", "at the edge of a system", "requests, as API calls", "auth, rate limits, versioning, transformation, retries, aggregation"},
+		[]string{"Service mesh", "beside every service", "service-to-service calls", "mTLS identity, retries, timeouts, traffic splitting, telemetry"},
+	)
+	@docP() {
+		The rows overlap: a gateway is a reverse proxy, it usually load balances, and a mesh's sidecars use the same retry and timeout machinery as a gateway. Envoy, for example, is the data plane of Istio's mesh and of several gateways. The name describes the job, not the binary.
+	}
+	@docH2("north-south", "North-south and east-west")
+	@docP() {
+		Traffic entering or leaving the system is north-south; traffic between services inside it is east-west. A gateway owns north-south: it faces untrusted clients, so it authenticates them, limits them and hides internal structure. A mesh owns east-west: it gives every service an identity, encrypts and authorises calls between them, and applies the same timeouts and retries everywhere. Many systems run both, and the gateway is then often just one more proxy the mesh manages.
+	}
+	@docH2("what-belongs", "What belongs at the gateway")
+	@docList(
+		"Cross-cutting policy that is the same for every service: TLS, authentication, rate limits, request IDs, access logs.",
+		"Shaping the public API: routes, versions, redirects, headers that hide internal names.",
+		"Protecting services: timeouts, bounded retries, circuit breakers.",
+		"Not business logic. A gateway that knows what an order is becomes a shared monolith every team has to change; keep that in services, or in a backend for frontend that one team owns.",
+	)
+	@docH2("breadboard", "Gateways in Breadboard")
+	@docP() {
+		Breadboard runs HAProxy, Envoy, Traefik and NGINX as proxy services (see @docLink("/docs/load-balancing", "Load balancing")). The generated configs terminate TLS on 8443, route @docCodeWord("/<name>/") prefixes to upstreams, check health and balance across replicas. They add no authentication, no rate limits and no retry policy of their own; NGINX's default @docCodeWord("proxy_next_upstream error timeout") is the one exception, and tries the next server after a connection error or timeout.
+	}
+	@docP() {
+		Each gateway starter ships its own commented native config as the proxy's @docCodeWord("file"), so the gateway features are in a file you own and can break. Every hop stays verified TLS.
+	}
+	@docH2("try", "Try them")
+	@docStarters(stPathHost, stJWT, stRateLimit, stBFF)
+	@docTerminal("bb starter gw/path-host-routing", "bb up", "bb status")
+	@docOfficial(gwWhatDocs)
+}
+
+templ gwWhatDiagram() {
+	<svg viewBox="0 0 900 220" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Left: clients cross the system boundary through one gateway (north-south). Right: inside the boundary, each service has a sidecar proxy and calls between services go sidecar to sidecar (east-west)">
+		<defs>
+			<marker id="gwn-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<rect x="20" y="88" width="110" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="36" y="115" class="fill-slate-700 text-[13px]">clients</text>
+		<rect x="190" y="14" width="690" height="192" rx="14" fill="none" stroke-dasharray="6 5" class="stroke-slate-300"></rect>
+		<text x="866" y="34" text-anchor="end" class="fill-slate-500 text-[12px]">the system</text>
+		<line x1="130" y1="110" x2="226" y2="110" stroke-width="2" marker-end="url(#gwn-arrow)" class="stroke-indigo-400"></line>
+		<text x="160" y="100" text-anchor="middle" class="fill-indigo-700 text-[11px] font-semibold">north-south</text>
+		<rect x="230" y="70" width="140" height="80" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="246" y="104" class="fill-indigo-800 font-mono text-[13px] font-semibold">gateway</text>
+		<text x="246" y="126" class="fill-slate-500 text-[11px]">auth, limits, routes</text>
+		for i, y := range []int{40, 130} {
+			<rect x="470" y={ itoa(y) } width="150" height="56" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="486" y={ itoa(y + 24) } class="fill-slate-900 font-mono text-[13px] font-semibold">{ gwServices[i] }</text>
+			<rect x="486" y={ itoa(y + 32) } width="76" height="18" rx="4" class="fill-white stroke-indigo-200"></rect>
+			<text x="494" y={ itoa(y + 45) } class="fill-indigo-700 text-[10px]">sidecar</text>
+			<line x1="370" y1="110" x2="466" y2={ itoa(y + 28) } stroke-width="1.5" marker-end="url(#gwn-arrow)" class="stroke-slate-400"></line>
+		}
+		<rect x="720" y="85" width="150" height="56" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="736" y="109" class="fill-slate-900 font-mono text-[13px] font-semibold">catalog</text>
+		<rect x="736" y="117" width="76" height="18" rx="4" class="fill-white stroke-indigo-200"></rect>
+		<text x="744" y="130" class="fill-indigo-700 text-[10px]">sidecar</text>
+		<line x1="620" y1="68" x2="716" y2="104" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#gwn-arrow)" class="stroke-slate-400"></line>
+		<line x1="620" y1="158" x2="716" y2="124" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#gwn-arrow)" class="stroke-slate-400"></line>
+		<text x="668" y="196" text-anchor="middle" class="fill-slate-500 text-[11px] font-semibold">east-west (mesh)</text>
+	</svg>
+}
+
+// --- Routing and transformation --------------------------------------------------
+
+const gwTraefikRoutesCode = `http:
+  routers:
+    # Path prefix: /orders/... goes to orders, without the prefix.
+    orders:
+      entryPoints: [websecure]
+      rule: PathPrefix(` + "`/orders`" + `)
+      middlewares: [strip-orders]
+      service: orders
+    # Host: anything for admin.bb.internal goes to admin.
+    admin:
+      entryPoints: [websecure]
+      rule: Host(` + "`admin.bb.internal`" + `)
+      service: admin
+    # The default route: matches everything, at the lowest priority.
+    fallback:
+      entryPoints: [websecure]
+      rule: PathPrefix(` + "`/`" + `)
+      priority: 1
+      service: fallback
+  middlewares:
+    strip-orders:
+      stripPrefix:
+        prefixes: [/orders]`
+
+const gwEnvoyRoutesCode = `virtual_hosts:
+  # Envoy picks a virtual host by the Host header (with or without the port).
+  - name: admin
+    domains: ["admin.bb.internal", "admin.bb.internal:8443"]
+    routes:
+      - match: {prefix: /}
+        route: {cluster: admin}
+  - name: api
+    domains: ["*"]
+    # Routes are tried in order; the first match wins.
+    routes:
+      - match: {prefix: /orders/}
+        route: {cluster: orders, prefix_rewrite: /}
+      - match: {prefix: /}
+        route: {cluster: fallback}`
+
+const gwTransformCode = `http:
+  middlewares:
+    gateway-headers:
+      headers:
+        customRequestHeaders:
+          X-Gateway: edge          # added to every request
+          X-Debug: ""              # an empty value removes the header
+        customResponseHeaders:
+          Server: ""               # hide what answered
+    v1-to-root:
+      replacePathRegex:
+        regex: ^/api/v1/(.*)
+        replacement: /$1
+    old-docs:
+      redirectRegex:
+        regex: ^https://([^/]+)/docs/(.*)
+        replacement: https://${1}/help/${2}
+        permanent: true`
+
+const gwVersionCode = `# A header picks the version when the path does not say.
+map $http_api_version $api_upstream {
+    default be_v1;
+    2       be_v2;
+}
+
+server {
+    # By path: each version reaches its own backend, prefix stripped.
+    location /v1/ {
+        proxy_pass https://be_v1/;
+        # Tell clients v1 is going away (RFC 9745 and RFC 8594).
+        add_header Deprecation "@1798761600" always;
+        add_header Sunset "Fri, 01 Jan 2027 00:00:00 GMT" always;
+    }
+    location /v2/ {
+        proxy_pass https://be_v2/;
+    }
+    # By header: Api-Version: 2 reaches v2, anything else v1.
+    location / {
+        proxy_pass https://$api_upstream;
+    }
+}`
+
+templ gwRouting() {
+	@docLead() {
+		Routing decides which service answers a request; transformation changes the request or response on the way. Together they let the public API keep its shape while the services behind it change.
+	}
+	@docFigure("The gateway matches each request against its routes: by host, then by path. A matched route can strip a prefix and add or remove headers before the request reaches its service; a request no route claims goes to the default.") {
+		@gwRoutingDiagram()
+	}
+	@docH2("match", "What a route matches")
+	@docTable([]string{"Match on", "Envoy", "Traefik", "NGINX"},
+		[]string{"Host", "virtual_hosts[].domains", "Host(`a.example`)", "server_name"},
+		[]string{"Path prefix", "match: {prefix: /orders/}", "PathPrefix(`/orders`)", "location /orders/"},
+		[]string{"Exact path", "match: {path: /health}", "Path(`/health`)", "location = /health"},
+		[]string{"Regex", "match: {safe_regex: …}", "PathRegexp(`^/v[0-9]+/`)", "location ~ ^/v[0-9]+/"},
+		[]string{"Header", "headers: [{name: …, string_match: …}]", "Header(`X-Canary`, `on`)", "map $http_x_canary …"},
+		[]string{"Method", "headers on :method", "Method(`POST`)", "limit_except, or if"},
+	)
+	@docH2("order", "Which route wins")
+	@docP() {
+		Each proxy decides overlaps differently, and getting it wrong sends traffic to the default route without an error.
+	}
+	@docList(
+		"Envoy picks the virtual host by the Host header, then tries its routes in order: the first match wins, so put specific routes before a catch-all.",
+		"Traefik sorts routers by priority, which defaults to the length of the rule: PathPrefix(`/orders`) outranks PathPrefix(`/`). Set priority to override it, as a catch-all with priority 1.",
+		"NGINX takes an exact location (=) first, then remembers the longest matching prefix; unless that prefix is marked ^~, it tries regex locations in the order they appear and uses the first that matches, falling back to the remembered prefix.",
+	)
+	@docCode("dynamic.yml (Traefik)", gwTraefikRoutesCode)
+	@docCode("envoy.yaml (Envoy)", gwEnvoyRoutesCode)
+	@docH2("rewrite", "Prefixes and rewrites")
+	@docP() {
+		Services rarely know the prefix the gateway publishes them under, so the gateway strips it: @docCodeWord("/orders/42") reaches orders as @docCodeWord("/42")&#46; Traefik's @docCodeWord("stripPrefix") removes it and puts it in @docCodeWord("X-Forwarded-Prefix"), so the service can still build links; Envoy's @docCodeWord("prefix_rewrite") replaces the matched prefix and @docCodeWord("regex_rewrite") rewrites with a pattern; in NGINX, a @docCodeWord("proxy_pass") with a URI, such as @docCodeWord("https://be_orders/"), replaces the part of the path the location matched. Breadboard's generated configs do exactly this for every @docCodeWord("/<name>/") route.
+	}
+	@docH2("headers", "Adding and removing headers")
+	@docP() {
+		Gateways add headers the backend needs, such as @docCodeWord("X-Forwarded-For"), @docCodeWord("X-Forwarded-Proto") and identity from authentication, and remove headers that should not cross the boundary: internal debugging switches from clients, and @docCodeWord("Server") or version headers from responses.
+	}
+	@docTable([]string{"", "Request", "Response"},
+		[]string{"Envoy", "request_headers_to_add, request_headers_to_remove", "response_headers_to_add, response_headers_to_remove"},
+		[]string{"Traefik", "headers.customRequestHeaders (empty value removes)", "headers.customResponseHeaders (empty value removes)"},
+		[]string{"NGINX", "proxy_set_header (empty value removes)", "add_header; proxy_hide_header"},
+	)
+	@docCode("dynamic.yml (Traefik)", gwTransformCode)
+	@docH2("request-id", "Request IDs")
+	@docP() {
+		A request ID set at the edge and passed to every service ties one user request to every log line it causes. Envoy generates @docCodeWord("x-request-id") by default, under @docCodeWord("generate_request_id"), and at the edge it replaces one sent by an external client unless @docCodeWord("preserve_external_request_id") is set. NGINX has @docCodeWord("$request_id"), 32 random hex characters, to send with @docCodeWord("proxy_set_header X-Request-ID $request_id")&#46; Traefik has no request ID setting of its own: its headers middleware sets fixed values, not unique ones.
+	}
+	@docH2("redirects", "Redirects")
+	@docP() {
+		A redirect is an answer from the gateway itself: moved permanently is @docCodeWord("301") or @docCodeWord("308"), moved temporarily @docCodeWord("302") or @docCodeWord("307"), with a @docCodeWord("Location") header. The client makes a second request. Traefik has @docCodeWord("redirectScheme") and @docCodeWord("redirectRegex"), Envoy a route's @docCodeWord("redirect") action, NGINX @docCodeWord("return 301 https://…")&#46; A rewrite, in contrast, changes the path silently and the client never knows.
+	}
+	@docH2("versioning", "API versions")
+	@docP() {
+		Versions let an API change incompatibly while old clients keep working. The gateway sends each version to the backend that implements it, chosen by the path, as in @docCodeWord("/v1/") and @docCodeWord("/v2/"), by a header such as @docCodeWord("Api-Version: 2"), or by a media type in @docCodeWord("Accept")&#46; Paths are visible, cacheable and easy to route; headers keep URLs stable but are invisible in a browser and need a @docCodeWord("Vary") header to be cached correctly.
+	}
+	@docP() {
+		Retiring a version is a process: announce it in responses with a @docCodeWord("Deprecation") header (RFC 9745), whose date is written @docCodeWord("@<unix seconds>"), and a @docCodeWord("Sunset") header (RFC 8594), an HTTP date, watch the access log for clients still calling it, then remove the route.
+	}
+	@docCode("nginx.conf (NGINX)", gwVersionCode)
+	@docP() {
+		NGINX's @docCodeWord("add_header") is inherited from the enclosing level only when the location sets none of its own, and without @docCodeWord("always") it is added only to 2xx and 3xx answers. Both catch people who check a deprecation header on an error response.
+	}
+	@docH2("try", "Try them")
+	@docStarters(stPathHost, stTransform, stVersioning)
+	@docOfficial(gwRoutingDocs)
+}
+
+templ gwRoutingDiagram() {
+	<svg viewBox="0 0 900 230" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Three requests enter the gateway: admin.bb.internal goes to admin by host, /orders/42 goes to orders as /42 with a header added, and /unknown goes to the default service">
+		<defs>
+			<marker id="gwr-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		for i, req := range []string{"Host: admin.bb.internal", "GET /orders/42", "GET /unknown"} {
+			<rect x="20" y={ itoa(30 + i*65) } width="210" height="40" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="34" y={ itoa(55 + i*65) } class="fill-slate-700 font-mono text-[12px]">{ req }</text>
+			<line x1="230" y1={ itoa(50 + i*65) } x2="306" y2={ itoa(50 + i*65) } stroke-width="1.5" marker-end="url(#gwr-arrow)" class="stroke-slate-400"></line>
+		}
+		<rect x="310" y="14" width="280" height="202" rx="12" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="326" y="40" class="fill-indigo-800 font-mono text-[13px] font-semibold">gateway routes</text>
+		<text x="326" y="64" class="fill-slate-700 font-mono text-[12px]">1 Host(admin…) → admin</text>
+		<text x="326" y="116" class="fill-slate-700 font-mono text-[12px]">2 /orders → orders</text>
+		<text x="340" y="136" class="fill-slate-500 text-[11px]">strip prefix, add X-Gateway</text>
+		<text x="326" y="180" class="fill-slate-700 font-mono text-[12px]">3 / → fallback (default)</text>
+		for i, svc := range []string{"admin  GET /", "orders  GET /42", "fallback  GET /unknown"} {
+			<rect x="680" y={ itoa(30 + i*65) } width="200" height="40" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x="694" y={ itoa(55 + i*65) } class="fill-slate-900 font-mono text-[12px]">{ svc }</text>
+			<line x1="590" y1={ itoa(50 + i*65) } x2="676" y2={ itoa(50 + i*65) } stroke-width="1.5" marker-end="url(#gwr-arrow)" class="stroke-slate-400"></line>
+		}
+	</svg>
+}
+
+// --- Authentication at the edge ----------------------------------------------------
+
+const gwJWTCode = `http_filters:
+  - name: envoy.filters.http.jwt_authn
+    typed_config:
+      '@type': type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+      providers:
+        issuer:
+          issuer: https://issuer.bb.internal:8443   # must equal the token's iss
+          audiences: [orders]                       # the token's aud must name one
+          # Public keys, fetched over verified TLS through the issuer cluster
+          # and cached; a token's kid picks the key.
+          remote_jwks:
+            http_uri:
+              uri: https://issuer.bb.internal:8443/.well-known/jwks.json
+              cluster: issuer
+              timeout: 2s
+            cache_duration: 300s
+          # Copy a verified claim into a header for the backend.
+          claim_to_headers:
+            - header_name: x-user
+              claim_name: sub
+      rules:
+        # Every request needs a valid token from this provider.
+        - match: {prefix: /}
+          requires: {provider_name: issuer}
+  - name: envoy.filters.http.router
+    typed_config:
+      '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router`
+
+const gwForwardAuthCode = `http:
+  routers:
+    orders:
+      entryPoints: [websecure]
+      rule: PathPrefix(` + "`/`" + `)
+      middlewares: [check-identity]
+      service: orders
+  middlewares:
+    check-identity:
+      forwardAuth:
+        # Traefik asks this URL about every request first.
+        address: https://auth.bb.internal:8443/check
+        tls:
+          ca: /etc/bb/ca.pem          # verify the auth service
+        # On a 2xx, these headers from the auth answer are set on the request.
+        authResponseHeaders:
+          - X-User`
+
+templ gwAuth() {
+	@docLead() {
+		Authentication at the edge means the gateway decides who the caller is before any service sees the request, and rejects anyone it cannot identify. It can check a token itself (JWT) or ask a service that knows (forward auth).
+	}
+	@docFigure("JWT: the gateway verifies the token's signature with the issuer's public keys, fetched once and cached, and forwards a claim. Forward auth: the gateway asks an auth service about every request and forwards the identity it returns.") {
+		@gwAuthDiagram()
+	}
+	@docH2("why", "Why authenticate at the edge")
+	@docList(
+		"One implementation instead of one per service, in every language the services use.",
+		"Unauthenticated traffic never reaches a service, so a service bug cannot be reached anonymously.",
+		"Services receive a plain identity header instead of parsing credentials; they still authorise (may this user read this order?), because only they know their data.",
+		"The gateway becomes part of the security boundary: a route that skips authentication, or a service reachable around the gateway, undoes it.",
+	)
+	@docH2("jwt", "JWTs and JWKS")
+	@docP() {
+		A JSON Web Token is three base64url parts joined by dots: a header (algorithm and key ID, @docCodeWord("kid")), a payload of claims, among them @docCodeWord("iss") issuer, @docCodeWord("sub") subject, @docCodeWord("aud") audience, @docCodeWord("exp") expiry, and a signature over the first two. An issuer signs with its private key; anyone with the public key can check the signature without asking the issuer. The issuer publishes its public keys as a JSON Web Key Set (JWKS) at a URL, so it can rotate keys by publishing a new one beside the old.
+	}
+	@docP() {
+		Verifying a JWT means: the signature matches a key from the JWKS for the token's @docCodeWord("kid") and an algorithm the verifier allows, @docCodeWord("exp") has not passed, and @docCodeWord("iss") and @docCodeWord("aud") are the expected ones. The payload is only encoded, not encrypted: anyone holding the token can read it, so it never carries secrets.
+	}
+	@docH2("envoy-jwt", "Verifying JWTs in Envoy")
+	@docP() {
+		Envoy's @docCodeWord("jwt_authn") filter runs before the router. By default it reads the token from @docCodeWord("Authorization: Bearer") or an @docCodeWord("access_token") query parameter.
+	}
+	@docCode("envoy.yaml", gwJWTCode)
+	@docTable([]string{"Request", "Envoy answers"},
+		[]string{"No token, on a route that requires one", "401, Jwt is missing"},
+		[]string{"Bad signature, expired, wrong issuer", "401, Jwt verification fails (or a more specific message)"},
+		[]string{"Valid token, audience not allowed", "403, Audiences in Jwt are not allowed"},
+		[]string{"Valid token", "forwarded, with the claim in x-user"},
+	)
+	@docP() {
+		The JWKS is fetched through an Envoy cluster, so in Breadboard it is a verified TLS hop to the issuer like any other. Other options forward the whole verified payload, with @docCodeWord("forward_payload_header"), or keep the token for the backend with @docCodeWord("forward: true"); by default Envoy strips it.
+	}
+	@docH2("forward", "Forward auth")
+	@docP() {
+		With forward auth the gateway makes a sub-request to an auth service for every client request, copying the original's headers (cookies, @docCodeWord("Authorization")) and describing it in @docCodeWord("X-Forwarded-Method"), @docCodeWord("X-Forwarded-Host"), @docCodeWord("X-Forwarded-Uri") and their siblings. A 2xx answer lets the request through, with headers listed in @docCodeWord("authResponseHeaders") copied onto it; any other answer goes back to the client as it is, so the auth service's 401 or redirect to a login page is what the user sees.
+	}
+	@docCode("dynamic.yml (Traefik)", gwForwardAuthCode)
+	@docP() {
+		The same pattern is @docCodeWord("auth_request") in NGINX (2xx allows; 401 or 403 are returned to the client; anything else is an error) and the @docCodeWord("ext_authz") filter in Envoy, which can also call a gRPC service.
+	}
+	@docH2("compare", "JWT or forward auth")
+	@docTable([]string{"", "JWT at the gateway", "Forward auth"},
+		[]string{"Per request", "a signature check, no network call", "a call to the auth service"},
+		[]string{"Revocation", "only at exp, unless you add a deny list", "immediate: the service decides each time"},
+		[]string{"Depends on", "the JWKS, fetched and cached", "the auth service being up and fast"},
+		[]string{"Decides with", "what is in the token", "anything the service knows: sessions, API keys, IP, plan"},
+	)
+	@docP() {
+		Short-lived JWTs (minutes) with refresh tokens are the usual answer to revocation. Forward auth fits session cookies, opaque API keys and logic that changes often, at the price of a dependency on every request: when the auth service is down, every request is denied.
+	}
+	@docH2("trust", "Trusting identity headers")
+	@docP() {
+		A backend that reads @docCodeWord("X-User") trusts whoever set it. That is safe only if every path to the backend goes through the gateway, and the gateway sets the header from verified identity on every route, replacing any copy the client sent. A service reachable around the gateway, or a route that forgets the auth middleware, lets a client claim to be anyone. Breadboard's TLS everywhere helps: the backend can require its caller to be the gateway's certificate, not anyone on the network.
+	}
+	@docH2("try", "Try them")
+	@docStarters(stJWT, stFwdAuth)
+	@docOfficial(gwAuthDocs)
+}
+
+templ gwAuthDiagram() {
+	<svg viewBox="0 0 900 250" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Top: a client sends a bearer token; Envoy checks it against cached keys from the issuer's JWKS and forwards x-user to the backend. Bottom: Traefik sends each request to an auth service first and forwards X-User on a 2xx">
+		<defs>
+			<marker id="gwa-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<text x="20" y="22" class="fill-slate-900 text-[13px] font-semibold">JWT</text>
+		<rect x="20" y="40" width="130" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="34" y="67" class="fill-slate-700 text-[13px]">client</text>
+		<line x1="150" y1="62" x2="306" y2="62" stroke-width="1.5" marker-end="url(#gwa-arrow)" class="stroke-slate-400"></line>
+		<text x="228" y="54" text-anchor="middle" class="fill-slate-500 font-mono text-[11px]">Bearer eyJ…</text>
+		<rect x="310" y="34" width="220" height="56" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="326" y="58" class="fill-indigo-800 font-mono text-[13px] font-semibold">envoy: jwt_authn</text>
+		<text x="326" y="78" class="fill-slate-500 text-[11px]">signature, exp, iss, aud</text>
+		<rect x="350" y="104" width="140" height="22" rx="5" class="fill-white stroke-slate-200"></rect>
+		<text x="362" y="119" class="fill-slate-500 text-[11px]">issuer: JWKS (cached)</text>
+		<line x1="420" y1="104" x2="420" y2="94" stroke-width="1.5" stroke-dasharray="3 3" class="stroke-slate-400"></line>
+		<line x1="530" y1="62" x2="686" y2="62" stroke-width="1.5" marker-end="url(#gwa-arrow)" class="stroke-slate-400"></line>
+		<text x="608" y="54" text-anchor="middle" class="fill-indigo-700 font-mono text-[11px]">x-user: alice</text>
+		<rect x="690" y="40" width="190" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="704" y="67" class="fill-slate-900 font-mono text-[13px]">backend</text>
+		<text x="20" y="160" class="fill-slate-900 text-[13px] font-semibold">forward auth</text>
+		<rect x="20" y="178" width="130" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="34" y="205" class="fill-slate-700 text-[13px]">client</text>
+		<line x1="150" y1="200" x2="306" y2="200" stroke-width="1.5" marker-end="url(#gwa-arrow)" class="stroke-slate-400"></line>
+		<text x="228" y="192" text-anchor="middle" class="fill-slate-500 font-mono text-[11px]">cookie / API key</text>
+		<rect x="310" y="172" width="220" height="56" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="326" y="196" class="fill-indigo-800 font-mono text-[13px] font-semibold">traefik: forwardAuth</text>
+		<text x="326" y="216" class="fill-slate-500 text-[11px]">every request, first</text>
+		<rect x="350" y="134" width="140" height="22" rx="5" class="fill-white stroke-slate-200"></rect>
+		<text x="362" y="149" class="fill-slate-500 text-[11px]">auth: 2xx or 401</text>
+		<line x1="420" y1="156" x2="420" y2="168" stroke-width="1.5" stroke-dasharray="3 3" class="stroke-slate-400"></line>
+		<line x1="530" y1="200" x2="686" y2="200" stroke-width="1.5" marker-end="url(#gwa-arrow)" class="stroke-slate-400"></line>
+		<text x="608" y="192" text-anchor="middle" class="fill-indigo-700 font-mono text-[11px]">X-User: alice</text>
+		<rect x="690" y="178" width="190" height="44" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="704" y="205" class="fill-slate-900 font-mono text-[13px]">backend</text>
+	</svg>
+}
+
+// --- Rate limiting -------------------------------------------------------------------
+
+const gwEnvoyRLCode = `http_filters:
+  - name: envoy.filters.http.local_ratelimit
+    typed_config:
+      '@type': type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+      stat_prefix: http_local_rate_limiter
+      # A bucket of 10 tokens, topped up by 5 every second: bursts of 10,
+      # then 5 requests a second.
+      token_bucket:
+        max_tokens: 10
+        tokens_per_fill: 5
+        fill_interval: 1s
+      # Both default to 0% of requests: without them nothing is limited.
+      filter_enabled:
+        runtime_key: local_rate_limit_enabled
+        default_value: {numerator: 100, denominator: HUNDRED}
+      filter_enforced:
+        runtime_key: local_rate_limit_enforced
+        default_value: {numerator: 100, denominator: HUNDRED}
+  - name: envoy.filters.http.router
+    typed_config:
+      '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router`
+
+const gwNginxRLCode = `http {
+    # One counter per client address, at 5 requests a second (one every
+    # 200 ms), kept in 10 MB of memory shared by the workers.
+    limit_req_zone $binary_remote_addr zone=perclient:10m rate=5r/s;
+    # The default answer is 503.
+    limit_req_status 429;
+
+    server {
+        location / {
+            # Up to 10 requests above the rate wait their turn; more are rejected.
+            limit_req zone=perclient burst=10;
+            # nodelay: serve those 10 at once; their slots still free at the rate.
+            # limit_req zone=perclient burst=10 nodelay;
+            proxy_pass https://be_api;
+        }
+    }
+}`
+
+const gwTraefikRLCode = `http:
+  middlewares:
+    per-client:
+      rateLimit:
+        average: 5        # tokens added per period
+        period: 1s
+        burst: 10         # the bucket's size
+        # Whose bucket: by default the client's address; here a header.
+        sourceCriterion:
+          requestHeaderName: X-Client-Id`
+
+const gwWindowCode = `// Fixed window: one counter per key per minute.
+window := now.Truncate(time.Minute)
+if counts[key][window] >= limit { reject() }
+counts[key][window]++
+
+// Sliding window counter: weigh the previous minute by how much of it
+// still overlaps the last 60 seconds.
+prev := window.Add(-time.Minute)
+elapsed := now.Sub(window).Seconds() / 60
+estimate := float64(counts[key][prev])*(1-elapsed) + float64(counts[key][window])
+if estimate >= limit { reject() }`
+
+templ gwRateLimit() {
+	@docLead() {
+		A rate limit caps how many requests a client may make over time. The algorithm decides how bursts are treated and how much state the limiter keeps; where it runs decides whether the limit is per gateway instance or for the whole system.
+	}
+	@docFigure("Token bucket: tokens drip in at a steady rate up to a capacity, and a burst spends what has saved up. Leaky bucket: requests queue in the bucket and leave at a steady rate; when the bucket is full, new ones are rejected.") {
+		@gwBucketsDiagram()
+	}
+	@docH2("why", "What a limit protects")
+	@docList(
+		"A service from more load than it can handle, whether from a bug, a retry loop or an attack.",
+		"Clients from each other: one noisy client should not use the capacity everyone shares.",
+		"Business rules: a free plan gets 100 calls a minute, a paid one 10,000.",
+	)
+	@docP() {
+		A rate limit is not a concurrency limit. A limit of 100 requests a second admits 100 one-second requests that all pile up at once; capping how many run at the same time is a circuit breaker's job (see @docLink("/docs/api-gateways/resilience", "Resilience at the gateway")).
+	}
+	@docH2("token-bucket", "Token bucket")
+	@docP() {
+		A bucket holds up to B tokens and gains r tokens per second. Each request takes one token; a request that finds the bucket empty is rejected. A client that has been quiet has a full bucket, so it can send B requests at once, then r a second after that. Two numbers, two meanings: the rate is the long-run average, the capacity is the largest burst. State per key is a token count and a timestamp.
+	}
+	@docCode("envoy.yaml (Envoy local_ratelimit)", gwEnvoyRLCode)
+	@docP() {
+		Envoy's @docCodeWord("local_ratelimit") filter is a token bucket: @docCodeWord("max_tokens") is the capacity, and @docCodeWord("tokens_per_fill") every @docCodeWord("fill_interval") the rate. A rejected request gets a 429 from Envoy itself, and the @docCodeWord("http_local_rate_limiter.http_local_rate_limit.rate_limited") counter in the admin stats goes up. Traefik's @docCodeWord("rateLimit") middleware is a token bucket too: @docCodeWord("average") per @docCodeWord("period") is the rate and @docCodeWord("burst") the capacity.
+	}
+	@docCode("dynamic.yml (Traefik rateLimit)", gwTraefikRLCode)
+	@docH2("leaky-bucket", "Leaky bucket")
+	@docP() {
+		Picture a bucket with a hole: requests pour in, and they leak out to the backend at a constant rate r. The bucket holds B requests; a request arriving when it is full is rejected. Whatever the arrival pattern, the backend sees a smooth flow. Used only to decide accept or reject, a leaky bucket and a token bucket with the same rate and size admit the same requests; the difference that matters in practice is that a leaky bucket can delay the requests it holds rather than pass them on at once.
+	}
+	@docCode("nginx.conf (NGINX limit_req)", gwNginxRLCode)
+	@docP() {
+		NGINX's @docCodeWord("limit_req") says in its documentation that it uses the leaky bucket method. @docCodeWord("rate=5r/s") is tracked at millisecond granularity, as one request every 200 ms, not five at the start of each second. @docCodeWord("burst=10") is the bucket: up to 10 excess requests are queued and released at the rate, and the 11th is rejected. With @docCodeWord("nodelay") the queued requests are forwarded immediately, but their places in the bucket still free up only at the rate, so the limit holds while the latency goes away; @docCodeWord("delay=N") forwards the first N at once and delays the rest. Rejected requests get 503 unless @docCodeWord("limit_req_status") says otherwise.
+	}
+	@docH2("fixed-window", "Fixed window")
+	@docP() {
+		Count requests per key in fixed intervals, such as each calendar minute, and reject once the count reaches the limit; the counter resets at the boundary. It is one counter per key and trivial in a shared store (increment, expire). Its flaw is the boundary: a client can send the full limit in the last second of one window and again in the first second of the next, twice the limit in two seconds.
+	}
+	@docH2("sliding-window", "Sliding window")
+	@docP() {
+		A sliding window limits the last N seconds as of now, so no boundary can be gamed. The exact version, a sliding log, keeps a timestamp per request and counts those in the window: precise, but memory grows with the limit. The common approximation, a sliding window counter, keeps the current and previous fixed-window counts and weighs the previous one by how much of it still overlaps the window. It is two counters per key and close to exact when traffic is spread evenly.
+	}
+	@docCode("windows.go (sketch)", gwWindowCode)
+	@docH2("compare", "Side by side")
+	@docTable([]string{"Algorithm", "Bursts", "State per key", "Seen in"},
+		[]string{"Token bucket", "up to the capacity, then the rate", "tokens and a timestamp", "Envoy local_ratelimit, Traefik rateLimit"},
+		[]string{"Leaky bucket", "queued (or rejected), sent at the rate", "a level and a timestamp", "NGINX limit_req"},
+		[]string{"Fixed window", "up to 2× the limit at a boundary", "one counter", "many Redis-backed limiters, Envoy's ratelimit service"},
+		[]string{"Sliding log", "none beyond the limit", "a timestamp per request", "exact quotas at small limits"},
+		[]string{"Sliding window counter", "close to none", "two counters", "large-scale API limiters"},
+	)
+	@docH2("keys", "Whose limit: keys")
+	@docP() {
+		A limit applies per key: a client address, an API key, a user from a verified token, or a route. One bucket for everyone protects the service but lets one client starve the rest; one per client is fair but needs a key that clients cannot change at will. Behind another proxy or a NAT, many users share one address, so an identity from authentication is usually the better key. NGINX takes the key from the zone: @docCodeWord("$binary_remote_addr"), or any variable such as @docCodeWord("$http_x_api_key"); an empty key is not limited. Traefik uses @docCodeWord("sourceCriterion")&#46; Envoy's local filter keeps one bucket by default; per-key buckets come from @docCodeWord("descriptors"), matched against entries a route's @docCodeWord("rate_limits") actions produce from the client address or a header.
+	}
+	@docH2("local-global", "Local and global limits")
+	@docFigure("Local: each gateway instance keeps its own bucket, so three instances admit about three times the limit. Global: every instance asks one rate limit service, which keeps the shared count.") {
+		@gwLocalGlobalDiagram()
+	}
+	@docP() {
+		A local limit lives in one gateway process. It costs nothing per request, but with N gateway instances behind a load balancer a client gets roughly N times the limit, and the share each instance sees depends on how it is balanced. Envoy's local bucket is shared by the workers of one Envoy process; NGINX's zone is shared memory across the workers of one server; Traefik keeps its buckets in the process.
+	}
+	@docP() {
+		A global limit keeps the count in one place every instance consults. In Envoy that is a separate service: the @docCodeWord("envoy.filters.http.ratelimit") filter sends descriptors over gRPC to a rate limit service (the reference implementation, envoyproxy/ratelimit, counts in Redis) and rejects when it says over limit. Every request pays a network call and depends on that service; Envoy's docs suggest a local limit in front to absorb large bursts and a global one for the exact quota. Traefik's @docCodeWord("rateLimit") can also keep its buckets in Redis.
+	}
+	@docCallout("Breadboard's examples use local limiting") {
+		The rate-limiting starter runs Envoy's local token bucket and NGINX's leaky bucket, each in one container, so the counts you see are exactly what each algorithm decides. Neither starts a global rate limit service.
+	}
+	@docH2("answer", "What the client gets back")
+	@docP() {
+		A rejected request should get 429 Too Many Requests, with a @docCodeWord("Retry-After") header when the gateway can say when to come back. Clients should back off with jitter, not retry at once: a fleet of clients retrying immediately turns a limit into a storm. Envoy's local filter answers 429 by default and can add draft @docCodeWord("RateLimit") headers with @docCodeWord("enable_x_ratelimit_headers"); Traefik answers 429; NGINX answers 503 unless @docCodeWord("limit_req_status") changes it, and its @docCodeWord("$limit_req_status") variable puts PASSED, DELAYED or REJECTED in the access log.
+	}
+	@docH2("try", "Try it")
+	@docStarters(stRateLimit)
+	@docTerminal("bb starter gw/rate-limiting", "bb up", "bb logs -f")
+	@docOfficial(gwRateLimitDocs)
+}
+
+templ gwBucketsDiagram() {
+	<svg viewBox="0 0 900 230" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Left: a token bucket with four of six tokens; each request takes one, and tokens refill at a fixed rate. Right: a leaky bucket queue of requests leaving at a fixed rate, with a request rejected because the queue is full">
+		<defs>
+			<marker id="gwb-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<text x="20" y="24" class="fill-slate-900 text-[13px] font-semibold">token bucket</text>
+		<text x="160" y="52" text-anchor="middle" class="fill-slate-500 text-[11px]">+ r tokens per second</text>
+		<line x1="160" y1="58" x2="160" y2="78" stroke-width="1.5" marker-end="url(#gwb-arrow)" class="stroke-slate-400"></line>
+		<path d="M90 82 L100 190 L220 190 L230 82" fill="none" stroke-width="2" class="stroke-slate-400"></path>
+		for i, full := range gwTokens {
+			if full == 1 {
+				<circle cx={ itoa(122 + (i%3)*38) } cy={ itoa(172 - (i/3)*34) } r="13" class="fill-indigo-400"></circle>
+			} else {
+				<circle cx={ itoa(122 + (i%3)*38) } cy={ itoa(172 - (i/3)*34) } r="13" fill="none" stroke-dasharray="3 3" class="stroke-slate-300"></circle>
+			}
+		}
+		<text x="160" y="212" text-anchor="middle" class="fill-slate-500 text-[11px]">capacity B = 6, 4 saved</text>
+		<line x1="250" y1="150" x2="330" y2="150" stroke-width="1.5" marker-end="url(#gwb-arrow)" class="stroke-slate-400"></line>
+		<text x="290" y="140" text-anchor="middle" class="fill-slate-500 text-[11px]">1 token</text>
+		<text x="340" y="146" class="fill-slate-700 text-[12px]">each request</text>
+		<text x="340" y="164" class="fill-slate-700 text-[12px]">empty → 429</text>
+		<text x="480" y="24" class="fill-slate-900 text-[13px] font-semibold">leaky bucket</text>
+		<line x1="480" y1="90" x2="556" y2="90" stroke-width="1.5" marker-end="url(#gwb-arrow)" class="stroke-slate-400"></line>
+		<text x="488" y="80" class="fill-slate-500 text-[11px]">requests</text>
+		<path d="M560 60 L570 170 L690 170 L700 60" fill="none" stroke-width="2" class="stroke-slate-400"></path>
+		for i := range 4 {
+			<rect x={ itoa(584 + (i%2)*52) } y={ itoa(136 - (i/2)*36) } width="40" height="26" rx="4" class="fill-slate-300"></rect>
+		}
+		<text x="630" y="52" text-anchor="middle" class="fill-red-700 text-[11px] font-semibold">full → reject</text>
+		<line x1="630" y1="170" x2="630" y2="206" stroke-width="1.5" marker-end="url(#gwb-arrow)" class="stroke-indigo-400"></line>
+		<text x="642" y="200" class="fill-indigo-700 text-[11px] font-semibold">out at r per second</text>
+		<text x="720" y="110" class="fill-slate-700 text-[12px]">queued requests</text>
+		<text x="720" y="128" class="fill-slate-700 text-[12px]">wait (NGINX burst),</text>
+		<text x="720" y="146" class="fill-slate-700 text-[12px]">or pass at once</text>
+		<text x="720" y="164" class="fill-slate-700 text-[12px]">(nodelay)</text>
+	</svg>
+}
+
+templ gwLocalGlobalDiagram() {
+	<svg viewBox="0 0 900 200" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Left: three gateway instances each with their own bucket of 10 per second, admitting about 30. Right: three instances that each ask one rate limit service backed by Redis">
+		<defs>
+			<marker id="gwl-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<text x="20" y="24" class="fill-slate-900 text-[13px] font-semibold">local</text>
+		for i := range 3 {
+			<rect x={ itoa(20 + i*130) } y="50" width="116" height="70" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+			<text x={ itoa(34 + i*130) } y="76" class="fill-indigo-800 font-mono text-[12px] font-semibold">gateway { itoa(i + 1) }</text>
+			<text x={ itoa(34 + i*130) } y="100" class="fill-slate-600 text-[11px]">bucket: 10/s</text>
+		}
+		<text x="210" y="160" text-anchor="middle" class="fill-red-700 text-[12px] font-semibold">client gets about 30/s</text>
+		<text x="480" y="24" class="fill-slate-900 text-[13px] font-semibold">global</text>
+		for i := range 3 {
+			<rect x={ itoa(480 + i*130) } y="40" width="116" height="50" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+			<text x={ itoa(494 + i*130) } y="70" class="fill-indigo-800 font-mono text-[12px] font-semibold">gateway { itoa(i + 1) }</text>
+			<line x1={ itoa(538 + i*130) } y1="90" x2="668" y2="136" stroke-width="1.5" marker-end="url(#gwl-arrow)" class="stroke-slate-400"></line>
+		}
+		<rect x="600" y="140" width="180" height="44" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="614" y="161" class="fill-slate-900 font-mono text-[12px] font-semibold">rate limit service</text>
+		<text x="614" y="177" class="fill-slate-500 text-[11px]">one count, in Redis</text>
+		<text x="866" y="170" text-anchor="end" class="fill-indigo-700 text-[12px] font-semibold">10/s total</text>
+	</svg>
+}
+
+// --- Resilience --------------------------------------------------------------------
+
+const gwResilienceCode = `routes:
+  - match: {prefix: /}
+    route:
+      cluster: orders
+      # The whole exchange, every try included. The default is 15s.
+      timeout: 3s
+      retry_policy:
+        retry_on: 5xx,reset,connect-failure
+        num_retries: 2              # the default is 1
+        per_try_timeout: 1s
+        # Jittered exponential backoff between tries (default 25ms base).
+        retry_back_off: {base_interval: 0.1s, max_interval: 1s}
+clusters:
+  - name: orders
+    circuit_breakers:
+      thresholds:
+        - priority: DEFAULT
+          max_connections: 100        # each defaults to 1024
+          max_pending_requests: 10
+          max_requests: 50
+          # Retries in flight may be at most 20% of requests in flight,
+          # but at least 3. Replaces max_retries when set.
+          retry_budget:
+            budget_percent: {value: 20.0}
+            min_retry_concurrency: 3`
+
+const gwTraefikBreakerCode = `http:
+  middlewares:
+    orders-breaker:
+      circuitBreaker:
+        # Open when more than a quarter of answers are 5xx, or 10% are network errors.
+        expression: ResponseCodeRatio(500, 600, 0, 600) > 0.25 || NetworkErrorRatio() > 0.10
+        checkPeriod: 100ms
+        fallbackDuration: 10s   # open: answer 503 without calling the service
+        recoveryDuration: 10s   # recovering: let traffic back in gradually
+    orders-retry:
+      retry:
+        attempts: 3
+        initialInterval: 100ms`
+
+templ gwResilience() {
+	@docLead() {
+		Every request through a gateway depends on a service that can be slow, failing or overloaded. Timeouts bound how long a request waits, retries hide brief failures, budgets stop retries from making things worse, and circuit breakers fail fast instead of piling more work on a service that is already struggling.
+	}
+	@docFigure("Retries multiply down a call chain: with three tries at each of four layers, one failing request becomes 27 calls to the database. A retry budget limits how many retries may be in flight at once, as a share of the requests in flight, so a failing service is not hit with every retry at the same time.") {
+		@gwRetryDiagram()
+	}
+	@docH2("failure", "How failure spreads")
+	@docP() {
+		A slow service is worse than a dead one. A dead one refuses connections and callers fail fast; a slow one holds every caller's connection, thread and memory while it thinks. Requests keep arriving at the same rate, so the work in flight grows until the callers run out of something too, and the slowness spreads upstream. The gateway is where that cascade can be stopped before it reaches every client.
+	}
+	@docH2("timeouts", "Timeouts")
+	@docP() {
+		A timeout turns an unbounded wait into a fast, clear error. Gateways have several, each bounding a different phase:
+	}
+	@docTable([]string{"Timeout", "Envoy", "Traefik", "NGINX"},
+		[]string{"Connect", "cluster connect_timeout (Breadboard: 2s)", "serversTransport forwardingTimeouts.dialTimeout (30s)", "proxy_connect_timeout (Breadboard: 5s)"},
+		[]string{"Whole request", "route timeout (15s)", "none by default", "none: per read and write"},
+		[]string{"Per try", "retry_policy.per_try_timeout", "—", "proxy_next_upstream_timeout (all tries)"},
+		[]string{"Waiting for the answer", "—", "forwardingTimeouts.responseHeaderTimeout (0, none)", "proxy_read_timeout, between reads (60s)"},
+		[]string{"Idle connection", "idle_timeout (1h)", "forwardingTimeouts.idleConnTimeout (90s)", "keepalive_timeout"},
+	)
+	@docP() {
+		Set timeouts from the outside in: the gateway's must be longer than the service's own call to its dependencies, or the gateway gives up while the work still finishes and is wasted; and each layer's must be shorter than its caller's. Envoy's route timeout counts from the end of the client's request to the end of the response, including every retry; @docCodeWord("per_try_timeout") bounds each attempt, so a 3s timeout with a 1s per-try timeout leaves room for about three attempts.
+	}
+	@docH2("retries", "Retries")
+	@docP() {
+		A retry sends a failed request again, usually to another host, and turns a brief failure (a replica restarting, a dropped connection) into a slower success. It is only safe when doing the request twice is harmless: GET, PUT, DELETE, or a POST with an idempotency key the service checks. NGINX never retries a non-idempotent request (POST, LOCK, PATCH) that it already sent unless told to; Envoy retries whatever the @docCodeWord("retry_on") conditions match, whatever the method, so the route decides.
+	}
+	@docCode("envoy.yaml (Envoy)", gwResilienceCode)
+	@docList(
+		"retry_on lists what counts: 5xx, gateway-error (502, 503, 504), reset, connect-failure, retriable-4xx (409), retriable-status-codes, and gRPC conditions such as unavailable and deadline-exceeded.",
+		"Backoff spreads retries out: Envoy waits a random time below 25 ms before the first retry, then below 50, then below 100 (the limit doubles from base_interval and is capped at max_interval, 10 times the base by default). Without jitter, many clients retry in lockstep.",
+		"Envoy adds x-envoy-attempt-count when asked (include_attempt_count_in_response), so a client can see how many tries its answer took.",
+		"Traefik's retry middleware retries when the backend could not be reached or did not answer, and stops as soon as it answers, whatever the status; its status option adds status codes to retry on. It skips POST, LOCK and PATCH unless retryNonIdempotentMethod is set, backs off from initialInterval, and timeout bounds the time spent retrying.",
+	)
+	@docH2("storms", "Retry storms and budgets")
+	@docP() {
+		Retries help when failures are rare and independent. When a service is overloaded, every retry is more load on the thing that is already failing: a service at 50% errors receives up to (1 + retries) times its normal traffic exactly when it can least serve it. In a chain, it multiplies: three tries at each of four layers is 27 calls at the bottom for one user request.
+	}
+	@docList(
+		"Retry at one layer only, usually the one closest to the client that can see the whole picture.",
+		"A retry budget limits concurrency, not a count of attempts. Envoy's retry_budget lets retries in flight reach budget_percent (20% by default) of the requests in flight to the cluster, active plus pending, and never fewer than min_retry_concurrency (3 by default); a retry beyond that is refused, the failed try's answer goes back to the client, and upstream_rq_retry_overflow counts it. When few tries fail, every retry fits; when many fail at once under steady traffic, most retries are refused.",
+		"At low traffic the floor sets the cap: up to three retries may be outstanding at once, and any further retry is refused. At larger traffic the percentage term sets the cap. One failing request on an otherwise idle cluster still gets all three of its retries, one after another, because it never has more than one retry outstanding: four tries for one request, the same as no budget.",
+		"It is not a fixed load multiplier. How many tries the service receives per request depends on how many requests are in flight, how long each try takes and the backoff between tries, so a concurrency share of 20% does not mean 1.2 tries per request. The retries-and-timeouts starter measures about 1.3 tries per request against a down service; that number is specific to its traffic, timing and floor of 1.",
+		"Without a budget Envoy still caps concurrent retries per cluster with max_retries, 3 by default: a fixed number, too high for a small service and too low for a big one.",
+	)
+	@docH2("breakers", "Circuit breakers")
+	@docP() {
+		A circuit breaker stops calling a service that is failing or full, and answers at once instead. The caller gets a fast error rather than a slow one, and the service gets room to recover. The term covers two designs:
+	}
+	@docList(
+		"Concurrency limits: Envoy's cluster circuit_breakers cap connections, pending requests, requests and retries in flight to a cluster. A request that finds no free connection waits in a pending queue of at most max_pending_requests; beyond that, or over max_requests, Envoy answers 503 at once with x-envoy-overloaded: true, and counts upstream_rq_pending_overflow, upstream_rq_active_overflow or upstream_rq_retry_overflow (upstream_cx_overflow when connections hit their cap). The defaults (1024 each, 3 retries) are far too high to protect a small service.",
+		"State machines: closed (calls pass and failures are counted), open (calls fail fast for a while), then half-open or recovering (some calls are let through; success closes, failure re-opens). Traefik's circuitBreaker middleware works this way, opening on an expression over error ratios or latency and answering 503 while open.",
+		"Envoy's outlier detection is the per-host version of the state machine: a host with consecutive 5xx is ejected for a while, then let back (see the sidecar/circuit-breaking starter and Health checks: active and passive).",
+	)
+	@docCode("dynamic.yml (Traefik)", gwTraefikBreakerCode)
+	@docP() {
+		A concurrency limit is easy to reason about: by Little's law, a service that takes 200 ms per request at 50 in flight serves at most 250 requests a second, so set @docCodeWord("max_requests") near what it can actually run at once and let the rest fail fast. Watch @docCodeWord("cluster.<name>.circuit_breakers.default.rq_open") in Envoy's stats: 1 means the limit is being hit now.
+	}
+	@docH2("together", "Putting them together")
+	@docSteps(
+		"A timeout on every call, shorter than the caller's.",
+		"Retries only for idempotent requests, with backoff and jitter, at one layer, with a budget.",
+		"A concurrency limit sized to what the service can do, so overload fails fast instead of queuing.",
+		"Outlier detection or health checks, so one bad replica is taken out instead of retried into.",
+		"Clients that treat 503 and 429 as “back off”, not “try again now”.",
+	)
+	@docH2("breadboard", "What Breadboard generates")
+	@docP() {
+		The generated proxy configs set connect timeouts (Envoy 2s, NGINX 5s) and health checks, and stop there: no retry policy, no circuit breaker thresholds, no route timeouts beyond each proxy's default (Envoy 15s). NGINX's default @docCodeWord("proxy_next_upstream error timeout") does retry the next server after a connection error or timeout, for requests that are safe to send twice. The resilience starters add every setting above in their own @docCodeWord("envoy.yaml"), where you can turn each one off and watch what changes.
+	}
+	@docH2("try", "Try them")
+	@docStarters(stRetries, stBreaking, stSidecarCB)
+	@docP() {
+		Health checks and outlier detection are covered in @docLink("/docs/load-balancing/health-checks", "Health checks: active and passive")&#46;
+	}
+	@docOfficial(gwResilienceDocs)
+}
+
+templ gwRetryDiagram() {
+	<svg viewBox="0 0 900 200" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="A chain of gateway, service A, service B and database. With three tries at each layer, calls grow 1, 3, 9, 27. A 20% retry budget limits retries in flight to a fifth of the requests in flight, active plus pending, but never below a floor of 3, so a lone failing request still gets every retry">
+		<defs>
+			<marker id="gwy-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<text x="20" y="24" class="fill-slate-900 text-[13px] font-semibold">three tries per layer, no budget</text>
+		for i, hop := range gwRetryHops {
+			<rect x={ itoa(20 + i*220) } y="40" width="170" height="60" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+			<text x={ itoa(36 + i*220) } y="66" class="fill-slate-900 font-mono text-[13px] font-semibold">{ hop }</text>
+			<text x={ itoa(36 + i*220) } y="88" class="fill-red-700 text-[12px] font-semibold">{ gwRetryLoads[i] } × calls</text>
+			if i < 3 {
+				<line x1={ itoa(190 + i*220) } y1="70" x2={ itoa(236 + i*220) } y2="70" stroke-width="1.5" marker-end="url(#gwy-arrow)" class="stroke-red-300"></line>
+			}
+		}
+		<text x="20" y="140" class="fill-slate-900 text-[13px] font-semibold">retry budget 20%</text>
+		<rect x="20" y="152" width="860" height="34" rx="8" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="36" y="174" class="fill-indigo-800 text-[12px]">retries in flight ≤ 20% of requests in flight (active + pending), at least 3: a concurrency limit, not a load multiple</text>
+	</svg>
+}
+
+// --- Backend for frontend -------------------------------------------------------------
+
+const gwBFFCode = `// One handler, two services in parallel, one merged answer.
+func dashboard(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 800*time.Millisecond)
+	defer cancel()
+	var profile Profile
+	var orders []Order
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return get(ctx, usersURL+"/me", &profile) })
+	g.Go(func() error { return get(ctx, ordersURL+"/recent", &orders) })
+	if err := g.Wait(); err != nil {
+		http.Error(w, "upstream failed", http.StatusBadGateway)
+		return
+	}
+	json.NewEncoder(w).Encode(Dashboard{Profile: profile, Orders: orders})
+}`
+
+templ gwBFF() {
+	@docLead() {
+		A screen often needs data from several services. Aggregation lets the client make one call and a server-side component make the several; a backend for frontend is that component, built for one kind of client and owned by the team that builds the client.
+	}
+	@docFigure("Gateway routing: the client calls users and orders itself, two round trips over its own network. BFF: the client makes one call; the BFF calls both services in parallel over the data centre network and returns one merged answer.") {
+		@gwBFFDiagram()
+	}
+	@docH2("chatty", "The chatty client")
+	@docP() {
+		A mobile home screen shows the user's profile, recent orders and recommendations. Called directly, that is three requests over a phone network, each paying its latency; the client parses three formats, handles three failures, and changes whenever any service changes its API. Many requests also fetch more than the screen shows, which costs a phone battery and bandwidth.
+	}
+	@docH2("aggregation", "Aggregation")
+	@docP() {
+		An aggregator accepts one request and makes the calls on the client's behalf, in parallel where they are independent, over the fast network inside the system. The client's latency becomes one round trip plus the slowest call, not the sum of every call over a slow link. The aggregator can also trim each answer to what the screen needs.
+	}
+	@docCode("bff/main.go (sketch)", gwBFFCode)
+	@docH2("bff", "Backend for frontend")
+	@docP() {
+		A backend for frontend (BFF) is an aggregator per client type: one for the web app, one for mobile, one for partners. Each is shaped by its client's screens and changes with them, and the team that owns the client owns its BFF, so a mobile change does not need a central API team. The pattern was named by Sam Newman from work at SoundCloud.
+	}
+	@docList(
+		"Good fit: very different clients (a phone and a desktop dashboard), screens that combine several services, client teams that ship independently.",
+		"Poor fit: one client type, or a BFF that only forwards calls; then it is just another hop.",
+		"Watch for duplication: several BFFs reimplementing the same logic. Shared logic belongs in a service, not copied between BFFs.",
+	)
+	@docH2("routing-vs", "Gateway routing or a BFF")
+	@docTable([]string{"", "Gateway routing", "BFF"},
+		[]string{"Requests from client", "one per service", "one per screen"},
+		[]string{"Knows the domain", "no: matches hosts, paths, headers", "yes: knows what a dashboard is"},
+		[]string{"Merges answers", "no", "yes"},
+		[]string{"Owned by", "a platform team, shared", "the client's team"},
+		[]string{"Built with", "proxy config", "application code"},
+	)
+	@docP() {
+		They combine: the gateway stays in front for TLS, authentication and rate limits, and routes @docCodeWord("/mobile/") to the mobile BFF and @docCodeWord("/web/") to the web one. Keep aggregation out of the gateway's config; a gateway that knows about dashboards is a shared monolith. GraphQL is a related answer: one generic endpoint where the client describes the shape it needs, at the cost of a schema layer.
+	}
+	@docH2("failure", "Latency and partial failure")
+	@docList(
+		"Call independent services in parallel; the answer takes as long as the slowest call, so give every call a timeout within the client's own deadline.",
+		"Decide per field what a failure means: no profile is an error, no recommendations is an empty list. A partial answer often beats a 502.",
+		"Pass the caller's identity and request ID to every service, as the gateway would.",
+		"Fan-out multiplies load: one client call is N service calls. Rate limits and circuit breakers belong on the BFF's calls too.",
+	)
+	@docH2("try", "Try it")
+	@docStarters(stBFF, stPathHost)
+	@docOfficial(gwBFFDocs)
+}
+
+templ gwBFFDiagram() {
+	<svg viewBox="0 0 900 230" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="Top: a client calls users and orders through the gateway with two requests. Bottom: a client makes one request through the gateway to a BFF, which calls users and orders in parallel and merges the answers">
+		<defs>
+			<marker id="gwf-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<text x="20" y="22" class="fill-slate-900 text-[13px] font-semibold">gateway routing</text>
+		<rect x="20" y="40" width="120" height="56" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="34" y="72" class="fill-slate-700 text-[13px]">client</text>
+		<line x1="140" y1="56" x2="296" y2="56" stroke-width="1.5" marker-end="url(#gwf-arrow)" class="stroke-slate-400"></line>
+		<line x1="140" y1="80" x2="296" y2="80" stroke-width="1.5" marker-end="url(#gwf-arrow)" class="stroke-slate-400"></line>
+		<text x="218" y="48" text-anchor="middle" class="fill-slate-500 font-mono text-[11px]">GET /users/me</text>
+		<text x="218" y="100" text-anchor="middle" class="fill-slate-500 font-mono text-[11px]">GET /orders/recent</text>
+		<rect x="300" y="40" width="140" height="56" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="316" y="72" class="fill-indigo-800 font-mono text-[13px] font-semibold">gateway</text>
+		<line x1="440" y1="56" x2="676" y2="46" stroke-width="1.5" marker-end="url(#gwf-arrow)" class="stroke-slate-400"></line>
+		<line x1="440" y1="80" x2="676" y2="90" stroke-width="1.5" marker-end="url(#gwf-arrow)" class="stroke-slate-400"></line>
+		<text x="20" y="140" class="fill-slate-900 text-[13px] font-semibold">backend for frontend</text>
+		<rect x="20" y="158" width="120" height="56" rx="8" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="34" y="190" class="fill-slate-700 text-[13px]">client</text>
+		<line x1="140" y1="186" x2="296" y2="186" stroke-width="1.5" marker-end="url(#gwf-arrow)" class="stroke-indigo-400"></line>
+		<text x="218" y="178" text-anchor="middle" class="fill-indigo-700 font-mono text-[11px]">GET /dashboard</text>
+		<rect x="300" y="158" width="140" height="56" rx="10" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="316" y="190" class="fill-indigo-800 font-mono text-[13px] font-semibold">gateway</text>
+		<line x1="440" y1="186" x2="496" y2="186" stroke-width="1.5" marker-end="url(#gwf-arrow)" class="stroke-slate-400"></line>
+		<rect x="500" y="158" width="120" height="56" rx="10" class="fill-white stroke-indigo-300"></rect>
+		<text x="516" y="184" class="fill-slate-900 font-mono text-[13px] font-semibold">bff</text>
+		<text x="516" y="202" class="fill-slate-500 text-[11px]">fan out, merge</text>
+		<line x1="620" y1="176" x2="676" y2="60" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#gwf-arrow)" class="stroke-indigo-400"></line>
+		<line x1="620" y1="196" x2="676" y2="140" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#gwf-arrow)" class="stroke-indigo-400"></line>
+		<rect x="680" y="24" width="200" height="44" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="696" y="51" class="fill-slate-900 font-mono text-[13px] font-semibold">users</text>
+		<rect x="680" y="80" width="200" height="72" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="696" y="120" class="fill-slate-900 font-mono text-[13px] font-semibold">orders</text>
+		<text x="866" y="214" text-anchor="end" class="fill-slate-500 text-[11px]">dashed: in parallel, inside the system</text>
+	</svg>
+}
+
+// --- gRPC ---------------------------------------------------------------------------
+
+const gwGRPCRoutesCode = `routes:
+  # gRPC paths are /<package>.<Service>/<Method>: one method by exact path,
+  # with its own deadline, before the rule for its whole service.
+  - match: {path: /catalog.v1.Catalog/Search, grpc: {}}
+    route:
+      cluster: catalog
+      max_stream_duration:
+        # Used when the call carries no grpc-timeout header.
+        max_stream_duration: 0.5s
+        # When it does, use the client's deadline, but never more than this.
+        grpc_timeout_header_max: 0.5s
+  # A whole service by prefix: honour the client's deadline, up to 5s.
+  - match: {prefix: /catalog.v1.Catalog/, grpc: {}}
+    route: {cluster: catalog, max_stream_duration: {grpc_timeout_header_max: 5s}}
+  - match: {prefix: /orders.v1.Orders/, grpc: {}}
+    route: {cluster: orders, max_stream_duration: {grpc_timeout_header_max: 5s}}`
+
+const gwGRPCClusterCode = `clusters:
+  - name: orders
+    # gRPC needs HTTP/2 to the backend; Envoy speaks HTTP/1.1 to a cluster
+    # unless told otherwise.
+    typed_extension_protocol_options:
+      envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+        '@type': type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+        explicit_http_config:
+          http2_protocol_options: {}
+    transport_socket:
+      name: envoy.transport_sockets.tls
+      typed_config:
+        '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+        sni: orders.bb.internal
+        common_tls_context:
+          alpn_protocols: [h2]
+          validation_context:
+            trusted_ca: {filename: /etc/bb/ca.pem}
+            # Verify the name too: SNI only asks for a certificate, and any
+            # certificate the lab CA signed would pass trusted_ca alone.
+            match_typed_subject_alt_names:
+              - san_type: DNS
+                matcher: {exact: orders.bb.internal}`
+
+templ gwGRPC() {
+	@docLead() {
+		gRPC is remote procedure calls over HTTP/2, with Protocol Buffers as the usual message format. A gateway that understands HTTP/2 can route gRPC calls by service and method, balance each call, enforce deadlines and count results by gRPC status.
+	}
+	@docFigure("One Envoy listener takes gRPC calls over HTTP/2 and routes each by its path, /package.Service/Method, to the cluster that implements it. A Search call that outlives its 0.5-second method deadline (max_stream_duration) is ended by Envoy with DEADLINE_EXCEEDED.") {
+		@gwGRPCDiagram()
+	}
+	@docH2("wire", "gRPC on the wire")
+	@docList(
+		"Each call is an HTTP/2 POST to /<package>.<Service>/<Method>, with content-type application/grpc. Many calls share one connection as separate streams.",
+		"Messages are length-prefixed frames in the request and response bodies; a call can stream many in either direction.",
+		"The result is in trailers, not the HTTP status: grpc-status (0 is OK, 4 DEADLINE_EXCEEDED, 14 UNAVAILABLE, …) and grpc-message. A failed call usually still has HTTP status 200.",
+		"A client deadline travels as the grpc-timeout header (such as 500m for 500 ms), so servers and proxies along the way can know how long the caller will wait.",
+	)
+	@docH2("l7", "Why gRPC needs an L7 proxy")
+	@docP() {
+		Because calls are multiplexed on long-lived connections, an L4 balancer that picks a backend per connection sends every call from one client to the same backend for as long as the connection lives. An L7 proxy that speaks HTTP/2 terminates the client's connection, sees each call as a stream, and balances calls across backends. See @docLink("/docs/load-balancing/l4-vs-l7", "L4 vs L7 proxying")&#46; Envoy was built with gRPC in mind; NGINX proxies it with @docCodeWord("grpc_pass"); Traefik routes it as HTTP/2 with an @docCodeWord("h2c") or HTTPS backend.
+	}
+	@docH2("routing", "Routing by service and method")
+	@docP() {
+		Since the service and method are the path, ordinary path routes are gRPC routes: a prefix for a whole service, an exact path for one method. Envoy also offers a @docCodeWord("grpc: {}") route match that matches only requests with a gRPC content type, to keep gRPC and REST apart on one listener.
+	}
+	@docCode("envoy.yaml (routes)", gwGRPCRoutesCode)
+	@docH2("http2", "HTTP/2 to the backend")
+	@docP() {
+		The client side is negotiated by ALPN: Breadboard's generated Envoy and NGINX listeners offer @docCodeWord("h2") and @docCodeWord("http/1.1")&#46; The backend side is configured per cluster, and Breadboard's generated Envoy clusters speak HTTP/1.1, which cannot carry gRPC. A gRPC cluster needs HTTP/2 explicitly, over TLS with @docCodeWord("h2") in ALPN. A verified hop checks both the CA, with @docCodeWord("trusted_ca"), and the name, with @docCodeWord("match_typed_subject_alt_names"): @docCodeWord("sni") only tells the backend which certificate to send.
+	}
+	@docCode("envoy.yaml (cluster)", gwGRPCClusterCode)
+	@docH2("deadlines", "Deadlines and timeouts")
+	@docP() {
+		A deadline is the caller's: it says how long the whole call, through every hop, may take. When it passes, the client's gRPC library ends the call with DEADLINE_EXCEEDED, whatever the servers are doing. Envoy can limit a call per route in two ways, and they end it with different statuses:
+	}
+	@docList(
+		"max_stream_duration is a deadline. With grpc_timeout_header_max, Envoy takes the client's grpc-timeout, capped at that maximum, and passes the tighter deadline on to the server; max_stream_duration applies to calls that carry no grpc-timeout. When it passes, Envoy cancels the call upstream and answers the client itself with grpc-status 4, DEADLINE_EXCEEDED (downstream duration timeout). The routes above give Search 0.5 seconds while the rest of the service honours the client's deadline up to 5.",
+		"The route timeout, 15s by default, is an upstream request timeout. When it passes, Envoy answers HTTP 504, which a gRPC client sees as grpc-status 14, UNAVAILABLE (upstream request timeout): a status that invites a retry, for a call that was only slow. Use max_stream_duration for gRPC deadlines, and leave the route timeout as the backstop.",
+	)
+	@docP() {
+		When Envoy ends a gRPC call itself, it answers in gRPC terms: a trailers-only response with a @docCodeWord("grpc-status") mapped from the HTTP error, and the gRPC client reports that status. Servers should also watch their own context and stop work the caller has abandoned.
+	}
+	@docH2("status", "Status codes and metrics")
+	@docP() {
+		HTTP metrics see gRPC failures as 200s, so a gateway needs gRPC-aware counters. Envoy's @docCodeWord("grpc_stats") filter counts calls by result, per service and method when @docCodeWord("stats_for_all_methods") or an allowlist of methods is set, as @docCodeWord("cluster.<cluster>.grpc.<service>.<method>.success"), @docCodeWord("failure") and @docCodeWord("total"), and the access log can record @docCodeWord("%GRPC_STATUS%") per call. NGINX logs @docCodeWord("$status") as 200 for a failed call; the gRPC status is in a trailer.
+	}
+	@docTable([]string{"grpc-status", "Name", "Typical cause"},
+		[]string{"0", "OK", "success"},
+		[]string{"4", "DEADLINE_EXCEEDED", "the deadline passed before the answer"},
+		[]string{"12", "UNIMPLEMENTED", "no such method on the server that got the call"},
+		[]string{"14", "UNAVAILABLE", "no healthy backend, connection refused; safe to retry"},
+		[]string{"16", "UNAUTHENTICATED", "missing or bad credentials"},
+	)
+	@docH2("try", "Try it")
+	@docStarters(stGRPC)
+	@docOfficial(gwGRPCDocs)
+}
+
+templ gwGRPCDiagram() {
+	<svg viewBox="0 0 900 220" width="900" class="mx-auto block h-auto max-w-full" role="img" aria-label="A gRPC client sends calls over one HTTP/2 connection to Envoy; calls to /catalog.v1.Catalog/ go to catalog and calls to /orders.v1.Orders/ go to orders, and a Search call that outlives its 0.5-second max_stream_duration is ended by Envoy with DEADLINE_EXCEEDED">
+		<defs>
+			<marker id="gwg-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L8 4 L0 8 z" class="fill-slate-400"></path></marker>
+		</defs>
+		<rect x="20" y="70" width="140" height="80" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="36" y="104" class="fill-slate-900 font-mono text-[13px] font-semibold">grpc client</text>
+		<text x="36" y="126" class="fill-slate-500 text-[11px]">one HTTP/2 connection</text>
+		<line x1="160" y1="110" x2="306" y2="110" stroke-width="3" marker-end="url(#gwg-arrow)" class="stroke-indigo-300"></line>
+		<text x="232" y="100" text-anchor="middle" class="fill-slate-500 text-[11px]">many streams</text>
+		<rect x="310" y="30" width="280" height="160" rx="12" class="fill-indigo-50 stroke-indigo-200"></rect>
+		<text x="326" y="56" class="fill-indigo-800 font-mono text-[13px] font-semibold">envoy :8443 (h2)</text>
+		<text x="326" y="88" class="fill-slate-700 font-mono text-[11px]">/catalog.v1.Catalog/* → catalog</text>
+		<text x="326" y="116" class="fill-slate-700 font-mono text-[11px]">/orders.v1.Orders/* → orders</text>
+		<text x="326" y="150" class="fill-red-700 font-mono text-[11px]">Search &gt; 0.5s → DEADLINE_EXCEEDED</text>
+		<text x="326" y="172" class="fill-slate-500 text-[11px]">grpc_stats: per method, per status</text>
+		<rect x="680" y="40" width="200" height="50" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="696" y="70" class="fill-slate-900 font-mono text-[13px] font-semibold">catalog</text>
+		<rect x="680" y="130" width="200" height="50" rx="10" class="fill-slate-50 stroke-slate-200"></rect>
+		<text x="696" y="160" class="fill-slate-900 font-mono text-[13px] font-semibold">orders</text>
+		<line x1="590" y1="86" x2="676" y2="66" stroke-width="1.5" marker-end="url(#gwg-arrow)" class="stroke-slate-400"></line>
+		<line x1="590" y1="116" x2="676" y2="152" stroke-width="1.5" marker-end="url(#gwg-arrow)" class="stroke-slate-400"></line>
+		<text x="636" y="206" text-anchor="middle" class="fill-slate-500 text-[11px]">HTTP/2 over verified TLS</text>
+	</svg>
+}
+
+// docOfficial ends a guide with the official pages behind it.
+templ docOfficial(links []link) {
+	@docH2("official", "Official documentation")
+	<ul class="my-4 flex flex-col gap-1.5 text-[16px] leading-7">
+		for _, l := range links {
+			<li>
+				@extLink(l.URL) {
+					{ l.Title } ↗
+				}
+			</li>
+		}
+	</ul>
+}

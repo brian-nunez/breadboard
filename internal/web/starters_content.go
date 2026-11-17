@@ -352,7 +352,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "dynamic.yml", KeyTitle: "Four routers and their priorities",
 		Covers: []string{"Path routing", "Host (virtual host) routing", "Strip prefix", "Router priority", "Default routes"},
-		Guide:  "/docs/traefik",
+		Guide:  "/docs/api-gateways/what-is-a-gateway",
 	},
 	"gw/request-transformation": {
 		Area:  "traefik",
@@ -365,7 +365,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "dynamic.yml", KeyTitle: "The middleware chain",
 		Covers: []string{"Header injection and removal", "Path rewriting", "Rewrite vs redirect", "Request IDs", "Not trusting client headers"},
-		Guide:  "/docs/traefik",
+		Guide:  "/docs/api-gateways/routing-and-transformation",
 	},
 	"gw/api-versioning": {
 		Area:  "nginx",
@@ -378,7 +378,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "nginx.conf", KeyTitle: "Routing by version and the deprecation headers",
 		Covers: []string{"Path vs header versioning", "Default versions", "Deprecation and Sunset headers", "Breaking vs compatible changes"},
-		Guide:  "/docs/nginx",
+		Guide:  "/docs/api-gateways/routing-and-transformation",
 	},
 	"gw/rate-limiting": {
 		Area:  "envoy",
@@ -391,7 +391,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "envoy.yaml", KeyTitle: "A token bucket per client",
 		Covers: []string{"Token bucket vs leaky bucket", "Burst vs steady rate", "429 and Retry-After", "Per-client keys", "Local vs global limits"},
-		Guide:  "/docs/envoy",
+		Guide:  "/docs/api-gateways/rate-limiting",
 	},
 	"gw/circuit-breaking": {
 		Area:  "envoy",
@@ -404,7 +404,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "envoy.yaml", KeyTitle: "The circuit_breakers block",
 		Covers: []string{"Envoy circuit breakers", "Fail fast vs queue", "max_connections, max_pending_requests, max_requests", "Protecting a slow backend"},
-		Guide:  "/docs/envoy",
+		Guide:  "/docs/api-gateways/resilience",
 	},
 	"gw/retries-and-timeouts": {
 		Area:  "envoy",
@@ -417,7 +417,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "envoy.yaml", KeyTitle: "Retry policies and the retry budget",
 		Covers: []string{"Route and per-try timeouts", "retry_on and back-off", "Retry storms", "Retry budgets"},
-		Guide:  "/docs/envoy",
+		Guide:  "/docs/api-gateways/resilience",
 	},
 	"gw/jwt-auth": {
 		Area:  "envoy",
@@ -430,7 +430,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "envoy.yaml", KeyTitle: "The jwt_authn provider and rules",
 		Covers: []string{"Authentication at the edge", "JWTs and JWKS", "Signature, issuer, audience and expiry checks", "Forwarding verified claims"},
-		Guide:  "/docs/envoy",
+		Guide:  "/docs/api-gateways/authentication",
 	},
 	"gw/forward-auth": {
 		Area:  "traefik",
@@ -443,7 +443,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "dynamic.yml", KeyTitle: "The forwardAuth middleware chain",
 		Covers: []string{"Delegated authentication", "Identity headers from an auth service", "Immediate session revocation", "Forward auth vs JWT"},
-		Guide:  "/docs/traefik",
+		Guide:  "/docs/api-gateways/authentication",
 	},
 	"gw/bff-aggregation": {
 		Area:  "traefik",
@@ -456,7 +456,7 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "cmd/bff-api/main.go", KeyTitle: "The fan-out and merge",
 		Covers: []string{"Backend for frontend", "Request aggregation", "Concurrent fan-out with timeouts", "Gateway routing vs composition"},
-		Guide:  "/docs/traefik",
+		Guide:  "/docs/api-gateways/bff-and-aggregation",
 	},
 	"gw/grpc-routing": {
 		Area:  "envoy",
@@ -469,6 +469,6 @@ var starterContents = map[string]starterContent{
 		},
 		KeyFile: "envoy.yaml", KeyTitle: "gRPC routes and the per-method deadline",
 		Covers: []string{"gRPC over HTTP/2", "Routing by service and method", "Deadlines and grpc-timeout", "gRPC status codes in gateway metrics"},
-		Guide:  "/docs/envoy",
+		Guide:  "/docs/api-gateways/grpc",
 	},
 }

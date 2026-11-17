@@ -21,7 +21,7 @@ func init() {
 			{"NGINX: stream ssl_preread module", nginxDocs + "stream/ngx_stream_ssl_preread_module.html"},
 			{"NGINX: HTTP load balancing", nginxDocs + "http/load_balancing.html"},
 		},
-		Starters: []string{stRoundRobin.URL, stBlueGreen.URL},
+		Starters: []string{stRoundRobin.URL, stBlueGreen.URL, stVersioning.URL, stRateLimit.URL},
 		Guides: []guide{
 			{
 				Slug: "config-anatomy", Title: "Anatomy of nginx.conf", Summary: "Contexts, upstreams, the HTTPS server, locations and the stream block.",

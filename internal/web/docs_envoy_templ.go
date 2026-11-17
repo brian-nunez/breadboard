@@ -31,7 +31,7 @@ func init() {
 			{"Envoy: cluster API", envoyDocs + "api-v3/config/cluster/v3/cluster.proto"},
 			{"Envoy: route API", envoyDocs + "api-v3/config/route/v3/route_components.proto"},
 		},
-		Starters: []string{stHashing.URL, stHealth.URL, stMirroring.URL},
+		Starters: []string{stHashing.URL, stHealth.URL, stMirroring.URL, stRateLimit.URL, stBreaking.URL, stRetries.URL, stJWT.URL, stGRPC.URL},
 		Guides: []guide{
 			{
 				Slug: "config-anatomy", Title: "Anatomy of envoy.yaml", Summary: "Listeners, filter chains, routes and clusters, in order.",

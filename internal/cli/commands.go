@@ -148,6 +148,9 @@ func (c *cli) starter(args []string) error {
 	if len(res.ExistingApps) > 0 {
 		fmt.Fprintf(c.out, "  left existing %s untouched: %s\n", plural(len(res.ExistingApps), "app", "apps"), join(res.ExistingApps))
 	}
+	if len(res.ExistingServices) > 0 {
+		fmt.Fprintf(c.out, "  left existing %s untouched: %s\n", plural(len(res.ExistingServices), "service", "services"), join(res.ExistingServices))
+	}
 	fmt.Fprintf(c.out, "\nNext: bb up, then read %s/README.md\n", res.Dir)
 	return nil
 }

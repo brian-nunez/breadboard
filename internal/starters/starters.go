@@ -12,6 +12,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/brian-nunez/breadboard/internal/catalog"
 	"github.com/brian-nunez/breadboard/internal/spec"
 	templates "github.com/brian-nunez/breadboard/starters"
 )
@@ -36,6 +37,8 @@ type Starter struct {
 	// Requires lists catalog types the starter needs; missing ones are added.
 	Requires []string
 	Apps     []App
+	// Services are proxies the starter adds in front of its apps.
+	Services []Service
 }
 
 // App is an app service the starter adds.
@@ -44,7 +47,8 @@ type App struct {
 	// Command runs the app: the binary the Dockerfile's dev stage built
 	// from cmd/<name> into /usr/local/bin.
 	Command []string
-	// Uses lists catalog types; each resolves to the experiment's service of that type.
+	// Uses lists catalog types, each resolved to the experiment's service of
+	// that type, or the names of this starter's Services.
 	Uses []string
 	// Register, when set, registers the app in the registry it uses through a sidecar.
 	Register *spec.Register
@@ -54,6 +58,26 @@ type App struct {
 	// (pgbouncer service, fluent-bit to, an outbound service that is not an
 	// app of this starter) names its catalog type, which resolves like Uses.
 	Sidecars []spec.Sidecar
+}
+
+// Service is a proxy service the starter adds: an infra service of a proxy
+// type, with upstreams and, usually, a native config the learner owns.
+type Service struct {
+	// Name is unique across every starter, like app names.
+	Name string
+	// Type is a proxy type from the catalog (haproxy, envoy, traefik,
+	// nginx, pgbouncer).
+	Type string
+	// Upstreams are the proxy's backends. Each Service names an app of
+	// this starter or a catalog type in Requires, which resolves to the
+	// experiment's service of that type, like Uses. Port, Name and TLS
+	// (mode and reason) are written as given.
+	Upstreams []spec.Upstream
+	// File is the path of a rendered template file (without .tmpl),
+	// relative to the starter's directory. bb starter writes it with the
+	// code and sets the service's file to it, relative to experiment.yaml.
+	// Empty keeps the generated config.
+	File string
 }
 
 var all = []Starter{
@@ -250,12 +274,81 @@ func Lookup(id string) (Starter, bool) {
 	return all[i], true
 }
 
+// Lab is the experiment a starter is rendered for.
+type Lab struct {
+	Experiment string
+	// Domain is the install's service domain (default bb.internal).
+	Domain string
+	// Infra maps each catalog type in the starter's Requires to the
+	// experiment's service of that type.
+	Infra map[string]Infra
+}
+
+// Infra is the experiment's service for one catalog type a starter
+// requires.
+type Infra struct {
+	Name string
+	// Config is every config option of the service, defaults applied.
+	Config map[string]string
+}
+
+// DefaultLab is the lab s renders for in an experiment that has none of
+// its required services yet: each type gets a service named after it with
+// the catalog's default config, as applying the starter would add.
+func (s Starter) DefaultLab(experiment, domain string) Lab {
+	lab := Lab{Experiment: experiment, Domain: domain, Infra: map[string]Infra{}}
+	for _, typ := range s.Requires {
+		lab.Infra[typ] = DefaultInfra(typ)
+	}
+	return lab
+}
+
+// DefaultInfra is a service named after a catalog type, with the type's
+// default config.
+func DefaultInfra(typ string) Infra {
+	in := Infra{Name: typ, Config: map[string]string{}}
+	if e, ok := catalog.Lookup(typ); ok {
+		in.Config = e.ResolveConfig(nil)
+	}
+	return in
+}
+
 // Data is what templates can use.
 type Data struct {
-	Experiment    string
+	Experiment string
+	// Domain is the install's service domain (default bb.internal): every
+	// service and app instance is <name>.<Domain>, which native proxy
+	// configs need for their backends.
+	Domain        string
 	GoVersion     string
 	GoImage       string
 	AlpineVersion string
+
+	infra map[string]Infra
+}
+
+// Service is the name of the experiment's service of a catalog type the
+// starter requires: {{.Service "postgres"}}.
+func (d Data) Service(typ string) (string, error) {
+	in, ok := d.infra[typ]
+	if !ok {
+		return "", fmt.Errorf("the template names a %s service, which the starter does not require", typ)
+	}
+	return in.Name, nil
+}
+
+// Config is one config option, defaults applied, of the experiment's
+// service of a required catalog type: {{.Config "postgres" "database"}}.
+func (d Data) Config(typ, key string) (string, error) {
+	in, ok := d.infra[typ]
+	if !ok {
+		return "", fmt.Errorf("the template names a %s service, which the starter does not require", typ)
+	}
+	v, ok := in.Config[key]
+	if !ok {
+		return "", fmt.Errorf("the %s service has no config option %q", typ, key)
+	}
+	return v, nil
 }
 
 // File is one rendered file, relative to the starter's directory.
@@ -264,18 +357,29 @@ type File struct {
 	Data []byte
 }
 
-// Render renders every template file of s.
-func Render(s Starter, experiment string) ([]File, error) {
-	data := Data{Experiment: experiment, GoVersion: GoVersion, GoImage: GoImage, AlpineVersion: AlpineVersion}
+// Render renders every template file of s for a lab.
+func Render(s Starter, lab Lab) ([]File, error) {
+	return RenderFS(templates.FS, s, lab)
+}
+
+// RenderFS renders s from templates in fsys, rooted like the embedded
+// templates. Tests use it to apply starters that do not ship.
+func RenderFS(fsys fs.FS, s Starter, lab Lab) ([]File, error) {
+	for _, typ := range s.Requires {
+		if _, ok := lab.Infra[typ]; !ok {
+			return nil, fmt.Errorf("starter %s: the lab has no %s service", s.ID, typ)
+		}
+	}
+	data := Data{Experiment: lab.Experiment, Domain: lab.Domain, GoVersion: GoVersion, GoImage: GoImage, AlpineVersion: AlpineVersion, infra: lab.Infra}
 	var files []File
-	err := fs.WalkDir(templates.FS, s.Template, func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, s.Template, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 		if !strings.HasSuffix(p, ".tmpl") {
 			return fmt.Errorf("starter %s: %s is missing the .tmpl suffix", s.ID, p)
 		}
-		src, err := fs.ReadFile(templates.FS, p)
+		src, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}
@@ -293,6 +397,11 @@ func Render(s Starter, experiment string) ([]File, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	for _, svc := range s.Services {
+		if svc.File != "" && !slices.ContainsFunc(files, func(f File) bool { return f.Path == svc.File }) {
+			return nil, fmt.Errorf("starter %s: service %s: file %s is not in the template (add %s.tmpl)", s.ID, svc.Name, svc.File, svc.File)
+		}
 	}
 	return files, nil
 }

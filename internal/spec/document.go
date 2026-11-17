@@ -103,6 +103,61 @@ func (d *Document) AddService(name, typ string, upstreams ...string) error {
 	return nil
 }
 
+// AddProxy appends a proxy service with its upstreams and file. An
+// upstream with only a service is written in the short form; the others
+// as mappings with the fields that are set. The name must be unused.
+func (d *Document) AddProxy(svc Service) error {
+	if d.HasName(svc.Name) {
+		return fmt.Errorf("service %q: %w", svc.Name, errs.ErrExists)
+	}
+	body := mapping(scalar("type"), scalar(svc.Type))
+	if len(svc.Upstreams) > 0 {
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
+		for _, u := range svc.Upstreams {
+			if u.Port != 0 || u.Name != "" || u.TLS != (TLS{}) {
+				seq.Style = 0
+			}
+		}
+		for _, u := range svc.Upstreams {
+			seq.Content = append(seq.Content, upstreamNode(u))
+		}
+		body.Content = append(body.Content, scalar("upstreams"), seq)
+	}
+	if svc.File != "" {
+		body.Content = append(body.Content, scalar("file"), scalar(svc.File))
+	}
+	m := d.section("services")
+	m.Content = append(m.Content, scalar(svc.Name), body)
+	return nil
+}
+
+// upstreamNode writes one upstreams entry with the keys the decoder reads.
+func upstreamNode(u Upstream) *yaml.Node {
+	if u.Port == 0 && u.Name == "" && u.TLS == (TLS{}) {
+		return scalar(u.Service)
+	}
+	n := mapping(scalar("service"), scalar(u.Service))
+	if u.Port != 0 {
+		n.Content = append(n.Content, scalar("port"), intScalar(u.Port))
+	}
+	if u.Name != "" {
+		n.Content = append(n.Content, scalar("name"), scalar(u.Name))
+	}
+	if u.TLS != (TLS{}) {
+		tls := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		if u.TLS.Mode != "" {
+			tls.Content = append(tls.Content, scalar("mode"), scalar(u.TLS.Mode))
+		}
+		if u.TLS.Reason != "" {
+			tls.Content = append(tls.Content, scalar("reason"), scalar(u.TLS.Reason))
+		} else {
+			tls.Style = yaml.FlowStyle
+		}
+		n.Content = append(n.Content, scalar("tls"), tls)
+	}
+	return n
+}
+
 // AddApp appends an app. The name must be unused.
 func (d *Document) AddApp(app App) error {
 	if d.HasName(app.Name) {

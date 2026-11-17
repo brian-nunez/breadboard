@@ -17,7 +17,7 @@ A starter takes the user from intent to running code: it writes a small, working
 - **Comments teach the why.** Explain concepts (consumer groups, offsets, at-least-once delivery, why invalidation follows the write), not the syntax.
 - **Every starter README has two sections:** *Try this* (guided experiments) and *Break this* (failure drills: kill the broker, slow the consumer, exhaust memory).
 - **Idempotent apply.** Re-applying a starter never overwrites user-modified files; it reports conflicts instead.
-- **Unique app names.** App names are unique across every starter (a test enforces it), so several starters can share one experiment. Re-applying a starter to the same directory leaves its existing apps alone; if a name it needs belongs to anything else in `experiment.yaml`, `bb starter` fails before writing any file.
+- **Unique app and service names.** App names, and the names of the proxy services a starter brings, are unique across every starter and never a catalog type's name (tests enforce it), so several starters can share one experiment. Re-applying a starter to the same directory leaves its existing apps and proxies alone; if a name it needs belongs to anything else in `experiment.yaml`, `bb starter` fails before writing any file.
 
 ## Language and libraries
 
@@ -61,6 +61,55 @@ The `sidecar/*` starters teach the patterns of Phase 5's sidecars (see `catalog.
 - `sidecar/pgbouncer-pool` pins `github.com/jackc/pgx/v5 v5.13.0`. `pool-client` opens 50 client connections (`pgxpool`) through a PgBouncer sidecar in transaction mode with `pool_size: 10`, and logs how many server connections Postgres sees.
 - `sidecar/log-shipper` pins `github.com/aws/aws-sdk-go-v2 v1.48.0`, `github.com/aws/aws-sdk-go-v2/config v1.33.18` and `github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10`. `log-writer` writes JSON lines with `log/slog` to `BB_LOG_DIR` and has no S3 code; its Fluent Bit sidecar ships them to the `app-logs` bucket; `log-reader` lists the bucket with the AWS SDK.
 
+### Starters that bring proxies
+
+A starter can add proxy services (Phase 5 wave C) through `starters.Starter.Services`. Each `starters.Service` has:
+
+- `Name`: unique across starters, like app names, and not a catalog type.
+- `Type`: a proxy type (`haproxy`, `envoy`, `traefik`, `nginx`, `pgbouncer`).
+- `Upstreams`: `spec.Upstream` values. `Service` names an app of the starter, or a catalog type in `Requires`, which resolves to the experiment's service of that type like `uses`. `Port`, `Name` and `TLS` (`Mode`, `Reason`) are written as given, and validated like any upstream ([`spec.md`](spec.md#proxies-and-upstreams)).
+- `File`: optional. The path of a rendered template (without `.tmpl`) relative to the starter's directory. It is written with the code, and the service's `file` is set to it relative to `experiment.yaml` (`./<dir>/<File>`), so the proxy runs the learner's native config instead of a generated one. Rendering fails when the template has no such file.
+
+An app of the starter reaches a proxy by listing the proxy's name in `starters.App.Uses` (`uses: [<proxy>]`); other entries of `Uses` stay catalog types.
+
+`bb starter` writes the proxies through the YAML node tree (comments survive), validates the whole `experiment.yaml` before writing any file, and re-applies idempotently: an existing service of that name is the starter's own when it has the same type and either the same `file` or an upstream to one of the starter's apps in the same directory; anything else is `ErrExists`.
+
+Templates render with `{{.Experiment}}` (the experiment name) and `{{.Domain}}` (the install's service domain, default `bb.internal`), so native configs can name their backends: `<app>.{{.Domain}}` resolves to every replica, `<app>-<n>.{{.Domain}}` to one. For each catalog type in `Requires`, `{{.Service "<type>"}}` is the experiment's service of that type (an existing one, or the one `bb starter` adds) and `{{.Config "<type>" "<key>"}}` one of its config options with catalog defaults applied, so a config can follow a Postgres that is not named `postgres` (D-161). A proxy config must keep what the catalog entry says its file must keep (the loopback health endpoint, Envoy's admin API, PgBouncer's auth files; see `catalog.md`), and contains no secrets.
+
+`bb serve`'s starter page, `starter_details` (MCP) and `StarterDetails` (core) list each proxy, its upstreams and its config file.
+
+### Load-balancing strategy starters
+
+`lb/round-robin`, `lb/least-connections`, `lb/power-of-two-choices` and `lb/consistent-hashing` each bring one proxy (`starters.Starter.Services`) with a commented native config the learner owns, and have no library pins (standard library only). They share one shape:
+
+- A backend app with replicas that serves TLS on 8443 with `TLS_CERT_FILE`/`TLS_KEY_FILE` (the proxy re-encrypts to port 8443) and answers each request with its instance name (`BB_SERVICE`). Its latency knob is a constant at the top of its `main.go` and, at runtime, `POST /delay?d=<duration>` on a plain listener bound to `127.0.0.1:8080`, reached with `docker exec … wget`: no other container, the proxy included, can reach it.
+- A client app that uses the proxy (`<PROXY>_URL`), trusts the lab CA through `SSL_CERT_FILE`, generates traffic and logs a running tally every 5 seconds: requests per replica with their share, status codes, p50 and p99.
+- Where a strategy is compared with another, the proxy runs both side by side over the same replicas on two path prefixes, and the client drives both at once, so one log window shows the difference. The starter's single upstream carries the route name of the primary strategy's unit (`be_leastconn`, Traefik service `p2c`, Envoy cluster `ring-hash`), so the explorers tag it; the comparison unit is the file's own.
+
+| Starter | Proxy | Backend | Client | What the config shows |
+|---|---|---|---|---|
+| `lb/round-robin` | `rr-edge` (NGINX) | `rr-backend` ×3, no delay | `rr-client`: 10 requests a second, one at a time | One `upstream` with `server rr-backend.<domain>:8443 resolve`, default weighted round robin, one worker; scaling the backend adds peers through DNS without restarting NGINX. |
+| `lb/least-connections` | `lc-edge` (HAProxy) | `lc-backend` ×3, 50 ms, `lc-backend-3` 500 ms | `lc-client`: 6 requests in flight per strategy | `be_leastconn` (`balance leastconn`, default route) and `be_roundrobin` (`/roundrobin/`), each a `server-template` of the same replicas. |
+| `lb/power-of-two-choices` | `p2c-edge` (Traefik) | `p2c-backend` ×3, 50 ms, `p2c-backend-3` 500 ms | `p2c-client`: 6 requests in flight per strategy | Services `p2c` (`strategy: p2c`, default route) and `wrr` (`/wrr/`), each listing the replicas by name, with health checks. |
+| `lb/consistent-hashing` | `ch-edge` (Envoy) | `ch-backend` ×4, per-replica key cache (a miss costs 20 ms) | `ch-client`: the same 200 keys in `X-User-ID` every 5 seconds per policy; logs the stable placement, every key that moves, and moves since the baseline | Clusters `ring-hash` (`RING_HASH`, default route) and `maglev` (`MAGLEV`, `/maglev/`), both `STRICT_DNS` with a `hash_policy` on `x-user-id`. |
+### Load-balancing pattern starters: stickiness, canary, blue-green, health checks
+
+Each brings its proxies with a commented native config (`File`), backends that serve TLS on 8443 with `TLS_CERT_FILE`/`TLS_KEY_FILE` and name the instance that answered, and a client that logs a running tally. Every hop is re-encrypted and verified against the lab CA. None has library pins (standard library only). Decisions D-145 to D-149.
+
+- `lb/sticky-sessions` (HAProxy `sticky-edge`): `sticky-backend` (3 replicas) keeps a visit count per `session` cookie in memory; `sticky-client` plays three users with their own cookie jars and one anonymous caller. `haproxy.cfg` lists one `server` per replica with `cookie s1`…`s3`, `cookie SERVERID insert indirect nocache httponly secure`, `option redispatch`, `retries 2` and `timeout connect 1s`. A stopped replica's users move with `visits=1`.
+- `lb/weighted-canary` (Traefik `canary-edge`): `canary-v1` (2 replicas) and `canary-v2` (1); `dynamic.yml` routes everything to a `weighted` service (90/10, `healthCheck: {}`), plus a `canary-testers` router on ``Header(`X-Canary`, `always`)`` to v2. `canary-client` logs each version's share and errors (`X-App-Version` names the version on errors).
+- `lb/blue-green` (NGINX `bg-edge`): `bg-blue` (v1) and `bg-green` (v2); `nginx.conf` proxies `/` to `https://$bg_live` (an upstream per colour), defaults `set $bg_live bg-blue;` and then includes `/etc/nginx/bg-live/*.conf` from the container's writable layer. `switch.sh <colour>` smoke-tests the colour through `/bg-<colour>/`, writes the switch file, runs `nginx -t` and `nginx -s reload` through `docker exec`. `bg-client` sends 20 requests a second and logs each cutover and every error.
+- `lb/health-checks` (HAProxy `hc-active`, Envoy `hc-passive`): `hc-backend` (3 replicas) with a loopback `POST /fail` and `/recover` that stamps the state change time in every answer; `hc-active` uses `option httpchk` with `inter 2s fall 3 rise 2` and no passive checks, `hc-passive` uses `outlier_detection` (`consecutive_5xx: 3`, `interval: 1s`, `base_ejection_time: 10s`, `max_ejection_percent: 50`) and no active checks. `hc-client` sends the same traffic through both and logs per proxy the time to eject and to recover.
+### Proxying starters (Phase 5 wave C)
+
+Each brings one proxy with a native, commented config the learner owns (`File`), and backends that serve TLS on 8443 with `TLS_CERT_FILE`/`TLS_KEY_FILE` unless the lesson is a terminate hop. None has library pins except `pgbouncer/pooling-modes`.
+
+- `proxy/l4-vs-l7` (HAProxy, `l4l7-edge`, `haproxy.cfg`): `l4l7-api` and `l4l7-web`, two replicas each, answer with their instance in `X-Instance`. The config's `frontend l7` (8443, `mode http`) routes `/api/` or `X-Route: api` to `be_api` and the rest to `be_web`; `frontend l4` (7443, `mode tcp`, TLS offload, no ALPN) sends every connection to `be_l4`, which lists both apps' replicas. `l4l7-client` derives the layer 4 address from `L4L7_EDGE_URL`'s host and logs, per round, the instances reached over one layer 7 connection and over four layer 4 connections, with a misrouted count.
+- `proxy/tls-modes` (HAProxy, `tlsm-edge`, `haproxy.cfg`): upstreams `reencrypt` (`tlsm-reencrypt`, TLS), `terminate` (`tlsm-terminate`, `tls.mode: off` with a reason; it listens on `BB_PLAIN_LISTEN_ADDR` and has no TLS code) and `passthrough` (`tlsm-passthrough`, `tls.mode: passthrough`). `tlsm-client` logs the certificate names, issuer and fingerprint it verified on each, dialling `TLSM_EDGE_PASSTHROUGH_ADDR` with the backend's name as SNI for passthrough, and tries the terminate port directly.
+- `proxy/request-mirroring` (Envoy, `mirror-edge`, `envoy.yaml`): the default route sends every request to cluster `v1` with a `request_mirror_policies` entry for `v2` at 100%; `/v1/` and `/v2/` reach each version unmirrored. `mirror-v2` takes 250 ms and fails one order in three and logs the copies it received and the shadow `Host`; `mirror-client` logs which version answered, failures and the slowest answer every 5 seconds.
+- `proxy/connection-draining` (HAProxy, `drain-edge`, `haproxy.cfg`): `drain-backend` runs 3 replicas listed one `server` line each (so the runtime API can name them, `be_app/drain-backend-<n>`), with `option httpchk` on `GET /healthz` every second. On SIGTERM a replica answers `/healthz` with 503 for 4 seconds while serving, then `http.Server.Shutdown`. The runtime API is `stats socket ipv4@127.0.0.1:9999 level admin`. `drain-client` keeps eight requests in flight and logs per-replica counts and failures every 2 seconds.
+- `pgbouncer/pooling-modes` (PgBouncer, `pool-central`, `pgbouncer.ini`) pins `github.com/jackc/pgx/v5 v5.13.0` and requires `postgres`. The config offers the Postgres database `app` twice in `[databases]`: `app` (`pool_mode=transaction pool_size=5`) and `app_session` (`pool_mode=session pool_size=8`). `pool-modes` runs 30 transaction and 6 session clients (one `pgx.Conn` each) that report `pg_backend_pid()`, and every 5 seconds runs a `set_config(…, false)` read-back trap, a SQL `PREPARE`/`EXECUTE` trap and a protocol-level prepared statement in both pools.
+
 ## Starter list
 
 | Id | Phase | Teaches |
@@ -77,3 +126,16 @@ The `sidecar/*` starters teach the patterns of Phase 5's sidecars (see `catalog.
 | `sidecar/circuit-breaking` | 5 | Envoy outlier detection: ejecting a failing replica, `max_ejection_percent`, ejection time and recovery. |
 | `sidecar/pgbouncer-pool` | 5 | Connection pooling with a PgBouncer sidecar: transaction vs session mode, pool size vs client count. |
 | `sidecar/log-shipper` | 5 | The adapter pattern: logs as files in a shared volume, shipped to S3 Compatible storage by a Fluent Bit sidecar. |
+| `lb/round-robin` | 5 | Round robin with NGINX across replicas re-resolved through DNS; scaling replicas without restarting the proxy. |
+| `lb/least-connections` | 5 | HAProxy `leastconn` vs `roundrobin` with uneven request cost: the slow replica gets fewer requests under least connections. |
+| `lb/power-of-two-choices` | 5 | Traefik `p2c` vs `wrr`: a load-aware choice between two random servers with little state. |
+| `lb/consistent-hashing` | 5 | Envoy `ring_hash` vs `maglev` keyed by a header: the same key on the same replica, cache locality, and how many keys move when a replica leaves. |
+| `lb/sticky-sessions` | 5 | Cookie session persistence with HAProxy, and what happens to a user's session when their replica dies. |
+| `lb/weighted-canary` | 5 | A canary release through a Traefik weighted service (v1 90 / v2 10); shifting and rolling back traffic. |
+| `lb/blue-green` | 5 | Blue-green cutover through NGINX's graceful reload, with no failed request; reload vs restart. |
+| `lb/health-checks` | 5 | Active (HAProxy) vs passive (Envoy outlier detection) health checks: time to eject and time to recover. |
+| `proxy/l4-vs-l7` | 5 | HAProxy `mode tcp` vs `mode http`: what each layer can see and route on; per-connection vs per-request balancing. |
+| `proxy/tls-modes` | 5 | Re-encrypt, terminate and passthrough side by side at one HAProxy, and which certificate the client sees on each. |
+| `proxy/request-mirroring` | 5 | Shadow traffic to v2 with Envoy `request_mirror_policies`; responses discarded, side effects not. |
+| `proxy/connection-draining` | 5 | Removing a backend under load with no failed requests: HAProxy's runtime API `drain`, and a replica that drains itself on SIGTERM. |
+| `pgbouncer/pooling-modes` | 5 | Session vs transaction pooling in a shared PgBouncer; session state and SQL `PREPARE` in transaction mode; central pool vs sidecar. |

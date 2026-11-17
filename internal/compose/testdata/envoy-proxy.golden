@@ -172,11 +172,16 @@ static_resources:
   clusters:
     # Re-encrypt: TLS to every replica of web, verified as web.bb.internal.
     - name: web
-      # STRICT_DNS: every address web.bb.internal resolves to is a host;
+      # Strict DNS: every address web.bb.internal resolves to is a host;
       # Envoy re-resolves it every 5s, so replicas that start later join.
-      type: STRICT_DNS
-      dns_lookup_family: V4_ONLY
-      dns_refresh_rate: 5s
+      # The DNS cluster extension is the successor of the STRICT_DNS type
+      # and its deprecated dns_refresh_rate field.
+      cluster_type:
+        name: envoy.clusters.dns
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+          dns_lookup_family: V4_ONLY
+          dns_refresh_rate: 5s
       connect_timeout: 2s
       lb_policy: ROUND_ROBIN
       load_assignment:
@@ -226,11 +231,16 @@ static_resources:
     # Reason: practice TLS termination
     # and watch the requests
     - name: v1
-      # STRICT_DNS: every address api.plain.bb.internal resolves to is a host;
+      # Strict DNS: every address api.plain.bb.internal resolves to is a host;
       # Envoy re-resolves it every 5s, so replicas that start later join.
-      type: STRICT_DNS
-      dns_lookup_family: V4_ONLY
-      dns_refresh_rate: 5s
+      # The DNS cluster extension is the successor of the STRICT_DNS type
+      # and its deprecated dns_refresh_rate field.
+      cluster_type:
+        name: envoy.clusters.dns
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+          dns_lookup_family: V4_ONLY
+          dns_refresh_rate: 5s
       connect_timeout: 2s
       lb_policy: ROUND_ROBIN
       load_assignment:
@@ -264,11 +274,16 @@ static_resources:
     # Terminate: plaintext HTTP to consul on its private segment.
     # Reason: plain HTTP API behind the proxy
     - name: consul
-      # STRICT_DNS: every address consul.plain.bb.internal resolves to is a host;
+      # Strict DNS: every address consul.plain.bb.internal resolves to is a host;
       # Envoy re-resolves it every 5s, so replicas that start later join.
-      type: STRICT_DNS
-      dns_lookup_family: V4_ONLY
-      dns_refresh_rate: 5s
+      # The DNS cluster extension is the successor of the STRICT_DNS type
+      # and its deprecated dns_refresh_rate field.
+      cluster_type:
+        name: envoy.clusters.dns
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+          dns_lookup_family: V4_ONLY
+          dns_refresh_rate: 5s
       connect_timeout: 2s
       lb_policy: ROUND_ROBIN
       load_assignment:
@@ -301,11 +316,16 @@ static_resources:
                 end: 500
     # Passthrough: the client's TLS session goes to every replica of payments untouched.
     - name: tls_payments
-      # STRICT_DNS: every address payments.bb.internal resolves to is a host;
+      # Strict DNS: every address payments.bb.internal resolves to is a host;
       # Envoy re-resolves it every 5s, so replicas that start later join.
-      type: STRICT_DNS
-      dns_lookup_family: V4_ONLY
-      dns_refresh_rate: 5s
+      # The DNS cluster extension is the successor of the STRICT_DNS type
+      # and its deprecated dns_refresh_rate field.
+      cluster_type:
+        name: envoy.clusters.dns
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+          dns_lookup_family: V4_ONLY
+          dns_refresh_rate: 5s
       connect_timeout: 2s
       lb_policy: ROUND_ROBIN
       load_assignment:
@@ -504,7 +524,7 @@ services:
       breadboard.experiment-id: 0123456789abcdef
       breadboard.service: edge
       breadboard.kind: infra
-      breadboard.config-hash: 25bd84eff5966820
+      breadboard.config-hash: 9b4ea83f0237ddac
     mem_limit: 128m
     cpus: 0.25
     restart: unless-stopped

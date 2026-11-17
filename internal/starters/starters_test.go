@@ -4,13 +4,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/brian-nunez/breadboard/internal/catalog"
 )
 
 func TestEveryStarterRenders(t *testing.T) {
 	for _, s := range All() {
-		files, err := Render(s, "lab")
+		files, err := Render(s, s.DefaultLab("lab", "bb.internal"))
 		if err != nil {
 			t.Fatalf("%s: %v", s.ID, err)
 		}
@@ -61,7 +64,7 @@ func TestRenderedStartersBuild(t *testing.T) {
 	for _, s := range All() {
 		t.Run(s.ID, func(t *testing.T) {
 			dir := t.TempDir()
-			files, err := Render(s, "lab")
+			files, err := Render(s, s.DefaultLab("lab", "bb.internal"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,11 +112,40 @@ func TestStarterAppNamesAreUnique(t *testing.T) {
 	}
 }
 
+// Service names are unique across starters and never collide with an app
+// name of any starter or a catalog type, and every upstream names an app of its own starter
+// or a type it requires.
+func TestStarterServiceNamesAreUnique(t *testing.T) {
+	owner := map[string]string{}
+	for _, s := range All() {
+		for _, a := range s.Apps {
+			owner[a.Name] = s.ID
+		}
+	}
+	for _, s := range All() {
+		for _, svc := range s.Services {
+			if prev, ok := owner[svc.Name]; ok {
+				t.Errorf("service %q is in both %s and %s", svc.Name, prev, s.ID)
+			}
+			owner[svc.Name] = s.ID
+			// A required type is added under its own name.
+			if _, ok := catalog.Lookup(svc.Name); ok {
+				t.Errorf("%s service %q is named after a catalog type", s.ID, svc.Name)
+			}
+			for _, u := range svc.Upstreams {
+				if !slices.ContainsFunc(s.Apps, func(a App) bool { return a.Name == u.Service }) && !slices.Contains(s.Requires, u.Service) {
+					t.Errorf("%s service %s upstream %q is neither an app of the starter nor a type it requires", s.ID, svc.Name, u.Service)
+				}
+			}
+		}
+	}
+}
+
 // Each app runs the binary the dev stage built from cmd/<app>, so the program
 // is the container's main process.
 func TestStarterAppsRunTheirBuiltBinary(t *testing.T) {
 	for _, s := range All() {
-		files, err := Render(s, "lab")
+		files, err := Render(s, s.DefaultLab("lab", "bb.internal"))
 		if err != nil {
 			t.Fatal(err)
 		}

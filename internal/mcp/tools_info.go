@@ -59,6 +59,7 @@ type starterInfo struct {
 	Language string   `json:"language"`
 	Requires []string `json:"requires" jsonschema:"catalog types it needs; apply_starter adds any that are missing"`
 	Apps     []string `json:"apps" jsonschema:"apps it adds to experiment.yaml"`
+	Services []string `json:"services" jsonschema:"proxy services it adds to experiment.yaml"`
 }
 
 type startersOut struct {
@@ -82,16 +83,32 @@ type register struct {
 	Check string `json:"check,omitempty"`
 }
 
+type starterService struct {
+	Name      string            `json:"name"`
+	Type      string            `json:"type" jsonschema:"a proxy type from the catalog"`
+	Upstreams []starterUpstream `json:"upstreams" jsonschema:"the proxy's backends"`
+	File      string            `json:"file,omitempty" jsonschema:"its native config, one of files (relative to dir); set as the service's file, replacing the generated config"`
+}
+
+type starterUpstream struct {
+	Service string `json:"service" jsonschema:"an app of the starter, or a catalog type resolved to the experiment's service of that type"`
+	Port    int    `json:"port,omitempty"`
+	Name    string `json:"name,omitempty" jsonschema:"route name; default the service"`
+	Mode    string `json:"mode" jsonschema:"on (re-encrypt), off (terminate) or passthrough"`
+	Reason  string `json:"reason,omitempty" jsonschema:"why a terminate hop is plaintext"`
+}
+
 type starterFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 }
 
 type starterDetailsOut struct {
-	Starter starterInfo   `json:"starter"`
-	Dir     string        `json:"dir" jsonschema:"directory the code is written to by default"`
-	Apps    []starterApp  `json:"apps"`
-	Files   []starterFile `json:"files" jsonschema:"every file the starter writes, with its content"`
+	Starter  starterInfo      `json:"starter"`
+	Dir      string           `json:"dir" jsonschema:"directory the code is written to by default"`
+	Apps     []starterApp     `json:"apps"`
+	Services []starterService `json:"services" jsonschema:"proxies it adds in front of its apps"`
+	Files    []starterFile    `json:"files" jsonschema:"every file the starter writes, with its content"`
 }
 
 type caOut struct {
@@ -127,7 +144,7 @@ func settingView(v core.Setting) setting {
 }
 
 func starterInfoView(i core.StarterInfo) starterInfo {
-	return starterInfo{ID: i.ID, Title: i.Title, Summary: i.Summary, Language: i.Language, Requires: orEmpty(i.Requires), Apps: orEmpty(i.Apps)}
+	return starterInfo{ID: i.ID, Title: i.Title, Summary: i.Summary, Language: i.Language, Requires: orEmpty(i.Requires), Apps: orEmpty(i.Apps), Services: orEmpty(i.Services)}
 }
 
 func (s *Server) addInfoTools() {
@@ -184,7 +201,7 @@ func (s *Server) addInfoTools() {
 
 	add(s, readTool, true, &sdk.Tool{
 		Name:        "starter_details",
-		Description: "Everything a starter would write and add, without writing anything: its apps and the full content of every file (code, Dockerfile, README with exercises).",
+		Description: "Everything a starter would write and add, without writing anything: its apps, its proxies and their config files, and the full content of every file (code, Dockerfile, README with exercises).",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in starterIn) (starterDetailsOut, error) {
 		res, err := s.eng.StarterDetails(ctx, core.StarterDetailsRequest{ID: in.ID})
 		if err != nil {
@@ -197,6 +214,13 @@ func (s *Server) addInfoTools() {
 				out := starterApp{Name: a.Name, Command: orEmpty(a.Command), Uses: orEmpty(a.Uses)}
 				if a.Register != nil {
 					out.Register = &register{Name: a.Register.Name, Port: a.Register.Port, Check: a.Register.Check}
+				}
+				return out
+			}),
+			Services: mapSlice(res.Services, func(svc core.StarterService) starterService {
+				out := starterService{Name: svc.Name, Type: svc.Type, File: svc.File, Upstreams: []starterUpstream{}}
+				for _, u := range svc.Upstreams {
+					out.Upstreams = append(out.Upstreams, starterUpstream{Service: u.Service, Port: u.Port, Name: u.Name, Mode: u.Mode(), Reason: u.TLS.Reason})
 				}
 				return out
 			}),

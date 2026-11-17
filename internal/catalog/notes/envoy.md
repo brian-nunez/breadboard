@@ -8,13 +8,13 @@ Envoy 1.40 as a standalone proxy in front of the upstreams you list under `servi
 - **Terminate** (`tls: {mode: off, reason: ...}`): Envoy decrypts and sends plaintext HTTP to the backend over a private network shared only with it. An app behind a terminating hop binds `BB_PLAIN_LISTEN_ADDR`, so nothing else can reach its plaintext port.
 - **Passthrough** (`tls: {mode: passthrough}`): Envoy never decrypts. On port 9443 (`<NAME>_PASSTHROUGH_ADDR`) the TLS inspector reads the server name (SNI) from the client's hello and picks a filter chain that forwards the bytes, so the client sees the backend's own certificate.
 
-The generated bootstrap is at `.bb/runtime/config/<name>/envoy.yaml`, commented for copying. Every app replica is found through Docker's DNS (`STRICT_DNS`), balanced round robin, and health checked every 2 seconds.
+The generated bootstrap is at `.bb/runtime/config/<name>/envoy.yaml`, commented for copying. Every app replica is found through Docker's DNS (strict DNS, the `envoy.clusters.dns` cluster type), balanced round robin, and health checked every 2 seconds.
 
 ## Key concepts
 
 - **Listeners, filter chains and filters.** A listener accepts connections on a port. A filter chain is picked per connection (here by SNI on 9443), and its network filters handle the bytes: the HTTP connection manager parses HTTP and routes it, the TCP proxy just forwards.
 - **Routes and clusters.** The HTTP connection manager matches each request against routes in order; the first match names a cluster. A cluster is a pool of upstream hosts with a load-balancing policy, a transport socket (TLS or not) and health checks.
-- **`STRICT_DNS`.** Every address the cluster's DNS name resolves to becomes a host. Envoy re-resolves every 5 seconds, so replicas that start or stop are picked up without a restart.
+- **Strict DNS.** `cluster_type: envoy.clusters.dns` (DnsCluster, which replaces `type: STRICT_DNS` and its deprecated `dns_refresh_rate`). Every address the cluster's DNS name resolves to becomes a host. Envoy re-resolves every 5 seconds, so replicas that start or stop are picked up without a restart.
 - **Active health checks.** Envoy sends `GET /` to every host every 2 seconds; three failures take a host out of rotation and two successes bring it back. Any answer below 500 counts as healthy, so apps without a `/` handler stay in. Health checks use the cluster's transport socket, so on a re-encrypt hop they prove the TLS handshake and the certificate too.
 - **Panic threshold.** When fewer than half of a cluster's hosts are healthy, Envoy balances across all of them anyway, on the theory that a degraded service beats none.
 - **`use_remote_address`.** Envoy is the edge: it sets `X-Forwarded-Proto` from the connection and appends the client's address to `X-Forwarded-For`, so the backend still learns both after termination.

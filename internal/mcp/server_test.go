@@ -163,6 +163,10 @@ func TestGuidesAndStarterCode(t *testing.T) {
 	if !strings.Contains(dockerfile, "FROM") {
 		t.Errorf("starter Dockerfile = %q, want its text", dockerfile)
 	}
+	// Proxies the starter adds: a list (empty here), never null.
+	if svcs, ok := d["services"].([]any); !ok || len(svcs) != 0 {
+		t.Errorf("starter services = %v", d["services"])
+	}
 	for _, e := range h.mustCall(t, "catalog", nil)["entries"].([]any) {
 		if e := e.(map[string]any); !strings.Contains(e["image"].(string), ":") {
 			t.Errorf("%s: image %q is not pinned", e["type"], e["image"])

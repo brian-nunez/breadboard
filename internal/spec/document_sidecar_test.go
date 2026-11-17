@@ -2,6 +2,7 @@ package spec
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -47,5 +48,51 @@ func TestAddAppSidecarsRoundTrip(t *testing.T) {
 	out, _ = plain.Bytes()
 	if s, err := loadWith(t, string(out)); err != nil || !s.Apps[0].Sidecars[0].Transparent() {
 		t.Fatalf("transparent: true did not round trip: %v\n%s", err, out)
+	}
+}
+
+// AddProxy writes upstreams and file so that decoding gives them back: the
+// short form when an upstream sets only its target, a mapping otherwise.
+func TestAddProxyRoundTrip(t *testing.T) {
+	d := New("lab")
+	for _, name := range []string{"web", "api", "payments"} {
+		if err := d.AddApp(App{Name: name, Path: "./" + name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	short := Service{Name: "front", Type: "nginx", Upstreams: []Upstream{{Service: "web"}}}
+	full := Service{Name: "edge", Type: "haproxy", File: "./edge/haproxy.cfg", Upstreams: []Upstream{
+		{Service: "web"},
+		{Service: "api", Port: 9090, Name: "v1", TLS: TLS{Mode: TLSOff, Reason: "practice TLS termination"}},
+		{Service: "payments", TLS: TLS{Mode: TLSPassthrough}},
+	}}
+	for _, svc := range []Service{short, full} {
+		if err := d.AddProxy(svc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.AddProxy(short); err == nil {
+		t.Fatal("a second front was added")
+	}
+	out, _ := d.Bytes()
+	doc, err := Parse(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Decoded only: validating proxies needs the real catalog (core tests do).
+	s, err := doc.Decode()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for i, want := range []Service{short, full} {
+		got := s.Services[i]
+		if got.Name != want.Name || got.Type != want.Type || got.File != want.File || !reflect.DeepEqual(got.Upstreams, want.Upstreams) {
+			t.Errorf("round trip:\n got %+v\nwant %+v\n%s", got, want, out)
+		}
+	}
+	for _, line := range []string{"upstreams: [web]", "tls: {mode: passthrough}", "file: ./edge/haproxy.cfg"} {
+		if !strings.Contains(string(out), line) {
+			t.Errorf("experiment.yaml lacks %q:\n%s", line, out)
+		}
 	}
 }

@@ -25,11 +25,34 @@ func proxyConfigValid(t *testing.T, experiment, service, check string) {
 // TestIntegrationStarterBlueGreen: the client sees only blue, then only
 // green, then only blue again, with no failed request across either switch.
 // Each switch is the starter's own switch.sh: a smoke test, the switch file
-// and NGINX's graceful reload through docker exec.
+// and NGINX's graceful reload through docker exec. A client that starts
+// before blue answers waits for it and counts no failure.
 func TestIntegrationStarterBlueGreen(t *testing.T) {
 	eng, dir, name := sidecarStarterLab(t, "lb-bg", "lb/blue-green")
 	lastLines(t, eng, dir, "bg-client", "bg-edge")
 	proxyConfigValid(t, name, "bg-edge", "nginx -t -q -c /etc/bb/config/nginx.conf")
+
+	// Startup is not a switch. bb up orders only the proxy before the
+	// client, so on a busy machine the client's first requests can reach
+	// NGINX before bg-blue listens: 502s that NGINX's 5 s DNS cache can
+	// stretch over seconds (max_fails does not apply: each colour is a
+	// single-server upstream). Force that race on every run: start the
+	// client while blue is down, and blue once the client is waiting. The
+	// client must keep no score until blue answers.
+	blue, client := containerOf(t, name, "bg-blue"), containerOf(t, name, "bg-client")
+	// One stop at a time, client first: docker stops several containers in
+	// parallel, and blue stopping first would make the client log errors.
+	docker(t, "stop", "-t", "1", client)
+	docker(t, "stop", "-t", "1", blue)
+	skip := len(logsOf(t, eng, dir, "bg-client"))
+	docker(t, "start", client)
+	eventually(t, time.Minute, "the client to wait for the first answer", func() bool {
+		lines := logsOf(t, eng, dir, "bg-client")
+		return slices.ContainsFunc(lines[min(skip, len(lines)):], func(l string) bool {
+			return strings.Contains(l, "waiting for the first answer: ")
+		})
+	})
+	docker(t, "start", blue)
 
 	window := regexp.MustCompile(`last 2s: (.*) \| total`)
 	cutover := regexp.MustCompile(`cutover: (bg-\w+ -> bg-\w+)`)
@@ -51,7 +74,7 @@ func TestIntegrationStarterBlueGreen(t *testing.T) {
 			return run >= 2
 		})
 	}
-	onlyWindows("bg-blue", 0)
+	onlyWindows("bg-blue", skip)
 
 	switchTo := func(colour string) {
 		t.Helper()
@@ -61,7 +84,7 @@ func TestIntegrationStarterBlueGreen(t *testing.T) {
 		}
 		t.Logf("switch.sh %s:\n%s", colour, out)
 	}
-	skip := len(logsOf(t, eng, dir, "bg-client"))
+	skip = len(logsOf(t, eng, dir, "bg-client"))
 	switchTo("green")
 	onlyWindows("bg-green", skip)
 	skip = len(logsOf(t, eng, dir, "bg-client"))
@@ -69,6 +92,7 @@ func TestIntegrationStarterBlueGreen(t *testing.T) {
 	onlyWindows("bg-blue", skip)
 
 	lines := logsOf(t, eng, dir, "bg-client")
+	t.Logf("the client waited %d times for the first answer", len(matches(lines, regexp.MustCompile(`(waiting for the first answer)`))))
 	if got := matches(lines, cutover); !slices.Equal(got, []string{"bg-blue -> bg-green", "bg-green -> bg-blue"}) {
 		t.Errorf("cutovers = %q, want blue -> green, then green -> blue", got)
 	}

@@ -1,8 +1,9 @@
 //go:build integration
 
-// Integration tests run against real Docker:
+// Integration tests run against real Docker, several labs at once (see
+// labSlots; BB_IT_PARALLEL overrides the bound):
 //
-//	go test -tags integration -timeout 30m ./internal/core/
+//	go test -tags integration -timeout 30m ./internal/core/ ./internal/mcp/
 package core
 
 import (
@@ -20,8 +21,11 @@ import (
 
 func realEngine(t *testing.T) *Engine {
 	t.Helper()
-	os.Unsetenv("BB_DOMAIN")
-	eng, err := New(Options{Home: filepath.Join(t.TempDir(), "home"), HealthTimeout: 10 * time.Minute})
+	parallelLab(t)
+	// Polling health more often only notices changes sooner; the settle
+	// window, which catches a crash after the first healthy check, keeps
+	// its production length.
+	eng, err := New(Options{Home: filepath.Join(t.TempDir(), "home"), HealthTimeout: 10 * time.Minute, PollInterval: 500 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +105,7 @@ func records(lines []string, verb string) []string {
 func TestIntegrationPhaseOne(t *testing.T) {
 	eng := realEngine(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("it-%d", time.Now().Unix()%100000)
+	name := labName(t, "it")
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
@@ -201,7 +205,7 @@ func TestIntegrationPhaseOne(t *testing.T) {
 func TestIntegrationPlaintextSegment(t *testing.T) {
 	eng := realEngine(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("pt-%d", time.Now().Unix()%100000)
+	name := labName(t, "pt")
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
@@ -303,7 +307,7 @@ apps:
 func TestIntegrationDownRemovesVolumesOfRemovedServices(t *testing.T) {
 	eng := realEngine(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("rm-%d", time.Now().Unix()%100000)
+	name := labName(t, "rm")
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})

@@ -22,7 +22,7 @@ func starterLab(t *testing.T, prefix string, ids ...string) (*Engine, string, st
 	t.Helper()
 	eng := realEngine(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("%s-%d", prefix, time.Now().Unix()%100000)
+	name := labName(t, prefix)
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
@@ -182,7 +182,7 @@ func TestIntegrationCacheInvalidation(t *testing.T) {
 func TestIntegrationS3Compatible(t *testing.T) {
 	eng := realEngine(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("s3-%d", time.Now().Unix()%100000)
+	name := labName(t, "s3")
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
@@ -277,7 +277,7 @@ func TestIntegrationS3ObjectsBasics(t *testing.T) {
 func TestIntegrationSecondUpKeepsMounts(t *testing.T) {
 	eng := realEngine(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("re-%d", time.Now().Unix()%100000)
+	name := labName(t, "re")
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
@@ -360,7 +360,7 @@ func TestIntegrationConsulSelfRegistration(t *testing.T) {
 func TestIntegrationUpCatchesACrashAfterStart(t *testing.T) {
 	eng := realEngine(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("crash-%d", time.Now().Unix()%100000)
+	name := labName(t, "crash")
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})

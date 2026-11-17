@@ -110,7 +110,7 @@ func proxyFixture(t *testing.T) (starters.Starter, renderFunc) {
 // file is rendered with the lab domain, the result decodes and validates,
 // and the export runs the shipped config. Re-applying changes nothing.
 func TestApplyStarterWithProxy(t *testing.T) {
-	h := newHarness(t)
+	h := newEnvHarness(t)
 	t.Setenv("BB_DOMAIN", "practice.internal")
 	h.init()
 	st, render := proxyFixture(t)

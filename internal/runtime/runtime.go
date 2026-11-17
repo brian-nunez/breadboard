@@ -102,7 +102,9 @@ func (c *Compose) run(ctx context.Context, args ...string) ([]byte, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, &cmdError{args: args, err: err, stderr: stderr.String()}
+		// Some commands (inspect of several objects) print what they found
+		// even when one object is missing, so the output goes back too.
+		return stdout.Bytes(), &cmdError{args: args, err: err, stderr: stderr.String()}
 	}
 	return stdout.Bytes(), nil
 }
@@ -129,9 +131,23 @@ func (c *Compose) Available(ctx context.Context) error {
 	return nil
 }
 
+// ErrSubnetTaken means Docker refused to create a network because its
+// subnet overlaps a network that already exists. Another process (a second
+// bb, or any docker client) created that network after the subnet was
+// chosen, so choosing again sees it and avoids it.
+var ErrSubnetTaken = errors.New("a network's subnet is taken by another network")
+
+// subnetTaken matches the daemon's messages for ErrSubnetTaken: IPAM's,
+// when the subnet is already allocated, and the bridge driver's, when it
+// overlaps an existing bridge.
+var subnetTaken = regexp.MustCompile(`Pool overlaps with other one on this address space|networks have overlapping IPv4`)
+
 // Up builds app images and starts every service in the background.
 func (c *Compose) Up(ctx context.Context, p Project) error {
 	_, err := c.run(ctx, append(p.args(), "up", "--detach", "--build", "--remove-orphans")...)
+	if ce := (*cmdError)(nil); errors.As(err, &ce) && subnetTaken.MatchString(ce.stderr) {
+		return fmt.Errorf("%w: %w", ErrSubnetTaken, err)
+	}
 	return err
 }
 
@@ -300,7 +316,10 @@ func (c *Compose) Exec(ctx context.Context, experiment, service string, cmd []st
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("%s is not running: %w", service, errs.ErrNotFound)
 	}
-	return c.run(ctx, append([]string{"exec", ids[0]}, cmd...)...)
+	if out, err = c.run(ctx, append([]string{"exec", ids[0]}, cmd...)...); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Stats samples CPU and memory use once for running containers.
@@ -465,6 +484,11 @@ func (c *Compose) Subnets(ctx context.Context) ([]Network, error) {
 		return nil, nil
 	}
 	out, err = c.run(ctx, append([]string{"network", "inspect"}, ids...)...)
+	// A network removed between the list and the inspect (another lab's
+	// down) holds no subnet any more: inspect still prints every other one.
+	if ce := (*cmdError)(nil); errors.As(err, &ce) && onlyMissingNetworks(ce.stderr) {
+		err = nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -491,4 +515,15 @@ func (c *Compose) Subnets(ctx context.Context) ([]Network, error) {
 		}
 	}
 	return list, nil
+}
+
+// missingNetwork is the daemon's message for a network that does not exist
+// (current and older wordings).
+var missingNetwork = regexp.MustCompile(`^(Error response from daemon: network \S+ not found|Error: No such network: \S+)$`)
+
+// onlyMissingNetworks reports whether every line of an inspect's stderr
+// says a network does not exist.
+func onlyMissingNetworks(stderr string) bool {
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	return lines[0] != "" && !slices.ContainsFunc(lines, func(l string) bool { return !missingNetwork.MatchString(strings.TrimSpace(l)) })
 }

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -155,6 +156,10 @@ func TestUpFailures(t *testing.T) {
 			// Poll 1 records the baseline (and, when all are healthy, starts
 			// the settle window); poll 3 sees the restart.
 			h.rt.restartOnPoll = map[string]int{"consumer": 3}
+			// A settle window far longer than three polls, so poll 3 falls
+			// inside it however slowly a loaded machine polls; Up still
+			// returns at poll 3.
+			h.eng.startupSettle = time.Minute
 			_, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir})
 			if !errors.Is(err, ErrUnhealthy) || !strings.Contains(err.Error(), "consumer restarted during startup") || !strings.Contains(err.Error(), "bb logs consumer") {
 				t.Fatalf("error = %v", err)
@@ -258,6 +263,50 @@ func TestPlaintextEdgeGetsAPrivateSubnet(t *testing.T) {
 	}
 	if len(st.Warnings) != 1 || !strings.Contains(st.Warnings[0], "plaintext edge pooler -> postgres:5432") {
 		t.Errorf("status warnings = %v", st.Warnings)
+	}
+}
+
+// TestUpChoosesAgainWhenASubnetIsTaken covers two labs starting at once:
+// both chose the same free subnet, the other one created its network first,
+// and Docker refused ours. Up must choose again, around the newcomer.
+func TestUpChoosesAgainWhenASubnetIsTaken(t *testing.T) {
+	h := setupStarter(t)
+	h.add("postgres")
+	spec := h.read("experiment.yaml") + "  pooler:\n    path: ./producer-consumer\n    uses:\n      - service: postgres\n        tls: {mode: off, reason: terminate TLS at a pooler}\n"
+	h.writeSpec(spec)
+	ups := 0
+	h.rt.onUp = func() error {
+		ups++
+		if ups == 1 {
+			h.rt.subnets = []runtime.Network{{Subnet: netip.MustParsePrefix("10.213.0.0/24"), ExperimentID: "someone-else"}}
+			return fmt.Errorf("%w: docker compose up: exit status 1", runtime.ErrSubnetTaken)
+		}
+		return nil
+	}
+	var infos []string
+	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir, Events: func(e Event) {
+		if e.Kind == EventInfo {
+			infos = append(infos, e.Message)
+		}
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := state.Project{Dir: h.dir}.LoadState()
+	if ups != 2 || ps.Segments["plain-postgres"] != "10.213.1.0/24" {
+		t.Fatalf("ups = %d, segments = %v; want a second up on the next free /24", ups, ps.Segments)
+	}
+	if !slices.ContainsFunc(infos, func(m string) bool { return strings.Contains(m, "choosing again") }) {
+		t.Errorf("no event says the subnet was chosen again: %v", infos)
+	}
+
+	// A subnet that stays taken is not retried forever.
+	ups = 0
+	h.rt.onUp = func() error {
+		ups++
+		return fmt.Errorf("%w: docker compose up: exit status 1", runtime.ErrSubnetTaken)
+	}
+	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); !errors.Is(err, runtime.ErrSubnetTaken) || ups != subnetAttempts {
+		t.Fatalf("Up = %v after %d ups, want ErrSubnetTaken after %d", err, ups, subnetAttempts)
 	}
 }
 
@@ -445,7 +494,7 @@ func TestDownStatusLogs(t *testing.T) {
 }
 
 func TestConfigAndDomainChange(t *testing.T) {
-	h := setupStarter(t)
+	h := withStarter(newEnvHarness(t)) // it sets BB_DOMAIN
 	got, err := h.eng.ConfigGet(h.ctx(), ConfigGetRequest{Key: "domain"})
 	if err != nil || got.Settings[0].Value != "bb.internal" || got.Settings[0].Source != "default" {
 		t.Fatalf("ConfigGet = %+v %v", got, err)

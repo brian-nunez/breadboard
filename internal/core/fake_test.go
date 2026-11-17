@@ -22,9 +22,11 @@ type fakeRuntime struct {
 	mu          sync.Mutex
 	unavailable error
 	upErr       error
-	calls       []string
-	projects    []runtime.Project
-	containers  map[string][]runtime.Container // by experiment
+	// onUp runs at the start of each Up; a non-nil error fails that Up.
+	onUp       func() error
+	calls      []string
+	projects   []runtime.Project
+	containers map[string][]runtime.Container // by experiment
 	// healthOf overrides the health of a service after Up.
 	healthOf map[string]string
 	stateOf  map[string]string
@@ -64,6 +66,11 @@ func (f *fakeRuntime) Available(ctx context.Context) error {
 
 func (f *fakeRuntime) Up(ctx context.Context, p runtime.Project) error {
 	f.record("up")
+	if f.onUp != nil {
+		if err := f.onUp(); err != nil {
+			return err
+		}
+	}
 	if f.upErr != nil {
 		return f.upErr
 	}
@@ -195,10 +202,32 @@ type harness struct {
 	now time.Time
 }
 
+// TestMain clears BB_DOMAIN once, so harnesses see the default domain
+// without each test setting the environment, which parallel tests cannot.
+func TestMain(m *testing.M) {
+	os.Unsetenv("BB_DOMAIN")
+	os.Exit(m.Run())
+}
+
+// parallelTests records the tests a harness already marked parallel: a test
+// may build more than one harness.
+var parallelTests sync.Map
+
+// newHarness returns a harness and runs the test in parallel with the
+// other harness tests: each has its own fake runtime, BB_HOME and project.
+// A test that sets the environment uses newEnvHarness instead.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	t.Setenv("BB_DOMAIN", "")
-	os.Unsetenv("BB_DOMAIN")
+	if _, done := parallelTests.LoadOrStore(t, true); !done {
+		t.Parallel()
+	}
+	return newEnvHarness(t)
+}
+
+// newEnvHarness is newHarness for a test that calls t.Setenv: it runs
+// alone, before the parallel tests start.
+func newEnvHarness(t *testing.T) *harness {
+	t.Helper()
 	h := &harness{t: t, rt: newFake(), dir: filepath.Join(t.TempDir(), "lab"), now: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)}
 	eng, err := New(Options{
 		Home:          filepath.Join(t.TempDir(), "home"),

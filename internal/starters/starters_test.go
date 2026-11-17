@@ -63,6 +63,9 @@ func TestRenderedStartersBuild(t *testing.T) {
 	}
 	for _, s := range All() {
 		t.Run(s.ID, func(t *testing.T) {
+			// Each starter builds in its own directory; the go command
+			// shares its module and build caches safely.
+			t.Parallel()
 			dir := t.TempDir()
 			files, err := Render(s, s.DefaultLab("lab", "bb.internal"))
 			if err != nil {

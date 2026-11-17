@@ -1,0 +1,58 @@
+// Command mirror-client places an order through mirror-edge five times a
+// second and logs, every 5 seconds, which version answered, how many
+// requests failed, and the slowest answer. Envoy also copies every request
+// to mirror-v2; none of v2's answers, failures or delays reach this client.
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	// MIRROR_EDGE_URL=https://mirror-edge.<domain>:8443, from uses: [mirror-edge].
+	// The default client verifies Envoy's certificate against SSL_CERT_FILE.
+	url := os.Getenv("MIRROR_EDGE_URL") + "/orders"
+	client := &http.Client{Timeout: 3 * time.Second}
+	var v1, v2, failed, n int
+	var slowest time.Duration
+	report := time.Tick(5 * time.Second)
+	for id := 1; ; id++ {
+		start := time.Now()
+		resp, err := client.Post(url, "application/json", bytes.NewBufferString(fmt.Sprintf(`{"id":%d}`, id)))
+		took := time.Since(start)
+		n++
+		slowest = max(slowest, took)
+		switch {
+		case err != nil:
+			failed++
+			log.Printf("order %d failed: %v", id, err)
+		default:
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			switch {
+			case resp.StatusCode != http.StatusOK:
+				failed++
+				log.Printf("order %d: %s %s", id, resp.Status, strings.TrimSpace(string(body)))
+			case bytes.HasPrefix(body, []byte("v1 ")):
+				v1++
+			case bytes.HasPrefix(body, []byte("v2 ")):
+				v2++
+			}
+		}
+		select {
+		case <-report:
+			log.Printf("last 5s: %d orders, answered by v1=%d v2=%d, failed %d, slowest %s",
+				n, v1, v2, failed, slowest.Round(time.Millisecond))
+			v1, v2, failed, n, slowest = 0, 0, 0, 0, 0
+		default:
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}

@@ -1,0 +1,80 @@
+# haproxy.cfg for drain-edge, from the proxy/connection-draining starter. You
+# own it: experiment.yaml sets services.drain-edge.file to this file, and bb
+# up loads your edits (bb up again after a change).
+#
+# Taking a server out of rotation without failing a request, two ways:
+#
+#   1. From the proxy: put the server in DRAIN through the runtime API
+#      (below). HAProxy sends it no new requests, lets the ones in flight
+#      finish, and keeps checking its health. Then stop the replica.
+#   2. From the server: on SIGTERM, drain-backend fails /healthz but keeps
+#      serving for a few seconds. The active check (option httpchk) marks it
+#      down, new requests go elsewhere, then the replica exits.
+#
+# Keep the monitor frontend on 127.0.0.1:8404 (bb's health check reads
+# /healthz there) and the TLS listener on 8443.
+
+global
+    log stdout format raw local0
+    maxconn 256
+    nbthread 1
+    ssl-default-bind-options ssl-min-ver TLSv1.2
+    ssl-default-server-options ssl-min-ver TLSv1.2
+    # The runtime API, on loopback only and with admin rights: change server
+    # states without a reload. From the host:
+    #   docker exec bb-{{.Experiment}}-drain-edge-1 bash -c \
+    #     'exec 3<>/dev/tcp/127.0.0.1/9999; echo "set server be_app/drain-backend-2 state drain" >&3; cat <&3'
+    # Other commands: "show servers state be_app", "set server be_app/<s>
+    # state ready" (back in rotation), "... state maint" (out, checks off).
+    stats socket ipv4@127.0.0.1:9999 level admin
+
+resolvers docker
+    nameserver dns 127.0.0.11:53
+    accepted_payload_size 8192
+    resolve_retries 3
+    timeout resolve 1s
+    timeout retry 1s
+
+defaults
+    log global
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+    timeout check 5s
+    # init-addr none: a replica that does not resolve yet (or was stopped)
+    # is down instead of stopping HAProxy from starting.
+    default-server resolvers docker resolve-prefer ipv4 init-addr none
+
+# Loopback only: bb's health check and the stats page (bb serve, MCP).
+frontend monitor
+    bind 127.0.0.1:8404
+    mode http
+    monitor-uri /healthz
+    stats enable
+    stats uri /stats
+    stats refresh 10s
+    stats show-legends
+
+frontend https
+    bind :8443 ssl crt /etc/bb/tls/keystore.pem alpn h2,http/1.1
+    mode http
+    option httplog
+    http-request set-header X-Forwarded-Proto https
+    option forwardfor
+    default_backend be_app
+
+backend be_app
+    mode http
+    balance roundrobin
+    # The health check is an HTTP request, over the same verified TLS as the
+    # traffic: GET /healthz must answer 200. A draining replica answers 503.
+    option httpchk
+    http-check send meth GET uri /healthz ver HTTP/1.1 hdr Host drain-backend.{{.Domain}}
+    http-check expect status 200
+    # One line per replica instead of a server-template, so each server has
+    # the replica's name and the runtime API can address it:
+    # be_app/drain-backend-2. Scaling the app means adding a line here.
+    # inter 1s fall 2: down within about two seconds of failing checks.
+    server drain-backend-1 drain-backend-1.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(drain-backend-1.{{.Domain}}) verifyhost drain-backend-1.{{.Domain}} check check-sni drain-backend-1.{{.Domain}} inter 1s fall 2 rise 2
+    server drain-backend-2 drain-backend-2.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(drain-backend-2.{{.Domain}}) verifyhost drain-backend-2.{{.Domain}} check check-sni drain-backend-2.{{.Domain}} inter 1s fall 2 rise 2
+    server drain-backend-3 drain-backend-3.{{.Domain}}:8443 ssl verify required ca-file /etc/bb/ca.pem sni str(drain-backend-3.{{.Domain}}) verifyhost drain-backend-3.{{.Domain}} check check-sni drain-backend-3.{{.Domain}} inter 1s fall 2 rise 2

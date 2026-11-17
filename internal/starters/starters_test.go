@@ -163,3 +163,51 @@ func TestStarterAppsRunTheirBuiltBinary(t *testing.T) {
 		}
 	}
 }
+
+// Templates name the lab's services of the required types and their config
+// (D-161): pooling-modes' pgbouncer.ini follows a Postgres named db whose
+// database and role are not the defaults.
+func TestTemplatesNameTheLabsInfra(t *testing.T) {
+	s, ok := Lookup("pgbouncer/pooling-modes")
+	if !ok {
+		t.Fatal("pgbouncer/pooling-modes is not registered")
+	}
+	lab := Lab{Experiment: "lab", Domain: "lab.test", Infra: map[string]Infra{
+		"postgres": {Name: "db", Config: map[string]string{"database": "orders", "user": "shop"}},
+	}}
+	files, err := Render(s, lab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ini string
+	for _, f := range files {
+		if f.Path == "pgbouncer.ini" {
+			ini = string(f.Data)
+		}
+	}
+	for _, want := range []string{
+		"\norders = host=db.lab.test port=5432 dbname=orders pool_mode=transaction pool_size=5\n",
+		"\norders_session = host=db.lab.test port=5432 dbname=orders pool_mode=session pool_size=8\n",
+		"\nadmin_users = shop\n",
+	} {
+		if !strings.Contains(ini, want) {
+			t.Errorf("pgbouncer.ini lacks %q:\n%s", want, ini)
+		}
+	}
+	if strings.Contains(ini, "postgres.lab.test") || strings.Contains(ini, "dbname=app") || strings.HasPrefix(ini, "\n") {
+		t.Errorf("pgbouncer.ini still assumes the defaults or starts with a blank line:\n%s", ini)
+	}
+
+	// A lab without a required service, or a template naming a type the
+	// starter does not require, is an error rather than a guess.
+	if _, err := Render(s, Lab{Experiment: "lab", Domain: "lab.test"}); err == nil {
+		t.Error("rendered without the required postgres")
+	}
+	d := Data{infra: lab.Infra}
+	if _, err := d.Service("redis"); err == nil {
+		t.Error("Service named a type the starter does not require")
+	}
+	if _, err := d.Config("postgres", "nope"); err == nil {
+		t.Error("Config returned an unknown option")
+	}
+}

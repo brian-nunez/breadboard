@@ -1,0 +1,25 @@
+// Command tlsm-reencrypt is the re-encrypt backend: HAProxy decrypts the
+// client's TLS, then opens a second TLS connection to this app and verifies
+// its certificate. The app serves TLS with its own certificate and reports
+// what arrived: a TLS connection from the proxy, not from the client.
+package main
+
+import (
+	"crypto/tls"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// r.TLS is the proxy's connection to us; the client's own TLS
+		// session ended at the proxy, which says so in X-Forwarded-Proto.
+		fmt.Fprintf(w, "%s: %s from %s, SNI %s, X-Forwarded-Proto %s\n",
+			name, tls.VersionName(r.TLS.Version), r.RemoteAddr, r.TLS.ServerName, r.Header.Get("X-Forwarded-Proto"))
+	})
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

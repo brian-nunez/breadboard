@@ -1,0 +1,171 @@
+// Command l4l7-client sends the same requests through both of l4l7-edge's
+// listeners and logs where each one landed:
+//
+//   - :8443, HAProxy in mode http (layer 7): it parses every request, so it
+//     routes /api/ and "X-Route: api" to l4l7-api and the rest to l4l7-web,
+//     and balances each request on its own, even on one connection.
+//   - :7443, HAProxy in mode tcp (layer 4): it sees a TLS connection and the
+//     bytes inside it, never a request. It picks a server once per
+//     connection, and every request on that connection goes there, whatever
+//     its path.
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/http/httptrace"
+	"net/url"
+	"os"
+	"slices"
+	"strings"
+	"time"
+)
+
+// l4Port is the layer 4 listener in the shipped haproxy.cfg (frontend l4).
+const l4Port = "7443"
+
+// request is one call: a path and an optional X-Route header.
+type request struct{ path, route string }
+
+// app is where a request should go if the proxy can route it.
+func (r request) app() string {
+	if strings.HasPrefix(r.path, "/api/") || r.route == "api" {
+		return "l4l7-api"
+	}
+	return "l4l7-web"
+}
+
+func (r request) String() string {
+	if r.route != "" {
+		return r.path + " with X-Route: " + r.route
+	}
+	return r.path
+}
+
+func main() {
+	// L4L7_EDGE_URL=https://l4l7-edge.<domain>:8443, from uses: [l4l7-edge].
+	l7 := os.Getenv("L4L7_EDGE_URL")
+	u, err := url.Parse(l7)
+	if err != nil || u.Hostname() == "" {
+		log.Fatalf("L4L7_EDGE_URL=%q: %v", l7, err)
+	}
+	l4 := "https://" + u.Hostname() + ":" + l4Port
+
+	for {
+		layer7(l7)
+		layer4(l4)
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// layer7 sends eight requests over a single connection to the mode http
+// listener.
+func layer7(base string) {
+	reqs := []request{
+		{"/api/orders", ""}, {"/api/orders", ""}, {"/api/orders", ""},
+		{"/web/home", ""}, {"/web/home", ""}, {"/web/home", ""},
+		{"/home", "api"}, {"/home", "api"},
+	}
+	c := oneConnection()
+	defer c.CloseIdleConnections()
+	var instances []string
+	misrouted, conns := 0, 0
+	for _, r := range reqs {
+		inst, isNew, err := get(c, base, r)
+		if err != nil {
+			log.Printf("L7 :8443 %s failed: %v", r, err)
+			return
+		}
+		if isNew {
+			conns++
+		}
+		if !strings.HasPrefix(inst, r.app()+"-") {
+			misrouted++
+		}
+		log.Printf("L7 :8443 %-28s -> %s", r, inst)
+		instances = append(instances, inst)
+	}
+	slices.Sort(instances)
+	log.Printf("L7 :8443 (mode http): %d connection(s), %d requests; instances %v; misrouted %d of %d",
+		conns, len(reqs), slices.Compact(instances), misrouted, len(reqs))
+}
+
+// layer4 opens four connections to the mode tcp listener and sends the same
+// two requests on each.
+func layer4(base string) {
+	reqs := []request{
+		{"/api/orders", ""},
+		{"/web/home", ""},
+	}
+	pinned := true
+	misrouted, total := 0, 0
+	var instances []string
+	for conn := 1; conn <= 4; conn++ {
+		c := oneConnection()
+		var seen []string
+		for _, r := range reqs {
+			inst, _, err := get(c, base, r)
+			if err != nil {
+				log.Printf("L4 :%s connection %d %s failed: %v", l4Port, conn, r, err)
+				c.CloseIdleConnections()
+				return
+			}
+			total++
+			if !strings.HasPrefix(inst, r.app()+"-") {
+				misrouted++
+			}
+			seen = append(seen, inst)
+		}
+		c.CloseIdleConnections()
+		// Both requests rode the same connection: at layer 4 they
+		// should reach the same instance.
+		if seen[0] != seen[1] {
+			pinned = false
+		}
+		log.Printf("L4 :%s connection %d: %s -> %s, %s -> %s", l4Port, conn, reqs[0], seen[0], reqs[1], seen[1])
+		instances = append(instances, seen...)
+	}
+	slices.Sort(instances)
+	log.Printf("L4 :%s (mode tcp): 4 connections, %d requests; instances %v; one instance per connection: %t; misrouted %d of %d",
+		l4Port, total, slices.Compact(instances), pinned, misrouted, total)
+}
+
+// oneConnection is a client that keeps at most one connection open, so
+// every request reuses it. It verifies the proxy's certificate against
+// SSL_CERT_FILE, the lab's trust bundle. Against :8443, where HAProxy offers
+// HTTP/2 (ALPN h2), the requests are streams on that one connection;
+// against :7443, which offers no ALPN, they are HTTP/1.1, one after another.
+func oneConnection() *http.Client {
+	return &http.Client{
+		Timeout:   3 * time.Second,
+		Transport: &http.Transport{MaxConnsPerHost: 1, MaxIdleConnsPerHost: 1},
+	}
+}
+
+// get sends r and returns the instance that answered and whether the
+// request opened a new connection.
+func get(c *http.Client, base string, r request) (string, bool, error) {
+	var isNew bool
+	trace := &httptrace.ClientTrace{GotConn: func(i httptrace.GotConnInfo) { isNew = !i.Reused }}
+	req, err := http.NewRequest(http.MethodGet, base+r.path, nil)
+	if err != nil {
+		return "", false, err
+	}
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	if r.route != "" {
+		req.Header.Set("X-Route", r.route)
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	// Read the body to the end, or the connection cannot be reused.
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", isNew, fmt.Errorf("%s", resp.Status)
+	}
+	return resp.Header.Get("X-Instance"), isNew, nil
+}

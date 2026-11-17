@@ -1,0 +1,81 @@
+# pgbouncer/pooling-modes
+
+One shared [PgBouncer](https://www.pgbouncer.org/config.html) in front of Postgres, with a session pool and a transaction pool side by side: how many server connections each needs for its clients, and what transaction pooling breaks. The app uses the official Go driver [pgx](https://pkg.go.dev/github.com/jackc/pgx/v5).
+
+- `cmd/pool-modes`: 30 clients query through the transaction pool and 6 through the session pool, each on its own connection. Every 5 seconds it reports both pools and runs two traps in each.
+- `pgbouncer.ini`: the pool's config, yours to edit. `experiment.yaml` points `services.pool-central.file` at it.
+
+## How it works
+
+`pool-central` is an infra PgBouncer: one service that every app using it shares, reached over TLS at `pool-central.{{.Domain}}:6432` (`DATABASE_URL`, `PGHOST`, … point there). It offers the same Postgres database under two names, each its own pool:
+
+```ini
+[databases]
+{{.Config "postgres" "database"}} = host={{.Service "postgres"}}.{{.Domain}} port=5432 dbname={{.Config "postgres" "database"}} pool_mode=transaction pool_size=5
+{{.Config "postgres" "database"}}_session = host={{.Service "postgres"}}.{{.Domain}} port=5432 dbname={{.Config "postgres" "database"}} pool_mode=session pool_size=8
+```
+
+`bb starter` fills in your experiment's Postgres service and database; the examples below use the defaults, `postgres` and `app`.
+
+- **Session pooling** gives a client a server connection when it connects and takes it back when it disconnects, then resets it (`DISCARD ALL`). Everything a session can do works, but a pool of 8 serves at most 8 connected clients; the 9th waits.
+- **Transaction pooling** lends a server connection for one transaction, then gives it to whoever is waiting. Thirty clients share 5 connections; the session pool's 6 clients, each on a connection of its own, run more queries than all 30 of them. And a client's next transaction can run on another server connection, and nothing is reset between clients.
+
+Every query the app runs also returns `pg_backend_pid()`, the Postgres process that ran it:
+
+```text
+transaction pool (app): 30 clients ran 2530 queries in 5s on 5 server connections; a client's next query changed server 1455 times
+session pool (app_session): 6 clients ran 3015 queries in 5s on 6 server connections; a client's next query changed server 0 times
+postgres sees 12 server connections for this role; the clients hold 38
+```
+
+### The traps
+
+Anything that lives in a Postgres session, rather than in one transaction, does not follow a client across transactions:
+
+```text
+trap SET (transaction): set app.tenant = "tenant-6" on server 89, read back "" on server 96: WRONG: the value stayed on the other server connection
+trap PREPARE (transaction): PREPARE trap_6, then EXECUTE trap_6: WRONG: ERROR: prepared statement "trap_6" does not exist (SQLSTATE 26000)
+trap SET (session): set app.tenant = "tenant-6" on server 100, read back "tenant-6" on server 100: ok
+trap PREPARE (session): PREPARE trap_6, then EXECUTE trap_6 returned 6: ok
+pgx prepared statement (transaction): select $1::int + 1 returned 13: ok
+```
+
+- **`SET`** (here `set_config('app.tenant', …, false)`, the same thing) stays on the server connection that ran it. The next statement may run elsewhere and not see it (`read back ""`), and whoever runs next on that connection inherits it (`read back "tenant-4"`: a value an earlier round left there, which any client on that connection would read). When both statements happen to land on the same server, the line says `ok`; that luck is the trap. A tenant id leaking between requests is a security bug, not a curiosity. Use `SET LOCAL` (or `set_config(…, true)`) inside a transaction instead: it ends with the transaction.
+- **SQL `PREPARE` and `EXECUTE`** are passed to Postgres as plain statements; the `EXECUTE` may reach a server that never saw the `PREPARE`.
+- **Protocol-level prepared statements**, which pgx and most drivers use by default, do work: PgBouncer tracks up to `max_prepared_statements` (200) per client and prepares them again on whichever server connection runs them.
+- Also session-scoped, and unsafe in transaction mode: `LISTEN`, session advisory locks, temporary tables, `WITH HOLD` cursors.
+
+PgBouncer does keep a few parameters in step for each client (`application_name`, `TimeZone`, `DateStyle`, `client_encoding`, `standard_conforming_strings`, and more), because Postgres reports their changes to the client. A custom setting like `app.tenant` is not one of them.
+
+```sh
+bb up
+bb logs pool-modes -f
+```
+
+In `bb serve`, open **pool-central** and its **PgBouncer pools** tab: pool `app` in `transaction` mode with about 31 clients on at most 5 servers, pool `app_session` in `session` mode with 7 clients on 7 servers. MCP clients call `pgbouncer_pools` with `service: pool-central`.
+
+## A central pool or a sidecar
+
+`sidecar/pgbouncer-pool` runs PgBouncer as a sidecar in the app's pod. Both are useful:
+
+| | Central (`pool-central`, this starter) | Sidecar (`sidecar/pgbouncer-pool`) |
+|---|---|---|
+| Who shares a pool | every app and replica that uses it | one app instance |
+| Server connections | one cap for everyone (`pool_size` per database and user) | `pool_size` × replicas: 10 replicas of a pool of 10 can open 100 |
+| Client hop | over the network, TLS (`sslmode=verify-full`) | loopback in the pod, plaintext |
+| Failure | one more service to keep up; when it is down, every app is | fails with its app only |
+| Config | one place, owned by whoever runs the database | per app, owned by the app |
+
+A central pool protects the database: its total connections no longer grow with the number of app replicas. A sidecar keeps the pool next to the app, with no extra hop and no shared component, and is the usual choice when each app's replica count is small or the database has room. Large deployments often run both: a sidecar to cut connection churn, and a central pool to cap what reaches Postgres.
+
+## Try this
+
+- **Fill the session pool.** Set `sessionClients = 10` in `cmd/pool-modes/main.go` and `bb up`. Eleven clients (ten plus the trap client) want the 8 server connections and keep them, so three wait and run nothing: the session report counts fewer servers than clients, and the session traps log that the pool is full. After `query_wait_timeout` (120 s) PgBouncer disconnects clients that waited that long. Session pools must be sized for the number of connected clients, not the number of busy ones.
+- **Resize the transaction pool.** Set `pool_size=2`, then `20`, on the `app` line, `bb up` each time, and compare queries per 5 seconds. More servers help until Postgres itself is the bottleneck.
+- **Fix the SET trap.** Wrap the set and the read in one transaction (`conn.Begin`, then both statements, then `Commit`) and use `set_config('app.tenant', $1, true)`. Both run on one server, and the value ends with the transaction: no leak.
+- **Ask PgBouncer directly.** `docker exec -it bb-{{.Experiment}}-pool-central-1 sh -c 'PGPASSWORD="$BB_PG_PASSWORD" psql "host=127.0.0.1 port=6432 user=$BB_PG_USER dbname=pgbouncer sslmode=require" -c "SHOW POOLS"'` opens the admin console the explorer reads; try `SHOW SERVERS` and `SHOW CLIENTS`.
+
+## Break this
+
+- **Statement pooling.** Set `pool_mode=statement` on the `app` line and `bb up`. PgBouncer now returns the server after every statement and refuses multi-statement transactions; the traps still fail, and any `BEGIN … COMMIT` fails too.
+- **Turn off prepared statement tracking.** Set `max_prepared_statements = 0` and `bb up`. pgx's own prepared statements now break in the transaction pool (`prepared statement "stmtcache_…" does not exist`), the problem every pre-1.21 PgBouncer had. Put it back.

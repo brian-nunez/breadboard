@@ -1,0 +1,30 @@
+// Command tlsm-passthrough is the passthrough backend: HAProxy reads the
+// server name from the client's TLS hello and forwards the encrypted bytes
+// here untouched. The client's TLS session ends in this app, which presents
+// its own certificate. The proxy cannot read or change the requests.
+package main
+
+import (
+	"crypto/tls"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// No X-Forwarded-Proto: the proxy never saw the HTTP request, so it
+		// could not add headers. RemoteAddr is the proxy's address: it
+		// still opened the TCP connection to us.
+		fwd := r.Header.Get("X-Forwarded-Proto")
+		if fwd == "" {
+			fwd = "none"
+		}
+		fmt.Fprintf(w, "%s: %s session from the client itself via %s, SNI %s, X-Forwarded-Proto %s\n",
+			name, tls.VersionName(r.TLS.Version), r.RemoteAddr, r.TLS.ServerName, fwd)
+	})
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

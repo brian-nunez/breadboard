@@ -1,0 +1,51 @@
+# proxy/tls-modes
+
+A proxy in front of HTTPS services can handle TLS three ways. This starter runs all three behind one [HAProxy](https://docs.haproxy.org/3.4/configuration.html), one backend per mode, and a client that logs the certificate it was shown each time.
+
+- `cmd/tlsm-reencrypt`: serves TLS on 8443 with its own certificate.
+- `cmd/tlsm-terminate`: plain HTTP, no TLS code, listening on `BB_PLAIN_LISTEN_ADDR`.
+- `cmd/tlsm-passthrough`: serves TLS on 8443 with its own certificate.
+- `cmd/tlsm-client`: every 5 seconds, calls each backend through `tlsm-edge`, then tries `tlsm-terminate`'s plaintext port directly.
+- `haproxy.cfg`: the proxy's config, yours to edit. `experiment.yaml` points `services.tlsm-edge.file` at it and declares each upstream's mode.
+
+## How it works
+
+| Mode | Client connects to | Client sees the certificate of | Proxy → backend | Proxy can read and route on HTTP |
+|---|---|---|---|---|
+| re-encrypt (`tls.mode: on`) | `TLSM_EDGE_URL/reencrypt/` | `tlsm-edge` | a new TLS connection, verified against the lab CA | yes |
+| terminate (`tls.mode: off`) | `TLSM_EDGE_URL/terminate/` | `tlsm-edge` | plain HTTP on a private segment | yes |
+| passthrough | `TLSM_EDGE_PASSTHROUGH_ADDR`, asking for `tlsm-passthrough.{{.Domain}}` | `tlsm-passthrough` | the client's own TLS bytes, untouched | no |
+
+In `haproxy.cfg` the difference between re-encrypt and terminate is the end of a server line: `ssl verify required ca-file … sni … verifyhost …` or nothing. Passthrough needs a different frontend: `mode tcp` on 9443, which waits for the client's TLS hello and routes on the server name it asks for (`req.ssl_sni`), without the key to decrypt anything.
+
+- **Re-encrypt** is the default in Breadboard and the usual choice: the proxy sees HTTP (routing, headers, retries) and the backend hop stays encrypted and verified.
+- **Terminate** saves the backend from TLS, at the cost of a plaintext hop. Breadboard puts that hop on a private network segment that only the proxy and `tlsm-terminate` join (`tlsm-terminate.plain.{{.Domain}}`), and the backend's pod drops the port on every other address. `experiment.yaml` must say why (`tls.reason`), and `bb up` prints it as a plaintext warning.
+- **Passthrough** keeps the session end to end: the backend holds the key, sees the client's TLS session, and the proxy cannot read or change requests. The client must ask for the backend's name (SNI), not the proxy's.
+
+```sh
+bb up
+bb logs tlsm-client -f
+```
+
+```text
+re-encrypt  https://tlsm-edge.{{.Domain}}:8443/reencrypt/: 200 OK, certificate for [tlsm-edge.{{.Domain}}] issued by "Breadboard root CA ({{.Domain}})" (sha256 5bd4ed4cd557), TLS 1.3; backend: tlsm-reencrypt: TLS 1.3 from 172.23.0.10:53878, SNI tlsm-reencrypt.{{.Domain}}, X-Forwarded-Proto https
+terminate   https://tlsm-edge.{{.Domain}}:8443/terminate/: 200 OK, certificate for [tlsm-edge.{{.Domain}}] issued by "Breadboard root CA ({{.Domain}})" (sha256 5bd4ed4cd557), TLS 1.3; backend: tlsm-terminate: plaintext HTTP from 10.213.0.129:57428 (tls=false), X-Forwarded-Proto https
+passthrough https://tlsm-passthrough.{{.Domain}}:9443/: 200 OK, certificate for [tlsm-passthrough.{{.Domain}}] issued by "Breadboard root CA ({{.Domain}})" (sha256 4c8bcba495d4), TLS 1.3; backend: tlsm-passthrough: TLS 1.3 session from the client itself via 172.23.0.10:32906, SNI tlsm-passthrough.{{.Domain}}, X-Forwarded-Proto none
+direct http://tlsm-terminate.{{.Domain}}:8080/: unreachable, as it should be: ...
+```
+
+The certificate fingerprint (`sha256 …`) is the same for the first two lines and different for the third. The terminate backend sees the proxy's address on the private segment (`10.213.0.129`); the other two see its address on the experiment's network. Passthrough also has no `X-Forwarded-Proto`: HAProxy never saw the request, so it could not add a header.
+
+In `bb serve`, **tlsm-edge**'s overview lists the three upstreams with their modes, and its **HAProxy stats** tab shows `be_reencrypt` and `be_terminate` in http mode and `be_tls_passthrough` in tcp mode (sessions and bytes, no requests). **tlsm-terminate**'s page shows the plaintext edge and its reason. MCP clients call `service_details` and `haproxy_stats` with `service: tlsm-edge`.
+
+## Try this
+
+- **Look at the certificates yourself.** `docker exec bb-{{.Experiment}}-tlsm-edge-1 bash -c 'openssl s_client -connect tlsm-edge.{{.Domain}}:9443 -servername tlsm-passthrough.{{.Domain}} </dev/null 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName'` prints the backend's names; change the port to 8443 and the server name to `tlsm-edge.{{.Domain}}` for the proxy's.
+- **Ask for a name nobody serves.** Change the passthrough URL in `cmd/tlsm-client/main.go` to `https://tlsm-reencrypt.%s:9443/` and `bb up`. No `req.ssl_sni` rule matches, so HAProxy closes the connection: passthrough routes only the names it lists.
+- **Switch terminate to re-encrypt.** Give `tlsm-terminate` TLS (`http.ListenAndServeTLS(":8443", …)`), delete its `tls` block and set `port: 8443` in `experiment.yaml`, and copy `be_reencrypt`'s server line into `be_terminate` with its names. The plaintext warning disappears from `bb up`.
+- **Add a header at the proxy.** Add `http-request set-header X-Edge tlsm-edge` to `frontend https` and print it in each backend. Re-encrypt and terminate show it; passthrough cannot.
+
+## Break this
+
+- **Reach the plaintext hop from elsewhere.** The client already tries `http://tlsm-terminate.{{.Domain}}:8080/` (refused or timed out: the app listens only on its segment address, and the pod's firewall drops the port elsewhere) and `tlsm-terminate.plain.{{.Domain}}` (the client is not on the segment, so the name does not resolve). Change `cmd/tlsm-terminate/main.go` to listen on `":8080"` and `bb up`: the pod's firewall still drops the port on every address but the segment's, and the client's direct call still fails.
+- **Drop verification on re-encrypt.** Change `ssl verify required` to `ssl verify none` in `be_reencrypt`. Everything still works, which is the danger: the hop is encrypted but HAProxy no longer knows whom it talks to. Put it back.

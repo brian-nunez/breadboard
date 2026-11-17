@@ -1,0 +1,24 @@
+// Command tlsm-terminate is the terminate backend: HAProxy decrypts the
+// client's TLS and sends plain HTTP the rest of the way. The app has no TLS
+// code. It listens on BB_PLAIN_LISTEN_ADDR, its address on a private segment
+// only the proxy joins, and its pod drops the port on every other address.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE")
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "%s: plaintext HTTP from %s (tls=%t), X-Forwarded-Proto %s\n",
+			name, r.RemoteAddr, r.TLS != nil, r.Header.Get("X-Forwarded-Proto"))
+	})
+	// BB_PLAIN_LISTEN_ADDR is <this app's segment address>:8080.
+	addr := os.Getenv("BB_PLAIN_LISTEN_ADDR")
+	log.Printf("%s serving plaintext HTTP on %s, reachable by the proxy only", name, addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
+}

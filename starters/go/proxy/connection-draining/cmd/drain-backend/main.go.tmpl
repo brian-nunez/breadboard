@@ -1,0 +1,89 @@
+// Command drain-backend runs as three replicas behind HAProxy. Each request
+// takes 50 to 250 ms, so there are always requests in flight.
+//
+// It shuts down gracefully, the way a replica must for a deploy or a scale
+// down to lose no requests:
+//
+//  1. On SIGTERM (docker stop, a rolling deploy) it starts failing its health
+//     check, /healthz, but keeps serving. HAProxy notices within about two
+//     seconds and stops sending it new requests.
+//  2. After drainDelay it stops accepting connections and waits for the
+//     requests already in flight to finish (http.Server.Shutdown).
+//  3. Then it exits.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"math/rand/v2"
+	"net/http"
+	"os"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
+	"time"
+)
+
+// drainDelay must be longer than HAProxy takes to mark the server down
+// (inter 1s x fall 2 in haproxy.cfg), and the whole drain shorter than the
+// time the stopper waits before SIGKILL: docker stop -t, a Kubernetes
+// pod's terminationGracePeriodSeconds. The README uses docker stop -t 15.
+const drainDelay = 4 * time.Second
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // drain-backend-1, -2 or -3
+	var draining atomic.Bool
+	var served, inFlight atomic.Int64
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		if draining.Load() {
+			http.Error(w, "draining", http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprintln(w, "ok")
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		inFlight.Add(1)
+		defer inFlight.Add(-1)
+		time.Sleep(time.Duration(50+rand.IntN(200)) * time.Millisecond)
+		served.Add(1)
+		fmt.Fprintln(w, name)
+	})
+	srv := &http.Server{Addr: ":8443", Handler: mux}
+
+	go func() {
+		for range time.Tick(5 * time.Second) {
+			log.Printf("%s: served %d requests in 5s", name, served.Swap(0))
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		<-stop
+		draining.Store(true)
+		log.Printf("%s: SIGTERM; failing /healthz and serving for %s more so HAProxy can stop sending", name, drainDelay)
+		time.Sleep(drainDelay)
+		log.Printf("%s: closing; waiting for %d requests in flight", name, inFlight.Load())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("%s: shutdown: %v", name, err)
+		}
+	}()
+
+	log.Printf("%s serving TLS on :8443", name)
+	err := srv.ListenAndServeTLS(os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"))
+	if !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+	// ListenAndServeTLS returns as soon as Shutdown starts; Shutdown itself
+	// returns once the last response has been written.
+	<-drained
+	log.Printf("%s: drained, exiting", name)
+}

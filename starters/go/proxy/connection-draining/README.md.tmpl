@@ -1,0 +1,49 @@
+# proxy/connection-draining
+
+Every deploy, scale-down and host maintenance takes a server out of rotation while it has requests in flight. Done carelessly, those requests fail. Done with **draining**, none do. This starter drains replicas behind [HAProxy](https://docs.haproxy.org/3.4/management.html#9.3-set%20server) under constant load, two ways.
+
+- `cmd/drain-backend`: three replicas serving TLS on 8443; each request takes 50 to 250 ms. On SIGTERM a replica drains itself (below), then exits.
+- `cmd/drain-client`: keeps eight requests in flight at all times and logs, every 2 seconds, which replica answered how many and how many failed, plus running totals.
+- `haproxy.cfg`: the proxy's config, yours to edit. `experiment.yaml` points `services.drain-edge.file` at it.
+
+## How it works
+
+**Draining from the proxy.** HAProxy's runtime API (`stats socket ipv4@127.0.0.1:9999 level admin`, loopback only) changes a server's state without a reload. In state `drain`, a server gets no new requests, keeps the ones it has until they finish, and stays health checked. Once its current sessions reach zero, nothing depends on it, and it can be stopped.
+
+**Draining from the server.** On SIGTERM, `drain-backend` starts answering its health check, `GET /healthz`, with 503, but keeps serving. HAProxy checks every second (`inter 1s fall 2`), so within about two seconds it marks the server down and sends it nothing new. Four seconds after the signal the replica stops accepting connections, gives what is in flight up to 5 seconds to finish (`http.Server.Shutdown` with a deadline) and exits, so the whole drain takes at most about 9 seconds. Whoever stops it must wait longer than that before killing: `docker stop -t 15` waits up to 15 seconds. Docker's own default is set by the engine and can be shorter (3 seconds on some Docker Desktop installs), which would kill the replica mid-drain.
+
+The two compose: an orchestrator drains at the proxy before it stops a replica, and the replica drains itself in case nobody did.
+
+```sh
+bb up
+bb logs drain-client -f
+```
+
+```text
+last 2s: drain-backend-1=27 drain-backend-2=26 drain-backend-3=27, failed 0; total 1604 requests, 0 failed
+```
+
+1. **Drain replica 2 at the proxy.**
+   ```sh
+   docker exec bb-{{.Experiment}}-drain-edge-1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/9999; echo "set server be_app/drain-backend-2 state drain" >&3; cat <&3'
+   ```
+   `drain-backend-2` disappears from the client's log within one line. In `bb serve`, **drain-edge**'s **HAProxy stats** tab shows it as `DRAIN` with 0 current sessions (MCP: `haproxy_stats` with `service: drain-edge`).
+2. **Stop it.** `docker stop -t 15 bb-{{.Experiment}}-drain-backend-2-1`. The failure count stays at 0.
+3. **Stop replica 3 without asking the proxy.** `docker stop -t 15 bb-{{.Experiment}}-drain-backend-3-1`. Its own drain takes it out: `bb logs drain-backend-3` shows the SIGTERM, the wait and the exit, and the failure count stays at 0.
+4. **Bring them back.** `bb up` starts both. Replica 3 rejoins as soon as its checks pass. Replica 2 is still in `drain` at the proxy (the state belongs to HAProxy, not to the container): set it back with `state ready`, or HAProxy forgets it at its next restart.
+
+## Try this
+
+- **Watch the sessions drain.** Before step 2, run `show servers state be_app` through the same socket, or watch the stats tab: replica 2's current sessions go from a few to zero within a quarter of a second, the time the slowest request takes.
+- **Use maintenance instead.** `state maint` also stops new requests, and stops health checks too: the server shows `MAINT`, and HAProxy will not bring it back on its own when the replica returns.
+- **Make requests slower.** Change the handler's sleep to 2 to 3 seconds and `bb up`. Draining now visibly takes seconds, and step 3 still loses nothing, since `Shutdown` waits for in-flight requests. That range fits inside all three time budgets a request has here; past them, requests fail:
+  - **The client's deadline, 5 seconds.** `http.Client{Timeout: 5 * time.Second}` in `cmd/drain-client/main.go` covers the whole request. A request slower than that fails in the client with no stop at all.
+  - **The replica's drain, about 9 seconds.** After SIGTERM it serves for `drainDelay` (4 s), then gives `Shutdown` 5 seconds (`context.WithTimeout` in `cmd/drain-backend/main.go`). When that deadline passes, `main` returns and the process exits with whatever is still in flight, so a request still running about 9 seconds after the signal is cut off.
+  - **The stopper's patience, 15 seconds.** `docker stop -t 15` sends SIGKILL after 15 seconds. With the deadlines above the replica has always exited by then, so this budget never binds; it only must stay above the drain.
+
+  To explore longer requests, raise the budgets in that order: the client's timeout first, then the `Shutdown` deadline, then `docker stop -t` so it stays above `drainDelay` plus that deadline. Raising `docker stop -t` alone changes nothing. (HAProxy's `timeout server 30s` in `haproxy.cfg` is a fourth limit, far above the others.) Drain budgets must cover the slowest request, at every layer.
+
+## Break this
+
+- **Kill instead of stop.** `docker kill bb-{{.Experiment}}-drain-backend-1-1` sends SIGKILL: no drain. The requests in flight on that replica fail at once, and the client's failure count jumps. HAProxy marks the server down two failed checks later. `bb up` brings it back.
+- **Skip the drain delay.** Set `drainDelay` to 0 in `cmd/drain-backend/main.go` and `bb up`, then `docker stop -t 15` a replica. It closes its listener before HAProxy has marked it down, so for a second or two new requests are sent to a server that refuses them; HAProxy retries refused connections (`retries`, 3 by default), so whether the client sees failures depends on timing. The delay is what makes it safe.

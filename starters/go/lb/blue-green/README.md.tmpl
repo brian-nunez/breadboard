@@ -44,6 +44,8 @@ bb logs bg-client -f
 
 The client logs `live colour: bg-blue` and then, every 2 seconds, `last 2s: bg-blue=40 | total ok=… errors=0`.
 
+The score starts with the first answer. `bb up` starts both colours, the proxy and the client together, and it orders only the proxy before the client, so on a busy machine the client's first requests can reach NGINX before `bg-blue` listens. NGINX answers those with `502 Bad Gateway`, and the client logs `waiting for the first answer: …` once a second until blue answers. Those failures come from startup, not from a switch, so the client leaves them out of the score. From the first answer on, every failure counts.
+
 ## What to watch
 
 - `bb logs bg-edge`: one access log line per request, with the live colour and the address that answered (`live=bg-blue upstream=<address>:8443`).

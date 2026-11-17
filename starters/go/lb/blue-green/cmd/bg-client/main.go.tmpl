@@ -1,7 +1,8 @@
 // Command bg-client calls the proxy twenty times a second, one request after
 // another, and keeps score: which colour answered, and every failure. Every
 // 2 seconds it logs a tally; when the colour changes it logs the cutover.
-// A blue-green switch done right shows one cutover and no errors.
+// The score starts with the first answer. A blue-green switch done right
+// shows one cutover and no errors.
 package main
 
 import (
@@ -22,9 +23,10 @@ func main() {
 	// connections open between requests, as real clients do.
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	var live string
-	var ok, failed int
-	window := map[string]int{}
+	live := waitForLive(client, url)
+	log.Printf("live colour: %s", live)
+	ok, failed := 1, 0
+	window := map[string]int{live: 1}
 	report := time.Tick(2 * time.Second)
 	for range time.Tick(50 * time.Millisecond) {
 		colour, err := call(client, url)
@@ -34,11 +36,7 @@ func main() {
 			window["errors"]++
 			log.Printf("error: %v", err)
 		case colour != live:
-			if live != "" {
-				log.Printf("cutover: %s -> %s after %d answers, %d errors so far", live, colour, ok, failed)
-			} else {
-				log.Printf("live colour: %s", colour)
-			}
+			log.Printf("cutover: %s -> %s after %d answers, %d errors so far", live, colour, ok, failed)
 			live = colour
 			fallthrough
 		default:
@@ -51,6 +49,23 @@ func main() {
 			clear(window)
 		default:
 		}
+	}
+}
+
+// waitForLive calls the proxy once a second until a colour answers, and
+// returns that colour. bb up starts the colours, the proxy and this client
+// together and orders only the proxy before the client, so the first
+// requests can reach NGINX before bg-blue listens, and NGINX answers them
+// with a 502 until it does. That is startup, not the switch: the score
+// starts with the first answer, and every failure after it counts.
+func waitForLive(client *http.Client, url string) string {
+	for {
+		colour, err := call(client, url)
+		if err == nil {
+			return colour
+		}
+		log.Printf("waiting for the first answer: %v", err)
+		time.Sleep(time.Second)
 	}
 }
 

@@ -205,7 +205,9 @@ func (s *Server) servicePage(ctx context.Context, name, tab string) servicePage 
 		return p
 	}
 	p.Details = d
-	if d.Type != "" {
+	// Learning notes belong to infra catalog entries. A sidecar type may
+	// share an infra type's id (envoy), but those notes are not its own.
+	if d.Type != "" && d.Kind == "infra" {
 		if l, err := s.eng.Learn(ctx, core.LearnRequest{Type: d.Type}); err == nil {
 			// Notes are written for any experiment; this page knows which one.
 			p.Notes = parseNotes(strings.ReplaceAll(l.Notes, "<experiment>", p.Dash.Experiment))

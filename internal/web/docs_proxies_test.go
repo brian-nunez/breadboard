@@ -88,7 +88,7 @@ func TestDocsStarterLinksAreKnown(t *testing.T) {
 			check("/docs/"+tc.ID+"/"+g.Slug, g.Starter)
 		}
 	}
-	for _, l := range []link{stRoundRobin, stLeastConn, stP2C, stHashing, stSticky, stCanary, stBlueGreen, stHealth, stL4L7, stTLSModes, stMirroring, stDraining, stPoolModes, stPoolSidecar} {
+	for _, l := range []link{stRoundRobin, stLeastConn, stP2C, stHashing, stSticky, stCanary, stBlueGreen, stHealth, stL4L7, stTLSModes, stMirroring, stDraining, stPoolModes, stPoolSidecar, stPathHost, stTransform, stVersioning, stRateLimit, stBreaking, stRetries, stJWT, stFwdAuth, stBFF, stGRPC, stSidecarCB} {
 		check("docStarters", l.URL)
 		if strings.Count(l.URL, "/") != 1 {
 			t.Errorf("starter id %q is not <area>/<name>", l.URL)

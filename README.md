@@ -38,7 +38,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Breadboard is early.** Phases 1 to 4 work: the core engine and CLI, five services including S3 Compatible, Compose export, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`). Phase 5 has begun: reverse proxies and load balancers as services (Envoy, Traefik, HAProxy, NGINX, PgBouncer) with re-encrypt, terminate and passthrough per upstream; sidecars (Envoy, PgBouncer, Fluent Bit) that share an app's network namespace, with transparent proxying and egress policy; and app replicas; and thirteen load-balancing and reverse-proxy starters (round robin, least connections, power of two choices, consistent hashing, sticky sessions, canary, blue-green, health checks, L4 vs L7, TLS modes, mirroring, draining, connection pooling) with docs for each proxy. Gateway examples, mTLS and other exporters are next. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
+> **Breadboard is early.** Phases 1 to 4 work: the core engine and CLI, five services including S3 Compatible, Compose export, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`). Phase 5 has begun: reverse proxies and load balancers as services (Envoy, Traefik, HAProxy, NGINX, PgBouncer) with re-encrypt, terminate and passthrough per upstream; sidecars (Envoy, PgBouncer, Fluent Bit) that share an app's network namespace, with transparent proxying and egress policy; app replicas; thirteen load-balancing and reverse-proxy starters (round robin, least connections, power of two choices, consistent hashing, sticky sessions, canary, blue-green, health checks, L4 vs L7, TLS modes, mirroring, draining, connection pooling) with docs for each proxy; and ten API-gateway starters (path and host routing, request transformation, versioning, rate limiting, circuit breaking, retries and timeouts, JWT and forward auth, backend for frontend, gRPC routing) with API gateway guides. `*.localhost` host access, mTLS and other exporters are next. Requires Go 1.27.4 and Docker with Compose v2 on macOS or Linux.
 
 <p align="center">
   <a href="#why-breadboard">Why Breadboard</a> ·
@@ -135,11 +135,16 @@ Each catalog entry pins an exact image version, configures TLS, sets resource li
 | **proxy/request-mirroring** | Shadow traffic to v2 with Envoy, its responses discarded. | 5 |
 | **proxy/connection-draining** | Draining a backend under load in HAProxy without a failed request. | 5 |
 | **pgbouncer/pooling-modes** | A shared PgBouncer in session and transaction pooling, and the session-state traps of transaction mode. | 5 |
-| **proxy/l4-vs-l7** | HAProxy in `mode http` and `mode tcp`: routing per request vs balancing per connection. | 5 |
-| **proxy/tls-modes** | Re-encrypt, terminate and passthrough at one HAProxy, and the certificate a client sees on each. | 5 |
-| **proxy/request-mirroring** | Shadow traffic to a new version with Envoy, its answers discarded. | 5 |
-| **proxy/connection-draining** | Taking replicas out of HAProxy under load with zero failed requests. | 5 |
-| **pgbouncer/pooling-modes** | Session vs transaction pooling in a shared PgBouncer, and the session-state traps of transaction mode. | 5 |
+| **gw/path-host-routing** | Routing by path and by Host through Traefik, with a stripped prefix and a default route. | 5 |
+| **gw/request-transformation** | Traefik middlewares adding and removing headers, rewriting paths and redirecting retired URLs. | 5 |
+| **gw/api-versioning** | v1 and v2 by path or header through NGINX, with deprecation headers on v1. | 5 |
+| **gw/rate-limiting** | Token bucket (Envoy) vs leaky bucket (NGINX) under the same bursts, with a bucket per client. | 5 |
+| **gw/circuit-breaking** | Envoy circuit breakers turning overload into fast 503s and capping a slow backend's concurrency. | 5 |
+| **gw/retries-and-timeouts** | Envoy retries and per-try timeouts hiding a flaky backend, and a retry storm with and without a retry budget. | 5 |
+| **gw/jwt-auth** | JWT authentication at the edge with Envoy: no token or a forged one gets 401, valid claims reach the backend. | 5 |
+| **gw/forward-auth** | Traefik forward auth: an auth service decides every request and returns the caller's identity. | 5 |
+| **gw/bff-aggregation** | A backend for frontend fanning one call out to two services, next to plain gateway routing. | 5 |
+| **gw/grpc-routing** | gRPC through Envoy: routing by service name over HTTP/2 and a per-method deadline. | 5 |
 
 Starters are Go 1.27.4 projects with a multi-stage Dockerfile and a README with exercises to try and things to break. See [starters](docs/design/starters.md).
 

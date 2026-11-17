@@ -30,7 +30,7 @@ func init() {
 			{"Traefik v3.7: rules and priority", traefikDocs + "reference/routing-configuration/http/routing/rules-and-priority/"},
 			{"Traefik v3.7: file provider", traefikDocs + "reference/install-configuration/providers/others/file/"},
 		},
-		Starters: []string{stP2C.URL, stCanary.URL},
+		Starters: []string{stP2C.URL, stCanary.URL, stPathHost.URL, stTransform.URL, stFwdAuth.URL, stBFF.URL},
 		Guides: []guide{
 			{
 				Slug: "config-anatomy", Title: "Anatomy of the Traefik config", Summary: "Static traefik.yml, tls.yml and the dynamic routes in dynamic.yml.",

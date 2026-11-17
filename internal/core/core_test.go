@@ -79,7 +79,7 @@ func TestCatalogAndLearn(t *testing.T) {
 			t.Errorf("%s image %q is not an exact pin", e.Type, e.Image)
 		}
 	}
-	if !slices.Equal(types, []string{"kafka", "postgres", "redis", "consul", "s3-compatible", "haproxy", "envoy", "traefik"}) {
+	if !slices.Equal(types, []string{"kafka", "postgres", "redis", "consul", "s3-compatible", "haproxy", "envoy", "traefik", "nginx", "pgbouncer"}) {
 		t.Fatalf("types = %v", types)
 	}
 	l, err := h.eng.Learn(h.ctx(), LearnRequest{Type: "postgres"})
@@ -284,5 +284,28 @@ func TestStarterDetailsWritesNothing(t *testing.T) {
 	}
 	if _, err := h.eng.StarterDetails(h.ctx(), StarterDetailsRequest{ID: "nope/nope"}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown starter error = %v", err)
+	}
+}
+
+// bb add pgbouncer lists the experiment's only Postgres as its upstream, so
+// the new pool validates without editing experiment.yaml; with no Postgres
+// the bare service is refused and validation says what to list.
+func TestAddPgBouncerWiresTheOnlyPostgres(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.writeSpec("version: 1\nname: lab\nservices:\n  db:\n    type: postgres\n")
+	if _, err := h.eng.AddService(h.ctx(), AddServiceRequest{Dir: h.dir, Type: "pgbouncer", Name: "pool"}); err != nil {
+		t.Fatalf("AddService pgbouncer: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(h.dir, "experiment.yaml"))
+	if err != nil || !strings.Contains(string(data), "pool:\n    type: pgbouncer\n    upstreams:\n      - service: db\n") {
+		t.Fatalf("experiment.yaml = %s %v", data, err)
+	}
+
+	h2 := newHarness(t)
+	h2.init()
+	h2.writeSpec("version: 1\nname: lab\nservices: {}\n")
+	if _, err := h2.eng.AddService(h2.ctx(), AddServiceRequest{Dir: h2.dir, Type: "pgbouncer"}); !errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), "upstreams") {
+		t.Fatalf("AddService pgbouncer without postgres = %v", err)
 	}
 }

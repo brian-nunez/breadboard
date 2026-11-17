@@ -56,7 +56,7 @@ func postgres() *Entry {
 					fmt.Sprintf("# Plaintext, only from the private segment shared with: %s", strings.Join(s.Plain.Clients, ", ")),
 				)
 				for _, r := range s.Plain.Reasons {
-					hba = append(hba, "# Reason: "+r)
+					hba = append(hba, hbaComment("Reason: "+r))
 				}
 				hba = append(hba, fmt.Sprintf("hostnossl all      all  %s scram-sha-256", s.Plain.Subnet))
 			}
@@ -133,4 +133,19 @@ func postgres() *Entry {
 			}
 		},
 	}
+}
+
+// hbaComment renders user text (a tls.reason) as pg_hba.conf comment lines
+// through Comment, so no line of it can become a record. pg_hba.conf joins a
+// line ending in a backslash with the next one before it strips comments,
+// so such a line gets a closing "#": the record after a comment can never
+// be swallowed into it.
+func hbaComment(text string) string {
+	lines := strings.Split(Comment("# ", text), "\n")
+	for i, l := range lines {
+		if strings.HasSuffix(l, `\`) {
+			lines[i] = l + "#"
+		}
+	}
+	return strings.Join(lines, "\n")
 }

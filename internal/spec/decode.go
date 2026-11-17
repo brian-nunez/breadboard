@@ -11,10 +11,7 @@ import (
 
 // Keys accepted by the schema's shape but not supported yet, with the phase
 // that introduces each one.
-var (
-	reservedTLS     = map[string]string{"clientAuth": "Phase 6 (mTLS)", "ca": "Phase 6 (multiple CAs)"}
-	reservedService = map[string]string{"upstream": "Phase 5 (proxies and relays)"}
-)
+var reservedTLS = map[string]string{"clientAuth": "Phase 6 (mTLS)", "ca": "Phase 6 (multiple CAs)"}
 
 // Decode turns the document into a Spec. It reports every structural problem
 // (unknown keys, wrong types, missing required fields) with its YAML path.
@@ -143,7 +140,7 @@ func (dec *decoder) service(name, path string, n *yaml.Node) Service {
 		dec.add(join(path, "type"), "is required")
 		return svc
 	}
-	f := dec.fields(path, n, reservedService, "type", "resources", "config")
+	f := dec.fields(path, n, nil, "type", "resources", "config", "upstreams", "file")
 	if v, ok := f["type"]; ok {
 		svc.Type = dec.str(join(path, "type"), v)
 	} else {
@@ -164,7 +161,59 @@ func (dec *decoder) service(name, path string, n *yaml.Node) Service {
 			}
 		}
 	}
+	if v, ok := f["upstreams"]; ok && !isNull(v) {
+		up := join(path, "upstreams")
+		if v.Kind != yaml.SequenceNode {
+			dec.add(up, "must be a list")
+		} else {
+			for i, item := range v.Content {
+				svc.Upstreams = append(svc.Upstreams, dec.upstream(fmt.Sprintf("%s[%d]", up, i), item))
+			}
+		}
+	}
+	if v, ok := f["file"]; ok {
+		svc.File = dec.str(join(path, "file"), v)
+	}
 	return svc
+}
+
+// upstream decodes one upstreams entry: a target name (short form) or a
+// mapping with service, port, name and tls.
+func (dec *decoder) upstream(path string, n *yaml.Node) Upstream {
+	if n.Kind == yaml.ScalarNode {
+		return Upstream{Service: dec.str(path, n)}
+	}
+	f := dec.fields(path, n, nil, "service", "port", "name", "tls")
+	u := Upstream{}
+	if n.Kind != yaml.MappingNode {
+		return u
+	}
+	if v, ok := f["service"]; ok {
+		u.Service = dec.str(join(path, "service"), v)
+	} else {
+		dec.add(join(path, "service"), "is required")
+	}
+	if v, ok := f["port"]; ok {
+		u.Port = dec.positive(join(path, "port"), v, "must be between 1 and 65535")
+	}
+	if v, ok := f["name"]; ok {
+		u.Name = dec.str(join(path, "name"), v)
+	}
+	if v, ok := f["tls"]; ok && !isNull(v) {
+		tp := join(path, "tls")
+		tf := dec.fields(tp, v, reservedTLS, "mode", "reason")
+		if m, ok := tf["mode"]; ok {
+			if m.Kind == yaml.ScalarNode && m.Value == TLSPassthrough {
+				u.TLS.Mode = TLSPassthrough
+			} else {
+				u.TLS.Mode = dec.tlsModeOf(join(tp, "mode"), m, "must be on, off or passthrough")
+			}
+		}
+		if r, ok := tf["reason"]; ok {
+			u.TLS.Reason = dec.str(join(tp, "reason"), r)
+		}
+	}
+	return u
 }
 
 func (dec *decoder) app(name, path string, n *yaml.Node) App {
@@ -277,8 +326,12 @@ func (dec *decoder) use(path string, n *yaml.Node) Use {
 // tlsMode accepts "on"/"off". YAML 1.1 readers treat bare on/off as booleans,
 // so both spellings are accepted and normalised.
 func (dec *decoder) tlsMode(path string, n *yaml.Node) string {
+	return dec.tlsModeOf(path, n, "must be on or off")
+}
+
+func (dec *decoder) tlsModeOf(path string, n *yaml.Node, msg string) string {
 	if n.Kind != yaml.ScalarNode {
-		dec.add(path, "must be on or off")
+		dec.add(path, "%s", msg)
 		return ""
 	}
 	switch n.Value {
@@ -287,7 +340,7 @@ func (dec *decoder) tlsMode(path string, n *yaml.Node) string {
 	case "off", "false":
 		return TLSOff
 	}
-	dec.add(path, "must be on or off, not %q", n.Value)
+	dec.add(path, "%s, not %q", msg, n.Value)
 	return ""
 }
 

@@ -412,6 +412,9 @@ type Network struct {
 	Name         string
 	Subnet       netip.Prefix
 	ExperimentID string
+	// IPRange is the part of Subnet Docker hands out dynamically; zero
+	// when the network has none (the whole subnet).
+	IPRange netip.Prefix
 }
 
 // labelExperimentID matches compose.LabelExperimentID.
@@ -470,7 +473,8 @@ func (c *Compose) Subnets(ctx context.Context) ([]Network, error) {
 		Labels map[string]string `json:"Labels"`
 		IPAM   struct {
 			Config []struct {
-				Subnet string `json:"Subnet"`
+				Subnet  string `json:"Subnet"`
+				IPRange string `json:"IPRange"`
 			} `json:"Config"`
 		} `json:"IPAM"`
 	}
@@ -481,7 +485,8 @@ func (c *Compose) Subnets(ctx context.Context) ([]Network, error) {
 	for _, n := range raw {
 		for _, cfg := range n.IPAM.Config {
 			if p, err := netip.ParsePrefix(cfg.Subnet); err == nil {
-				list = append(list, Network{Name: n.Name, Subnet: p, ExperimentID: n.Labels[labelExperimentID]})
+				r, _ := netip.ParsePrefix(cfg.IPRange) // zero when unset
+				list = append(list, Network{Name: n.Name, Subnet: p, ExperimentID: n.Labels[labelExperimentID], IPRange: r})
 			}
 		}
 	}

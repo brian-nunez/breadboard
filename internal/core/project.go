@@ -184,8 +184,9 @@ type prepared struct {
 	// addresses are the default network's fixed addresses (static
 	// addressing), or nil.
 	addresses map[string]netip.Addr
-	// networkChanged is set when the default network's subnet differs
-	// from the last up (static addressing switched on, off, or moved).
+	// networkChanged is set when an existing network's addressing differs
+	// from what this up renders: the default network's subnet (static
+	// addressing switched on, off, or moved), or an app segment's ip_range.
 	networkChanged bool
 }
 
@@ -239,7 +240,7 @@ func (e *Engine) prepare(ctx context.Context, p *project, events EventSink) (*pr
 	if err != nil {
 		return nil, err
 	}
-	stale, err := e.defaultNetworkStale(ctx, m, ps)
+	stale, err := e.networksStale(ctx, m, ps, subnets)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +318,7 @@ func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.
 	// Static addressing only for a lab with a transparent pod: its egress
 	// policy allows destinations by address. Other labs keep Docker's
 	// dynamic addresses, and their compose files stay as they were.
-	static := slices.ContainsFunc(m.Services, func(s *model.Service) bool { return s.Netinit != "" })
+	static := slices.ContainsFunc(m.Services, func(s *model.Service) bool { return s.Transparent })
 	if !static {
 		ps.Network, ps.Addresses = "", nil
 	}
@@ -404,24 +405,43 @@ func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.
 	return out, addrs, nil
 }
 
-// defaultNetworkStale reports whether the experiment's existing default
-// network has a subnet compose cannot keep: static addressing wants another
-// subnet, or it is off and the network still has a fixed one (Docker's own
-// pools never hand out segmentPool's blocks).
-func (e *Engine) defaultNetworkStale(ctx context.Context, m *model.Model, ps *state.ProjectState) (bool, error) {
+// networksStale reports whether an existing network of the experiment has
+// addressing compose cannot keep, so it must be recreated:
+//   - the default network: static addressing wants another subnet, or it is
+//     off and the network still has a fixed one (Docker's own pools never
+//     hand out segmentPool's blocks);
+//   - an app's private segment (a terminate target) without the ip_range
+//     that keeps its replicas' fixed addresses free (D-122), or with
+//     another subnet.
+func (e *Engine) networksStale(ctx context.Context, m *model.Model, ps *state.ProjectState, subnets map[string]netip.Prefix) (bool, error) {
 	networks, err := e.rt.Subnets(ctx)
 	if err != nil {
 		return false, err
 	}
+	appSegments := map[string]netip.Prefix{}
+	for _, seg := range m.Segments {
+		if seg.Port != 0 {
+			appSegments[m.Project+"_"+seg.Name] = subnets[seg.Name]
+		}
+	}
 	name := m.Project + "_" + compose.DefaultNetwork
 	for _, n := range networks {
-		if n.Name != name || n.ExperimentID != ps.ExperimentID {
+		if n.ExperimentID != ps.ExperimentID {
+			continue
+		}
+		if subnet, ok := appSegments[n.Name]; ok && (n.Subnet != subnet || n.IPRange != compose.DynamicRange(subnet)) {
+			return true, nil
+		}
+		if n.Name != name {
 			continue
 		}
 		if ps.Network == "" {
-			return segmentPool.Contains(n.Subnet.Addr()), nil
+			if segmentPool.Contains(n.Subnet.Addr()) {
+				return true, nil
+			}
+		} else if n.Subnet.String() != ps.Network {
+			return true, nil
 		}
-		return n.Subnet.String() != ps.Network, nil
 	}
 	return false, nil
 }

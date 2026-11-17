@@ -79,7 +79,7 @@ func TestCatalogAndLearn(t *testing.T) {
 			t.Errorf("%s image %q is not an exact pin", e.Type, e.Image)
 		}
 	}
-	if !slices.Equal(types, []string{"kafka", "postgres", "redis", "consul", "s3-compatible"}) {
+	if !slices.Equal(types, []string{"kafka", "postgres", "redis", "consul", "s3-compatible", "haproxy"}) {
 		t.Fatalf("types = %v", types)
 	}
 	l, err := h.eng.Learn(h.ctx(), LearnRequest{Type: "postgres"})

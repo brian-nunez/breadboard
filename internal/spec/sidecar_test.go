@@ -15,7 +15,9 @@ func sidecarLookup(id string) (TypeInfo, bool) {
 		return TypeInfo{Registry: true, HTTPS: true, Plaintext: true}, true
 	case "postgres":
 		info, _ := types(id)
-		info.Env = func(bool) []string { return []string{"DATABASE_URL", "PGHOST", "PGPORT", "PGUSER", "PGPASSWORD"} }
+		info.Env = func(string, bool) []string {
+			return []string{"DATABASE_URL", "PGHOST", "PGPORT", "PGUSER", "PGPASSWORD"}
+		}
 		return info, true
 	}
 	return types(id)

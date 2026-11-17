@@ -1,15 +1,21 @@
 // Command probe is the test app of the sidecar integration tests.
 //
-//	probe serve [ADDR]       HTTP on ADDR, else $BB_LISTEN_ADDR, else :8080;
-//	                         answers with the instance name and the protocol
-//	                         the request arrived on
+//	probe serve [ADDR]       HTTP on ADDR, else $BB_LISTEN_ADDR, else
+//	                         $BB_PLAIN_LISTEN_ADDR, else :8080; answers with
+//	                         the instance name and the protocol the request
+//	                         arrived on
+//	probe servetls ADDR      the same over TLS with $TLS_CERT_FILE/$TLS_KEY_FILE
 //	probe get URL            one GET; prints the body, exits 1 unless it is a 200
+//	probe peer ADDR NAME     verified TLS to ADDR with SNI NAME, then GET /;
+//	                         prints the certificate's names and the body
 //	probe hits URL N         N GETs; prints how many each instance answered
 //	probe dial HOST:PORT     exits 0 if a TCP connection opens
 //	probe asuid UID ARGS...  switches to user UID, then runs probe ARGS
 package main
 
 import (
+	"bufio"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -34,9 +40,21 @@ func main() {
 			addr = os.Args[2]
 		}
 		if addr == "" {
+			addr = os.Getenv("BB_PLAIN_LISTEN_ADDR")
+		}
+		if addr == "" {
 			addr = ":8080"
 		}
 		serve(addr)
+	case "servetls":
+		handle()
+		log.Printf("listening for TLS on %s", os.Args[2])
+		log.Fatal(http.ListenAndServeTLS(os.Args[2], os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+	case "peer":
+		if err := peer(os.Args[2], os.Args[3]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "dial":
 		c, err := net.DialTimeout("tcp", os.Args[2], 5*time.Second)
 		if err != nil {
@@ -89,17 +107,46 @@ func main() {
 }
 
 func serve(addr string) {
+	handle()
+	log.Printf("listening on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
+}
+
+func handle() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		proto := r.Header.Get("X-Forwarded-Proto")
-		if proto == "" {
+		switch {
+		case proto != "":
+		case r.TLS != nil:
+			proto = "tls"
+		default:
 			proto = "http"
 		}
 		line := fmt.Sprintf("instance=%s proto=%s host=%s", os.Getenv("BB_SERVICE"), proto, r.Host)
 		log.Print("served " + line)
 		fmt.Fprintln(w, line)
 	})
-	log.Printf("listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+}
+
+// peer opens a TLS connection verified against $SSL_CERT_FILE with SNI
+// name, prints the names on the certificate it got, then sends GET /.
+func peer(addr, name string) error {
+	c, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", addr, &tls.Config{ServerName: name, NextProtos: []string{"http/1.1"}})
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	fmt.Printf("peer=%s\n", strings.Join(c.ConnectionState().PeerCertificates[0].DNSNames, ","))
+	fmt.Fprintf(c, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", name)
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Print(string(body))
+	return nil
 }
 
 func get(url string) (string, error) {

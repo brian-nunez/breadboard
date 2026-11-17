@@ -84,13 +84,21 @@ func (d *Document) HasName(name string) bool {
 	return false
 }
 
-// AddService appends an infra service. The name must be unused.
-func (d *Document) AddService(name, typ string) error {
+// AddService appends an infra service, with an upstream entry for each
+// named service (proxies only). The name must be unused.
+func (d *Document) AddService(name, typ string, upstreams ...string) error {
 	if d.HasName(name) {
 		return fmt.Errorf("service %q: %w", name, errs.ErrExists)
 	}
 	m := d.section("services")
 	body := mapping(scalar("type"), scalar(typ))
+	if len(upstreams) > 0 {
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, u := range upstreams {
+			seq.Content = append(seq.Content, mapping(scalar("service"), scalar(u)))
+		}
+		body.Content = append(body.Content, scalar("upstreams"), seq)
+	}
 	m.Content = append(m.Content, scalar(name), body)
 	return nil
 }

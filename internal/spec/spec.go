@@ -20,10 +20,13 @@ const FileName = "experiment.yaml"
 // CurrentVersion is the newest spec version this build reads and writes.
 const CurrentVersion = 1
 
-// TLS modes an edge may request.
+// TLS modes an edge may request. A proxy's upstream may also ask for
+// passthrough: the proxy routes the client's TLS session by SNI without
+// decrypting it.
 const (
-	TLSOn  = "on"
-	TLSOff = "off"
+	TLSOn          = "on"
+	TLSOff         = "off"
+	TLSPassthrough = "passthrough"
 )
 
 // Spec is the decoded experiment.yaml.
@@ -40,7 +43,62 @@ type Service struct {
 	Type      string
 	Resources Resources
 	Config    map[string]string
+	// Upstreams are a proxy's backends, in spec order (the first is the
+	// default route). Only proxy types take them.
+	Upstreams []Upstream
+	// File is a user-owned native config, relative to experiment.yaml,
+	// that replaces a proxy's generated one.
+	File string
 }
+
+// Upstream is one backend of a proxy: an edge from the proxy to an app (all
+// its replicas) or to an infra service, with its own TLS mode.
+type Upstream struct {
+	Service string
+	// Port is the target port; zero means the default for the mode: the
+	// target's TLS port (on, passthrough) or its plaintext port (off).
+	Port int
+	// Name is the route name; empty means Service.
+	Name string
+	// TLS is the hop's mode: on (re-encrypt, the default), off (terminate
+	// at the proxy; plaintext on a private segment) or passthrough.
+	TLS TLS
+}
+
+// Route is the upstream's route name: Name, or the target's name.
+func (u Upstream) Route() string {
+	if u.Name != "" {
+		return u.Name
+	}
+	return u.Service
+}
+
+// Mode is the upstream's TLS mode with the default applied.
+func (u Upstream) Mode() string {
+	if u.TLS.Mode == "" {
+		return TLSOn
+	}
+	return u.TLS.Mode
+}
+
+// TerminateTargets lists the apps a proxy reaches over a terminate
+// (tls.mode: off) hop. Each runs as a pod with an init container that
+// confines its plaintext port to its private segment.
+func TerminateTargets(s *Spec) map[string]bool {
+	out := map[string]bool{}
+	for _, svc := range s.Services {
+		for _, u := range svc.Upstreams {
+			if _, ok := s.App(u.Service); ok && u.Mode() == TLSOff {
+				out[u.Service] = true
+			}
+		}
+	}
+	return out
+}
+
+// DefaultPlainPort is the port an app listens on for plaintext from a
+// terminating proxy when the upstream sets none.
+const DefaultPlainPort = 8080
 
 // Resources overrides a service's default limits. Empty fields keep the default.
 type Resources struct {

@@ -88,7 +88,7 @@ func renderModelErr(m *model.Model, mode secrets.Mode, readFile func(string) ([]
 	// A lab with a transparent pod gets static addressing (core allocates
 	// it from state; here it follows the model's order).
 	var addrs map[string]netip.Addr
-	if slices.ContainsFunc(m.Services, func(s *model.Service) bool { return s.Netinit != "" }) {
+	if slices.ContainsFunc(m.Services, func(s *model.Service) bool { return s.Transparent }) {
 		subnets[DefaultNetwork] = netip.MustParsePrefix("10.213.200.0/24")
 		addrs = map[string]netip.Addr{}
 		next := netip.MustParseAddr("10.213.200.10")

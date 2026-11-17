@@ -105,7 +105,7 @@ func renderEnvoy(in Input) (Output, error) {
 			Dockerfile: NetinitDockerfile(),
 			Command:    []string{"/bin/sh", "-c", netinitScript(in)},
 			CapAdd:     []string{"NET_ADMIN"},
-			Resources:  catalog.Resources{Memory: "32m", CPUs: "0.1"},
+			Resources:  NetinitResources,
 		}
 	}
 	return out, nil
@@ -601,3 +601,23 @@ func protoDuration(s string) (string, error) {
 	}
 	return strconv.FormatFloat(d.Seconds(), 'f', -1, 64) + "s", nil
 }
+
+// PlaintextGuardScript is the netinit script that confines a terminate
+// target's plaintext port to its private segment, whatever address the app
+// binds: TCP to port is dropped unless it is addressed to addr, the
+// instance's segment address. The rules live in the pod's namespace; the
+// app holds no NET_ADMIN, so it cannot remove them. The chain is rebuilt on
+// every run, so a changed port or address replaces the old rule.
+func PlaintextGuardScript(port int, addr string) string {
+	return strings.Join([]string{
+		"set -eu",
+		fmt.Sprintf("# Plaintext guard: TCP to port %d is accepted only on the segment address %s.", port, addr),
+		"iptables -N BB_PLAIN 2>/dev/null || iptables -F BB_PLAIN",
+		"iptables -C INPUT -j BB_PLAIN 2>/dev/null || iptables -I INPUT 1 -j BB_PLAIN",
+		fmt.Sprintf("iptables -A BB_PLAIN -p tcp --dport %d ! -d %s -j DROP", port, addr),
+		"iptables -S BB_PLAIN",
+	}, "\n")
+}
+
+// NetinitResources are the init container's limits.
+var NetinitResources = catalog.Resources{Memory: "32m", CPUs: "0.1"}

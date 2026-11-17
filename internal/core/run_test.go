@@ -6,11 +6,12 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/brian-nunez/breadboard/internal/pki"
 	"github.com/brian-nunez/breadboard/internal/runtime"
@@ -277,20 +278,88 @@ func TestSameNameInAnotherDirectoryIsRefused(t *testing.T) {
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatalf("Up with own resources: %v", err)
 	}
-	if !strings.Contains(string(h.rt.filesSeen["docker-compose.yml"]), "breadboard.experiment-id: "+ps.ExperimentID) {
-		t.Error("compose lacks the experiment id label")
+	checkExperimentIDLabels(t, h.rt.filesSeen["docker-compose.yml"], ps.ExperimentID)
+}
+
+// The experiment id label holds the id whatever it looks like: compose
+// quotes an id YAML would read as a number, so the check decodes the YAML
+// instead of matching text. The ids are 16 lowercase hex digits.
+func TestExperimentIDLabelOfAnyShape(t *testing.T) {
+	for name, id := range map[string]string{
+		"all digits":     "1234567890123456",
+		"leading zeros":  "0012345678901234",
+		"exponent shape": "1e10000000000000",
+		"ordinary":       "3fa9c0d2e17b4b68",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := setupStarter(t)
+			if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
+				t.Fatal(err)
+			}
+			p := state.Project{Dir: h.dir}
+			ps, err := p.LoadState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ps.ExperimentID = id
+			if err := p.SaveState(ps, h.eng.version); err != nil {
+				t.Fatal(err)
+			}
+			h.rt.owners = []string{id}
+			if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
+				t.Fatal(err)
+			}
+			checkExperimentIDLabels(t, h.rt.filesSeen["docker-compose.yml"], id)
+		})
+	}
+}
+
+// checkExperimentIDLabels decodes a compose file and checks that every
+// service, network and volume carries the experiment id label with id.
+func checkExperimentIDLabels(t *testing.T, data []byte, id string) {
+	t.Helper()
+	type labelled struct {
+		Labels map[string]string `yaml:"labels"`
+	}
+	var doc struct {
+		Services map[string]labelled `yaml:"services"`
+		Networks map[string]labelled `yaml:"networks"`
+		Volumes  map[string]labelled `yaml:"volumes"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("compose is not YAML: %v", err)
+	}
+	if len(doc.Services) == 0 {
+		t.Fatalf("compose has no services:\n%s", data)
+	}
+	for kind, items := range map[string]map[string]labelled{"service": doc.Services, "network": doc.Networks, "volume": doc.Volumes} {
+		for name, item := range items {
+			if got, ok := item.Labels["breadboard.experiment-id"]; !ok || got != id {
+				t.Errorf("%s %s: breadboard.experiment-id = %q (set %v), want %q", kind, name, got, ok, id)
+			}
+		}
 	}
 }
 
 func TestReissuedCertificateChangesTheConfigHash(t *testing.T) {
 	h := setupStarter(t)
+	// Decode the compose file: a hash that looks like a number is quoted,
+	// which a text match would miss.
 	hashOf := func() string {
-		re := regexp.MustCompile(`(?m)breadboard.service: kafka\n\s+breadboard.kind: infra\n\s+breadboard.config-hash: (\w+)`)
-		m := re.FindStringSubmatch(string(h.rt.filesSeen["docker-compose.yml"]))
-		if m == nil {
-			t.Fatalf("no config hash for kafka:\n%s", h.rt.filesSeen["docker-compose.yml"])
+		var doc struct {
+			Services map[string]struct {
+				Labels map[string]string `yaml:"labels"`
+			} `yaml:"services"`
 		}
-		return m[1]
+		data := h.rt.filesSeen["docker-compose.yml"]
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("compose is not YAML: %v", err)
+		}
+		hash := doc.Services["kafka"].Labels["breadboard.config-hash"]
+		if hash == "" {
+			t.Fatalf("no config hash for kafka:\n%s", data)
+		}
+		return hash
 	}
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)

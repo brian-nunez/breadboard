@@ -167,7 +167,7 @@ apps:
 		t.Fatalf("violation paths:\n got %v\nwant %v", got, want)
 	}
 	msg := err.Error()
-	for _, s := range []string{"reserved for Phase 6 (mTLS)", "reserved for Phase 6 (multiple CAs)", "reserved for Phase 5", "unknown key", "must be on or off"} {
+	for _, s := range []string{"reserved for Phase 6 (mTLS)", "reserved for Phase 6 (multiple CAs)", "services.kafka.upstream: unknown key", "unknown key", "must be on or off"} {
 		if !strings.Contains(msg, s) {
 			t.Errorf("error message lacks %q:\n%s", s, msg)
 		}

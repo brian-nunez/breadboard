@@ -49,6 +49,8 @@ type Entry struct {
 	// Sidecar renders the agent that registers an app with this service, for
 	// service registries. Nil means apps cannot register with it.
 	Sidecar func(Sidecar) Container
+	// Proxy is set for proxy types: services that take upstreams (proxy.go).
+	Proxy *Proxy
 }
 
 // Listener is a port the service accepts connections on.
@@ -106,6 +108,12 @@ type Server struct {
 	Secret func(key string) string
 	// Plain is set when at least one edge asked for plaintext.
 	Plain *Plain
+	// Upstreams are a proxy's resolved backends, in spec order.
+	Upstreams []Upstream
+	// UserConfig is the content of a proxy's file, which replaces the
+	// generated config file (Proxy.ConfigFile); nil without one. Render
+	// swaps it in, so entries need not handle it.
+	UserConfig []byte
 }
 
 // Plain describes the private segment a plaintext listener lives on.
@@ -125,6 +133,9 @@ type Client struct {
 	Secret  func(key string) string
 	// Plain is set when this edge is plaintext.
 	Plain *Plain
+	// Upstreams are the used proxy's backends, so its contract can say
+	// how to reach passthrough routes.
+	Upstreams []Upstream
 }
 
 // Sidecar is the input for rendering an app's registration agent. The agent
@@ -197,7 +208,7 @@ func notes(id string) string {
 	return string(data)
 }
 
-var entries = []*Entry{kafka(), postgres(), redis(), consul(), s3Compatible()}
+var entries = []*Entry{kafka(), postgres(), redis(), consul(), s3Compatible(), haproxy()}
 
 // All returns every entry, in display order.
 func All() []*Entry { return slices.Clone(entries) }
@@ -258,8 +269,17 @@ func Types(id string) (spec.TypeInfo, bool) {
 	if len(e.Config) > 0 {
 		info.Config = e.CheckConfig
 	}
-	info.Env = func(plain bool) []string {
-		cl := Client{Service: id, FQDN: id, Config: e.ResolveConfig(nil), Secret: func(string) string { return "" }}
+	if p := e.Proxy; p != nil {
+		info.Proxy = &spec.ProxyInfo{Modes: slices.Clone(p.Modes), HTTP: p.HTTP, Targets: slices.Clone(p.Targets), MinUpstreams: p.MinUpstreams, MaxUpstreams: p.MaxUpstreams}
+	}
+	info.Env = func(service string, plain bool) []string {
+		// Every upstream mode, so a proxy reports each variable it may set.
+		cl := Client{Service: service, FQDN: service, Config: e.ResolveConfig(nil), Secret: func(string) string { return "" }}
+		if e.Proxy != nil {
+			for _, m := range e.Proxy.Modes {
+				cl.Upstreams = append(cl.Upstreams, Upstream{Mode: m})
+			}
+		}
 		if plain {
 			cl.Plain = &Plain{FQDN: id}
 		}

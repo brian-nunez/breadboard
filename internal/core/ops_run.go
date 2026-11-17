@@ -89,7 +89,7 @@ func (e *Engine) Up(ctx context.Context, req UpRequest) (*UpResult, error) {
 			return nil, err
 		}
 		if len(running) > 0 {
-			ev.step("Recreating the experiment's network (transparent mode changes its addressing)")
+			ev.step("Recreating the experiment's networks (their addressing changed)")
 			// The project as last written: its files name the old networks.
 			if err := e.rt.Down(ctx, runtimeProject(p.Project, p.spec.Name), false); err != nil {
 				return nil, err
@@ -133,7 +133,7 @@ func (e *Engine) checkCaptureUsers(ctx context.Context, p *project, pr *prepared
 	m := pr.model
 	var apps []*model.Service
 	for _, svc := range m.Services {
-		if svc.Kind == model.App && svc.Netinit != "" {
+		if svc.Kind == model.App && svc.Transparent {
 			apps = append(apps, svc)
 		}
 	}
@@ -401,8 +401,9 @@ type ServiceStatus struct {
 	Sidecar  *SidecarInfo
 }
 
-// Edge is a connection from an app to a service, or through an Envoy
-// sidecar's outbound listener to another app or a service.
+// Edge is a connection from an app to a service, through an Envoy
+// sidecar's outbound listener to another app or a service, or from a proxy
+// to one of its upstreams.
 type Edge struct {
 	To     string
 	Port   int
@@ -411,8 +412,11 @@ type Edge struct {
 	// Via is the Envoy sidecar (its name within the app) that carries the
 	// edge; empty for an edge from uses.
 	Via string
-	// ToApp marks an app-to-app edge; To is then the target app's name.
+	// ToApp marks an edge to an app; To is then the target app's name.
 	ToApp bool
+	// Mode is set on a proxy's upstream edges (Phase 5): on (re-encrypt,
+	// TLS), off (terminate; plaintext on a private segment) or passthrough.
+	Mode string
 }
 
 // StatusRequest asks for the experiment's state.
@@ -524,9 +528,10 @@ func (e *Engine) status(ctx context.Context, m *model.Model) ([]ServiceStatus, [
 				warnings = append(warnings, fmt.Sprintf("%s was killed for exceeding its %s memory limit", svc.Name, svc.Resources.Memory))
 			}
 		}
-		if svc.Kind == model.App {
+		if svc.Kind == model.App || len(svc.Upstreams) > 0 {
+			// An app's edges, or a proxy's upstream edges.
 			for _, edge := range m.EdgesFrom(svc.Group()) {
-				s.Uses = append(s.Uses, Edge{To: edge.To, Port: edge.Port, TLS: edge.TLS, Reason: edge.Reason, Via: edge.Via, ToApp: edge.ToApp})
+				s.Uses = append(s.Uses, Edge{To: edge.To, Port: edge.Port, TLS: edge.TLS, Reason: edge.Reason, Via: edge.Via, ToApp: edge.ToApp, Mode: edge.Mode})
 			}
 		}
 		out = append(out, s)

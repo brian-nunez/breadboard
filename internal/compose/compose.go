@@ -116,6 +116,17 @@ func SegmentAddress(p netip.Prefix) netip.Addr {
 	return a
 }
 
+// InstanceSegmentAddress is an app instance's static address on its
+// private segment: SegmentAddress for a single instance or replica 1, then
+// one up per replica.
+func InstanceSegmentAddress(p netip.Prefix, instance int) netip.Addr {
+	a := SegmentAddress(p)
+	for i := 1; i < instance; i++ {
+		a = a.Next()
+	}
+	return a
+}
+
 // DefaultNetwork is the experiment's shared network. It has a fixed subnet
 // and every container a fixed address only in a lab with a transparent pod,
 // whose egress policy allows destinations by address.
@@ -199,8 +210,10 @@ func Render(in Input) (*Bundle, error) {
 			if err != nil {
 				return nil, err
 			}
-			vol := svc.Name + "-data"
-			volumes.Content = append(volumes.Content, str(vol), mapping(str("labels"), in.labels("", "")))
+			if svc.Entry.DataPath != "" { // proxies keep no data
+				vol := svc.Name + "-data"
+				volumes.Content = append(volumes.Content, str(vol), mapping(str("labels"), in.labels("", "")))
+			}
 		case model.Sidecar:
 			parent, ok := m.Service(svc.Parent)
 			if !ok {
@@ -282,9 +295,15 @@ func Render(in Input) (*Bundle, error) {
 		key := str(seg.Name)
 		key.HeadComment = fmt.Sprintf("Private segment for plaintext to %s; only %s can reach it.\n%s",
 			seg.Target, strings.Join(seg.Clients, ", "), reasonLines(seg.Reasons))
+		ipam := mapping(str("subnet"), str(subnet.String()))
+		if seg.Port != 0 {
+			// An app's segment: replicas hold fixed addresses from .10 up,
+			// so Docker hands out only the upper half (proxies, D-122).
+			ipam.Content = append(ipam.Content, str("ip_range"), str(DynamicRange(subnet).String()))
+		}
 		nets.Content = append(nets.Content, key, mapping(
 			str("internal"), boolean(true),
-			str("ipam"), mapping(str("config"), seq(mapping(str("subnet"), str(subnet.String())))),
+			str("ipam"), mapping(str("config"), seq(ipam)),
 			str("labels"), in.labels("", ""),
 		))
 	}
@@ -352,10 +371,15 @@ func podOf(m *model.Model, svc *model.Service) *model.Service {
 	return inst
 }
 
-// capture is a pod's LabelCapture value.
+// capture is a pod's LabelCapture value: transparent, guard (a terminate
+// target's plaintext guard) or off. Each names the rules netinit leaves in
+// the namespace, so a change recreates the holder and its joiners.
 func capture(inst *model.Service) string {
-	if inst.Netinit != "" {
+	switch {
+	case inst.Transparent:
 		return "transparent"
+	case inst.PlainGuard:
+		return "guard"
 	}
 	return "off"
 }
@@ -376,6 +400,30 @@ func netinit(in Input, inst *model.Service, outs map[string]sidecar.Output, add 
 				return nil, fmt.Errorf("compose: %s: more than one sidecar asks for an init container", inst.Name)
 			}
 			init = o.Init
+		}
+	}
+	if inst.PlainGuard {
+		guard, err := plainGuard(in, inst)
+		if err != nil {
+			return nil, err
+		}
+		if init == nil {
+			init = &sidecar.Init{Dockerfile: sidecar.NetinitDockerfile(), CapAdd: []string{"NET_ADMIN"}, Resources: sidecar.NetinitResources}
+		} else {
+			c := *init
+			init = &c
+		}
+		// One script installs every rule of the namespace: a sidecar's,
+		// then the guard's.
+		if n := len(init.Command); n >= 3 && init.Command[0] == "/bin/sh" && init.Command[1] == "-c" {
+			init.Command = []string{"/bin/sh", "-c", init.Command[2] + "\n" + guard}
+		} else if n == 0 {
+			init.Command = []string{"/bin/sh", "-c", guard}
+		} else {
+			return nil, fmt.Errorf("compose: %s: cannot add the plaintext guard to the init container's command", inst.Name)
+		}
+		if !slices.Contains(init.CapAdd, "NET_ADMIN") {
+			init.CapAdd = append(slices.Clone(init.CapAdd), "NET_ADMIN")
 		}
 	}
 	if init == nil {
@@ -410,6 +458,20 @@ func netinit(in Input, inst *model.Service, outs map[string]sidecar.Output, add 
 	return def, nil
 }
 
+// plainGuard is the netinit script of a terminate target's instance: its
+// plaintext port answers only on its segment address.
+func plainGuard(in Input, inst *model.Service) (string, error) {
+	seg, ok := in.Model.Segment(inst.Group())
+	if !ok || seg.Port == 0 {
+		return "", fmt.Errorf("compose: %s: plaintext guard without a segment", inst.Name)
+	}
+	subnet, ok := in.Subnets[seg.Name]
+	if !ok {
+		return "", fmt.Errorf("compose: no subnet allocated for segment %s", seg.Name)
+	}
+	return sidecar.PlaintextGuardScript(seg.Port, InstanceSegmentAddress(subnet, inst.Instance).String()), nil
+}
+
 func infraService(in Input, svc *model.Service, mounts []string, add func(string, []byte, os.FileMode)) (*yaml.Node, []string, error) {
 	m := in.Model
 	srv := catalog.Server{
@@ -429,7 +491,24 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 			Reasons: seg.Reasons,
 		}
 	}
-	c := svc.Entry.Server(srv)
+	srv.Upstreams = catalog.WithSecrets(svc.Upstreams, in.Secrets.Ref)
+	if svc.File != "" {
+		if in.ReadFile == nil {
+			return nil, nil, fmt.Errorf("compose: %s: file %s cannot be read here", svc.Name, svc.File)
+		}
+		data, err := in.ReadFile(svc.File)
+		if err != nil {
+			return nil, nil, fmt.Errorf("compose: %s: file: %w", svc.Name, err)
+		}
+		if data == nil {
+			data = []byte{}
+		}
+		srv.UserConfig = data
+	}
+	c, err := svc.Entry.Render(srv)
+	if err != nil {
+		return nil, nil, fmt.Errorf("compose: %w", err)
+	}
 	def := mapping(str("image"), str(svc.Entry.Image))
 	if len(c.Entrypoint) > 0 {
 		def.Content = append(def.Content, str("entrypoint"), command(c.Entrypoint))
@@ -440,7 +519,9 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 	env := append([]catalog.EnvVar{{Name: "SSL_CERT_FILE", Value: catalog.TrustBundleFile}}, c.Environment...)
 	def.Content = append(def.Content, str("environment"), environment(env))
 	mounts = configFiles(svc.Name, c.Files, mounts, add)
-	mounts = append([]string{svc.Name + "-data:" + svc.Entry.DataPath}, mounts...)
+	if svc.Entry.DataPath != "" {
+		mounts = append([]string{svc.Name + "-data:" + svc.Entry.DataPath}, mounts...)
+	}
 	def.Content = append(def.Content, str("healthcheck"), healthcheck(c.Health))
 	return def, mounts, nil
 }
@@ -551,6 +632,15 @@ func appEnv(m *model.Model, svc *model.Service, ref func(service string) func(ke
 	if svc.Pod != "" {
 		base = append(base, catalog.EnvVar{Name: "BB_SHARED_DIR", Value: sidecar.SharedDir})
 	}
+	if seg, ok := m.Segment(svc.Group()); ok && svc.Kind == model.App {
+		// A terminating proxy sends plaintext here: the app binds its
+		// segment address only, so no other container reaches the port.
+		addr := "<segment address>" // before subnets are allocated (status)
+		if p, ok := subnets[seg.Name]; ok {
+			addr = InstanceSegmentAddress(p, svc.Instance).String()
+		}
+		base = append(base, catalog.EnvVar{Name: "BB_PLAIN_LISTEN_ADDR", Value: fmt.Sprintf("%s:%d", addr, seg.Port)})
+	}
 	groups := []EnvGroup{{Vars: base}}
 	seen := map[string]bool{}
 	for _, e := range base {
@@ -563,10 +653,11 @@ func appEnv(m *model.Model, svc *model.Service, ref func(service string) func(ke
 		}
 		target, _ := m.Service(edge.To)
 		cl := catalog.Client{
-			Service: target.Name,
-			FQDN:    target.FQDN,
-			Config:  target.Config,
-			Secret:  ref(target.Name),
+			Service:   target.Name,
+			FQDN:      target.FQDN,
+			Config:    target.Config,
+			Secret:    ref(target.Name),
+			Upstreams: catalog.WithSecrets(target.Upstreams, ref),
 		}
 		if !edge.TLS {
 			seg, _ := m.Segment(target.Name)
@@ -678,7 +769,7 @@ func sidecarInput(m *model.Model, inst, sc *model.Service, uses []sidecar.Use, r
 		Targets:     slices.Clone(sc.Targets),
 		Uses:        uses,
 		Secret:      ref,
-		Transparent: inst.Netinit != "",
+		Transparent: inst.Transparent,
 	}
 	for i, t := range in.Targets {
 		var owners []*model.Service
@@ -774,7 +865,7 @@ func appService(in Input, svc *model.Service, groups []EnvGroup) *yaml.Node {
 	if ports := publish(app.Ports); ports != nil && svc.Pod == "" {
 		def.Content = append(def.Content, str("ports"), ports)
 	}
-	if svc.Netinit != "" {
+	if svc.Transparent {
 		// Transparent mode exempts the sidecars' reserved users from its
 		// rules, so the app must never become one of them.
 		def.Content = append(def.Content,
@@ -835,12 +926,23 @@ func networks(in Input, svc *model.Service) *yaml.Node {
 	n := mapping(str(DefaultNetwork), def)
 	for _, seg := range m.SegmentsOf(svc.Group()) {
 		def := mapping()
-		if seg.Target == svc.Name {
+		switch {
+		case seg.Target == svc.Name && svc.Kind != model.App:
 			def.Content = append(def.Content,
 				str("ipv4_address"), str(SegmentAddress(in.Subnets[seg.Name]).String()),
 				str("aliases"), flow(str(model.SegmentFQDN(svc.Name, m.Domain))),
 			)
-		} else {
+		case seg.Target == svc.Group() && svc.Kind == model.App:
+			// Every replica answers to the app's segment alias, and to its own.
+			aliases := []string{model.SegmentFQDN(svc.Name, m.Domain)}
+			if svc.Name != svc.Group() {
+				aliases = append(aliases, model.SegmentFQDN(svc.Group(), m.Domain))
+			}
+			def.Content = append(def.Content,
+				str("ipv4_address"), str(InstanceSegmentAddress(in.Subnets[seg.Name], svc.Instance).String()),
+				str("aliases"), flow(strs(aliases...)...),
+			)
+		default:
 			def = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: yaml.FlowStyle}
 		}
 		n.Content = append(n.Content, str(seg.Name), def)

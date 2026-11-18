@@ -193,3 +193,18 @@ func TestLiveOverviewStreamsUpdates(t *testing.T) {
 		t.Errorf("updates = %d, want 1:\n%s", n, rec.Body.String())
 	}
 }
+
+// The search hint defaults to Ctrl K, the key most platforms use; app.js
+// switches it to ⌘K on Apple platforms, which the static script must do.
+func TestSearchShortcutHint(t *testing.T) {
+	s := newServer(t)
+	cookie := map[string]string{"Cookie": signIn(t, s)}
+	body := s.get(t, "/docs", cookie).Body.String()
+	if !strings.Contains(body, `<kbd data-search-shortcut`) || !strings.Contains(body, ">Ctrl K</kbd>") || strings.Contains(body, ">⌘K</kbd>") {
+		t.Errorf("search hint is not the Ctrl K default with data-search-shortcut")
+	}
+	js := s.get(t, "/static/app.js", cookie).Body.String()
+	if !strings.Contains(js, "[data-search-shortcut]") || !strings.Contains(js, `"⌘K"`) {
+		t.Errorf("app.js does not switch the hint to ⌘K on Apple platforms")
+	}
+}

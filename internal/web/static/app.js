@@ -48,6 +48,18 @@ for (const el of document.querySelectorAll("[data-load]")) {
     .catch(() => (el.textContent = "Could not load. Reload the page to try again."));
 }
 
+// The search shortcut hint names the key this platform uses: ⌘K on Apple
+// platforms, Ctrl K (the server's default) elsewhere. Both keys work
+// everywhere.
+(() => {
+  const platform = navigator.userAgentData?.platform || navigator.platform || "";
+  if (/mac|iphone|ipad|ipod/i.test(platform)) {
+    for (const el of document.querySelectorAll("[data-search-shortcut]")) {
+      el.textContent = "⌘K";
+    }
+  }
+})();
+
 // Search: ⌘K / Ctrl+K or any [data-search-open] opens the dialog. The index
 // (title, kind, url for every page) is fetched once; filtering is local.
 (() => {

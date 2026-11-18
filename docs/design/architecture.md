@@ -45,7 +45,7 @@ Operations (Phase 1):
 | `Starters`, `ApplyStarter` | List starters; write starter code and update the spec. |
 | `Up`, `Down` | Reconcile, materialize, run, wait for health; stop and optionally delete data. |
 | `Status`, `Logs` | Per-service state, health, resources, TLS warnings; log stream. Each app instance row carries its app, instance number, replica count and sidecars, and is followed by its sidecars' rows (type, ports, env they give the app, transparent mode); the pod's namespace holder is never a row but decides the instance's state while it is down. Edges carry `Via` and `ToApp` for Envoy outbound targets (Phase 5). A proxy's row lists its upstream edges, each with its `Mode` (`on`, `off`, `passthrough`); every terminate hop is a plaintext warning (Phase 5). |
-| `Creds`, `CA` | Generated credentials and connection strings; CA details. |
+| `Creds`, `CA` | Generated credentials and connection strings; CA details: the lab CA and, since wave E, the host CA (`CAResult.Host`). |
 | `PostgresTables`, `RedisKeys`, `ConsulCatalog`, `KafkaTopics`, `S3Buckets` | Read-only explorers for the web UI: each runs the service's own CLI tool with `docker exec` and parses its output (ADR-0012) (Phase 3). |
 | `EnvoyClusters`, `PgBouncerPools` | Read-only sidecar explorers (Phase 5): Envoy's admin API (`/clusters`, `/stats`, `/listeners` over bash `/dev/tcp`, host addresses mapped to replicas with `getent` inside the sidecar) and PgBouncer's `SHOW POOLS` / `SHOW STATS` through `psql` inside the sidecar, both with `docker exec` (ADR-0012). They take an app, an instance, or the sidecar's service name. |
 | `HAProxyStats`, `TraefikRoutes`, `NginxStatus` | Read-only proxy explorers (Phase 5), each through `docker exec` against the proxy's loopback-only endpoint (ADR-0012): HAProxy's stats CSV (per backend and server: the replica at its address, status, last check, sessions, picks, bytes, errors), Traefik's API (routers, services, each server's UP/DOWN), NGINX `stub_status` (open source has no per-server counters) with what each upstream resolves to. Backends are matched to upstreams through `catalog.Proxy.Unit`. `EnvoyClusters` and `PgBouncerPools` also take an infra `envoy` or `pgbouncer` service. |
@@ -97,6 +97,7 @@ There is no database. Everything is a file, and each kind of data has one home:
 - Defaults to `os.UserConfigDir()/breadboard` (`~/Library/Application Support/breadboard` on macOS); overridable by the `BB_HOME` env var. Directory mode `0700`.
 - `config.yaml`: install settings, loaded through bkit `settings` in layers: built-in defaults (`settings.Map`) → `config.yaml` (`settings.File` with the yaml driver) → `BB_*` env vars (`settings.Env`).
 - `ca/root.crt` and `ca/root.key` (`0600`): the install's CA ([`security.md`](security.md)).
+- `ca/host.crt` and `ca/host.key` (`0600`): the host CA for `*.localhost` names, created by `bb ca` or the first `bb up` with a `host` target (Phase 5 wave E, ADR-0017).
 - `ca/lock`: every project shares the CA, so project locks cannot protect it. Loading, creating, or replacing the CA holds an exclusive `flock` on this file; a second caller waits (up to 30 seconds) instead of failing, then sees the CA the first one saved. A key that does not match its certificate is treated as missing and replaced, and leaves signed by the old CA are reissued on the next `bb up`.
 
 ## Project state (`.bb/`)
@@ -106,9 +107,11 @@ Created by `bb init` next to `experiment.yaml`, directory mode `0700`.
 ```
 .bb/
   .gitignore          contains "*": the whole directory is never committed, without editing the project's .gitignore
-  state.json          format version, bb version that last wrote it, experiment id
+  state.json          format version, bb version that last wrote it, experiment id,
+                      subnets, addresses, the host router's port (hostPort)
   secrets.json        generated secrets (0600)
-  certs/<service>/    leaf certificate and key per service (key 0600)
+  certs/<service>/    leaf certificate and key per service (key 0600); certs/bb-host/
+                      also holds host.crt and host.key, the router's host certificate
   runtime/            the generated compose project: docker-compose.yml, ca.pem,
                       trust-bundle.pem, tls/<service>/, config/<service>/
   lock                advisory file lock
@@ -143,6 +146,8 @@ Every file Breadboard owns carries a format version, and every format only moves
 - Ports: nothing is published to the host by default. A port is published only when the spec asks for it, always bound to `127.0.0.1`.
 - Replicas: an app with `replicas: N` renders services `<app>-1` … `<app>-N` (ADR-0016), each with the aliases `<app>-<n>.<domain>` and `<app>.<domain>`.
 - Proxies (Phase 5): a proxy is an infra service with no data volume and no `depends_on` on its upstreams; it finds them through Docker's DNS at runtime. Its generated config (or the user's `file`, copied in at each render) is under `config/<proxy>/`. An app behind a terminating proxy runs as a pod: its holder joins `plain-<app>` with a static address per replica (the segment's `ip_range` is the upper half), and `<instance>-netinit` installs the plaintext guard (D-121). An existing network whose addressing changed (an app segment without its `ip_range`, like the default network's subnet) is recreated by `bb up`: containers stop, volumes stay.
+
+- Host access (Phase 5 wave E, ADR-0017): a lab with a `host` target gets the service `bb-host`, Traefik on the catalog pin, an infra service of type `traefik` marked as the host router. Its `8443` is published on `127.0.0.1:<hostPort>`. The port comes from 44300–44999, starting at `44300 + FNV-1a-32(experiment) mod 700` and wrapping, first free on `127.0.0.1` and not published by a container; it is recorded in `.bb/state.json` and kept while free (D-190). Its generated config routes ``Host(`<name>`)`` for each host name to every instance of the target and re-encrypts against the lab CA (D-189). `bb up` prints the URLs, `Status` and `ServiceDetails` carry `HostURLs`, and `bb export compose` includes the router. A lab without a `host` target renders exactly as before.
 
 ### Pods
 
@@ -201,7 +206,7 @@ Each command is a thin wrapper over one core operation.
 | `bb logs [service] [-f] [--tail n]` | Stream logs. |
 | `bb creds [service]` | Show generated credentials and connection strings. |
 | `bb learn <type>` | Print the catalog entry's learning notes. |
-| `bb ca [--pem]` | Show CA details and how to trust it on the host (never auto-installs); `--pem` prints the certificate. |
+| `bb ca [--pem] [--host]` | Show both CAs and how to trust them on the host (never auto-installs); `--pem` prints the lab CA's certificate, `--host --pem` the host CA's. |
 | `bb config [get [key] \| set <key> <value>]` | List, read, or change install settings. |
 | `bb migrate` | Upgrade `experiment.yaml` to the current spec version. |
 | `bb export compose [--out dir] [--secrets inline\|dotenv]` | Write a standalone compose stack (default `export/compose`). |

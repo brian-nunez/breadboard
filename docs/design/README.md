@@ -40,6 +40,7 @@ These words carry fixed meanings across the docs and the code.
 | **edge** | A directed connection from a client (app or infra service) to a listener. Derived from `uses`, Envoy outbound targets and proxy upstreams. TLS policy lives on edges. |
 | **proxy** | An infra service whose catalog entry is a proxy type (HAProxy, …): it sits in front of its upstreams and decides TLS per hop. |
 | **upstream** | One backend of a proxy (an app with all its replicas, or an infra service) and the edge to it, with a TLS mode: re-encrypt, terminate or passthrough. |
+| **host router** | The lab's `bb-host` service: a Traefik container published on `127.0.0.1` that serves `https://<target>.<experiment>.localhost:<port>` with a certificate from the host CA and re-encrypts to the target. Only labs with a `host` target have one. |
 | **segment** | A compose network. Plaintext listeners live only on a private segment shared with their intended clients. |
 | **resolved model** | The engine's internal, fully-defaulted representation of an experiment. Every output is generated from it. |
 | **materialize** | Render the resolved model plus state into a concrete medium: compose files, `.env`, cert files, Kubernetes Secrets, Terraform variables. |

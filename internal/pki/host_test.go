@@ -22,10 +22,12 @@ import (
 
 func newHostCA(t *testing.T) *CA {
 	t.Helper()
+
 	ca, err := NewHostCA(now)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return ca
 }
 
@@ -33,64 +35,81 @@ func newHostCA(t *testing.T) *CA {
 // checks, to prove the certificate's own constraints reject it.
 func signRaw(t *testing.T, ca *CA, tmpl *x509.Certificate) *Leaf {
 	t.Helper()
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	tmpl.SerialNumber = big.NewInt(42)
 	tmpl.NotBefore, tmpl.NotAfter = now.Add(-time.Hour), now.Add(LeafLifetime)
 	tmpl.KeyUsage = x509.KeyUsageDigitalSignature
 	tmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.Cert, &key.PublicKey, ca.Key)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return &Leaf{Cert: cert}
 }
 
 func TestHostCAShape(t *testing.T) {
 	ca := newHostCA(t)
+
 	c := ca.Cert
 	if !c.IsCA || !c.MaxPathLenZero || c.KeyUsage&x509.KeyUsageCertSign == 0 {
 		t.Fatalf("CA basics wrong: isCA=%v maxPathLenZero=%v usage=%v", c.IsCA, c.MaxPathLenZero, c.KeyUsage)
 	}
+
 	if !c.PermittedDNSDomainsCritical || !slices.Equal(c.PermittedDNSDomains, []string{".localhost"}) {
 		t.Fatalf("permitted DNS = %v critical=%v", c.PermittedDNSDomains, c.PermittedDNSDomainsCritical)
 	}
+
 	closed := []string{".invalid"}
 	if !slices.Equal(c.PermittedURIDomains, closed) || !slices.Equal(c.ExcludedURIDomains, closed) ||
 		!slices.Equal(c.PermittedEmailAddresses, closed) || !slices.Equal(c.ExcludedEmailAddresses, closed) {
 		t.Fatalf("URI constraints = %v / %v, email constraints = %v / %v, want .invalid permitted and excluded",
 			c.PermittedURIDomains, c.ExcludedURIDomains, c.PermittedEmailAddresses, c.ExcludedEmailAddresses)
 	}
+
 	if len(c.ExcludedIPRanges) != 2 || c.ExcludedIPRanges[0].String() != "0.0.0.0/0" || c.ExcludedIPRanges[1].String() != "::/0" {
 		t.Fatalf("excluded IP ranges = %v", c.ExcludedIPRanges)
 	}
+
 	if c.Subject.CommonName != "Breadboard host CA (localhost)" || !slices.Equal(c.Subject.Organization, []string{"Breadboard"}) {
 		t.Fatalf("subject = %v", c.Subject)
 	}
+
 	if _, ok := c.PublicKey.(*ecdsa.PublicKey); !ok || c.PublicKey.(*ecdsa.PublicKey).Curve != elliptic.P256() {
 		t.Fatal("host CA key is not ECDSA P-256")
 	}
+
 	if got := c.NotAfter.Sub(now); got < CALifetime-time.Hour || got > CALifetime+time.Hour {
 		t.Fatalf("CA lifetime = %s", got)
 	}
+
 	if ca.Domain() != HostDomain {
 		t.Fatalf("Domain() = %q", ca.Domain())
 	}
+
 	if !ca.HostUsable(now) {
 		t.Error("HostUsable = false for a fresh host CA")
 	}
+
 	if ca.HostUsable(now.Add(CALifetime - LeafLifetime + time.Hour)) {
 		t.Error("HostUsable = true when a full leaf would outlive the CA")
 	}
+
 	if newCA(t).HostUsable(now) {
 		t.Error("HostUsable = true for the lab CA")
 	}
+
 	if lab, err := NewCA(HostDomain, now); err != nil || lab.HostUsable(now) {
 		t.Errorf("HostUsable = true for a lab CA on localhost (err %v)", err)
 	}
@@ -100,29 +119,36 @@ func TestHostCAShape(t *testing.T) {
 // another shape.
 func hostCAWith(t *testing.T, mutate func(*x509.Certificate)) *CA {
 	t.Helper()
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	tmpl := hostCATemplate(big.NewInt(7), now)
 	mutate(tmpl)
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return &CA{Cert: cert, Key: key, CertPEM: pemBlock("CERTIFICATE", der)}
 }
 
 func cidr(t *testing.T, s string) *net.IPNet {
 	t.Helper()
+
 	_, n, err := net.ParseCIDR(s)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return n
 }
 
@@ -160,6 +186,7 @@ func TestHostCAExactConstraints(t *testing.T) {
 			if ca.HostUsable(now) {
 				t.Error("HostUsable = true")
 			}
+
 			if _, err := ca.IssueHost([]string{"api.lab.localhost"}, now); !errors.Is(err, ErrNotHostCA) {
 				t.Errorf("IssueHost = %v, want ErrNotHostCA", err)
 			}
@@ -182,15 +209,20 @@ func hostRejectCases(t *testing.T) []struct {
 	host string
 } {
 	t.Helper()
+
 	u := func(s string) *url.URL {
 		v, err := url.Parse(s)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		return v
 	}
+
 	const h = "api.lab.localhost"
+
 	dns := []string{h}
+
 	return []struct {
 		name string
 		tmpl *x509.Certificate
@@ -217,10 +249,12 @@ func TestHostCARejectsNamesOutsideLocalhost(t *testing.T) {
 	if err := verify(ca, signRaw(t, ca, &x509.Certificate{Subject: pkix.Name{CommonName: "api.lab.localhost"}, DNSNames: []string{"api.lab.localhost"}}), "api.lab.localhost"); err != nil {
 		t.Fatalf("a DNS-only host leaf does not verify: %v", err)
 	}
+
 	for _, tc := range hostRejectCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.tmpl.Subject = pkix.Name{CommonName: tc.host}
 			err := verify(ca, signRaw(t, ca, tc.tmpl), tc.host)
+
 			var invalid x509.CertificateInvalidError
 			if !errors.As(err, &invalid) || invalid.Reason != x509.CANotAuthorizedForThisName {
 				t.Fatalf("verify error = %v, want a name-constraint violation", err)
@@ -232,32 +266,41 @@ func TestHostCARejectsNamesOutsideLocalhost(t *testing.T) {
 func TestHostLeafShape(t *testing.T) {
 	ca := newHostCA(t)
 	names := []string{"web.lab.localhost", "api.lab.localhost", "api-1.lab.localhost", "api.lab.localhost"}
+
 	leaf, err := ca.IssueHost(names, now)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	c := leaf.Cert
+
 	want := []string{"api-1.lab.localhost", "api.lab.localhost", "web.lab.localhost"}
 	if !slices.Equal(c.DNSNames, want) {
 		t.Errorf("DNSNames = %v, want %v", c.DNSNames, want)
 	}
+
 	if len(c.URIs) != 0 || len(c.IPAddresses) != 0 || len(c.EmailAddresses) != 0 {
 		t.Errorf("SANs beyond DNS: %v %v %v", c.URIs, c.IPAddresses, c.EmailAddresses)
 	}
+
 	if !slices.Equal(c.ExtKeyUsage, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}) {
 		t.Errorf("ExtKeyUsage = %v", c.ExtKeyUsage)
 	}
+
 	if c.IsCA {
 		t.Error("host leaf must not be a CA")
 	}
+
 	if got := c.NotAfter.Sub(now); got != LeafLifetime {
 		t.Errorf("host leaf lifetime = %s", got)
 	}
+
 	for _, n := range want {
 		if err := verify(ca, leaf, n); err != nil {
 			t.Errorf("host leaf does not verify for %s: %v", n, err)
 		}
 	}
+
 	if !KeyMatches(c, leaf.KeyPEM) {
 		t.Error("KeyMatches = false for the host leaf's own key")
 	}
@@ -265,6 +308,7 @@ func TestHostLeafShape(t *testing.T) {
 	if err := verify(newCA(t), leaf, want[0]); err == nil {
 		t.Error("host leaf verified against a lab CA")
 	}
+
 	if names[0] != "web.lab.localhost" {
 		t.Error("IssueHost reordered the caller's slice")
 	}
@@ -277,9 +321,11 @@ func TestIssueHostRejectsBadInput(t *testing.T) {
 			t.Errorf("IssueHost(%q) succeeded", names)
 		}
 	}
+
 	if _, err := ca.IssueHost([]string{"evil.com"}, now); !errors.Is(err, ErrNotHostName) {
 		t.Errorf("IssueHost outside .localhost = %v, want ErrNotHostName", err)
 	}
+
 	if _, err := newCA(t).IssueHost([]string{"api.lab.localhost"}, now); !errors.Is(err, ErrNotHostCA) {
 		t.Errorf("IssueHost from the lab CA = %v, want ErrNotHostCA", err)
 	}
@@ -288,10 +334,12 @@ func TestIssueHostRejectsBadInput(t *testing.T) {
 func TestHostNeedsReissue(t *testing.T) {
 	ca := newHostCA(t)
 	names := []string{"api.lab.localhost", "web.lab.localhost"}
+
 	leaf, err := ca.IssueHost(names, now)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	other := newHostCA(t)
 	for _, tc := range []struct {
 		name  string
@@ -315,6 +363,7 @@ func TestHostNeedsReissue(t *testing.T) {
 			}
 		})
 	}
+
 	if !ca.HostNeedsReissue(nil, names, now) {
 		t.Error("HostNeedsReissue(nil) = false")
 	}
@@ -322,14 +371,17 @@ func TestHostNeedsReissue(t *testing.T) {
 
 func TestHostCALoadRoundTrip(t *testing.T) {
 	ca := newHostCA(t)
+
 	keyPEM, err := ca.KeyPEM()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	loaded, err := LoadCA(ca.CertPEM, keyPEM)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !loaded.HostUsable(now) || loaded.Fingerprint() != ca.Fingerprint() {
 		t.Error("host CA changed after a round trip")
 	}
@@ -343,19 +395,25 @@ func TestHostCAOpenSSL(t *testing.T) {
 	if err != nil {
 		t.Skip("openssl not on PATH")
 	}
+
 	ca := newHostCA(t)
 	dir := t.TempDir()
+
 	caFile := filepath.Join(dir, "host-ca.crt")
 	if err := os.WriteFile(caFile, ca.CertPEM, 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	opensslVerify := func(t *testing.T, leaf *Leaf) (bool, string) {
 		t.Helper()
+
 		f := filepath.Join(dir, strings.NewReplacer(" ", "-", "/", "-").Replace(t.Name())+".crt")
 		if err := os.WriteFile(f, pemBlock("CERTIFICATE", leaf.Cert.Raw), 0o644); err != nil {
 			t.Fatal(err)
 		}
+
 		out, err := exec.Command(bin, "verify", "-CAfile", caFile, "-attime", strconv.FormatInt(now.Unix(), 10), "-purpose", "sslserver", f).CombinedOutput()
+
 		return err == nil && strings.Contains(string(out), ": OK"), string(out)
 	}
 	t.Run("legitimate leaf", func(t *testing.T) {
@@ -363,13 +421,16 @@ func TestHostCAOpenSSL(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		if ok, out := opensslVerify(t, leaf); !ok {
 			t.Fatalf("openssl rejected the host leaf:\n%s", out)
 		}
 	})
+
 	for _, tc := range hostRejectCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.tmpl.Subject = pkix.Name{CommonName: tc.host}
+
 			ok, out := opensslVerify(t, signRaw(t, ca, tc.tmpl))
 			if ok || !strings.Contains(out, "subtree violation") {
 				t.Fatalf("openssl did not reject the leaf for its names:\n%s", out)

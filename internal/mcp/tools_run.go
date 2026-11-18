@@ -47,13 +47,18 @@ func (s *Server) addRunTools() {
 		if err != nil {
 			return upOut{}, err
 		}
+
 		p := newProgress(ctx, req)
+
 		res, err := s.eng.Up(ctx, core.UpRequest{Dir: dir, Events: p.sink, Timeout: time.Duration(in.TimeoutSeconds) * time.Second})
 		if err != nil {
 			return upOut{}, withEvents(err, p.list())
 		}
-		return upOut{Experiment: res.Experiment, Services: mapSlice(res.Services, statusView), Warnings: orEmpty(res.Warnings), Events: p.list(),
-			HostURLs: mapSlice(res.HostURLs, hostURLView), HostPort: res.HostPort}, nil
+
+		return upOut{
+			Experiment: res.Experiment, Services: mapSlice(res.Services, statusView), Warnings: orEmpty(res.Warnings), Events: p.list(),
+			HostURLs: mapSlice(res.HostURLs, hostURLView), HostPort: res.HostPort,
+		}, nil
 	})
 
 	add(s, destructiveTool, true, &sdk.Tool{
@@ -64,11 +69,14 @@ func (s *Server) addRunTools() {
 		if err != nil {
 			return downOut{}, err
 		}
+
 		p := newProgress(ctx, req)
+
 		res, err := s.eng.Down(ctx, core.DownRequest{Dir: dir, Volumes: in.Volumes, Events: p.sink})
 		if err != nil {
 			return downOut{}, withEvents(err, p.list())
 		}
+
 		return downOut{Experiment: res.Experiment, VolumesRemoved: res.VolumesRemoved, Events: p.list()}, nil
 	})
 }

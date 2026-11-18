@@ -53,19 +53,24 @@ func NewHostCA(now time.Time) (*CA, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pki: generate host CA key: %w", err)
 	}
+
 	serial, err := serialNumber()
 	if err != nil {
 		return nil, err
 	}
+
 	tmpl := hostCATemplate(serial, now)
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
 		return nil, fmt.Errorf("pki: create host CA certificate: %w", err)
 	}
+
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		return nil, fmt.Errorf("pki: parse host CA certificate: %w", err)
 	}
+
 	return &CA{Cert: cert, Key: key, CertPEM: pemBlock("CERTIFICATE", der)}, nil
 }
 
@@ -95,6 +100,7 @@ func hostCATemplate(serial *big.Int, now time.Time) *x509.Certificate {
 func (ca *CA) isHost() bool {
 	c := ca.Cert
 	closed := []string{hostClosedSubtree}
+
 	return c.IsCA && c.PermittedDNSDomainsCritical &&
 		slices.Equal(c.PermittedDNSDomains, []string{"." + HostDomain}) && len(c.ExcludedDNSDomains) == 0 &&
 		slices.Equal(c.PermittedURIDomains, closed) && slices.Equal(c.ExcludedURIDomains, closed) &&
@@ -108,7 +114,9 @@ func excludesAllIPs(ranges []*net.IPNet) bool {
 	if len(ranges) != 2 {
 		return false
 	}
+
 	var v4, v6 int
+
 	for _, r := range ranges {
 		ones, bits := r.Mask.Size()
 		switch {
@@ -122,6 +130,7 @@ func excludesAllIPs(ranges []*net.IPNet) bool {
 			return false
 		}
 	}
+
 	return v4 == 1 && v6 == 1
 }
 
@@ -137,6 +146,7 @@ func (ca *CA) HostUsable(now time.Time) bool {
 func HostNames(names []string) []string {
 	out := slices.Clone(names)
 	slices.Sort(out)
+
 	return slices.Compact(out)
 }
 
@@ -147,27 +157,33 @@ func (ca *CA) IssueHost(names []string, now time.Time) (*Leaf, error) {
 	if !ca.isHost() {
 		return nil, ErrNotHostCA
 	}
+
 	names = HostNames(names)
 	if len(names) == 0 {
 		return nil, errors.New("pki: a host certificate needs at least one DNS name")
 	}
+
 	for _, n := range names {
 		if !strings.HasSuffix(n, "."+HostDomain) || n == "."+HostDomain {
 			return nil, fmt.Errorf("%w: %q", ErrNotHostName, n)
 		}
 	}
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("pki: generate host leaf key: %w", err)
 	}
+
 	serial, err := serialNumber()
 	if err != nil {
 		return nil, err
 	}
+
 	notAfter := now.Add(LeafLifetime)
 	if notAfter.After(ca.Cert.NotAfter) {
 		notAfter = ca.Cert.NotAfter
 	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: names[0], Organization: []string{"Breadboard"}},
@@ -177,18 +193,22 @@ func (ca *CA) IssueHost(names []string, now time.Time) (*Leaf, error) {
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.Cert, &key.PublicKey, ca.Key)
 	if err != nil {
 		return nil, fmt.Errorf("pki: sign host leaf: %w", err)
 	}
+
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		return nil, fmt.Errorf("pki: parse host leaf: %w", err)
 	}
+
 	keyPEM, err := marshalKey(key)
 	if err != nil {
 		return nil, err
 	}
+
 	return &Leaf{CertPEM: pemBlock("CERTIFICATE", der), KeyPEM: keyPEM, Cert: cert}, nil
 }
 
@@ -200,11 +220,14 @@ func (ca *CA) HostNeedsReissue(cert *x509.Certificate, names []string, now time.
 	if cert == nil {
 		return true
 	}
+
 	if err := cert.CheckSignatureFrom(ca.Cert); err != nil {
 		return true
 	}
+
 	if !slices.Equal(HostNames(cert.DNSNames), HostNames(names)) || len(cert.URIs) > 0 {
 		return true
 	}
+
 	return cert.NotAfter.Sub(now) < ReissueBefore
 }

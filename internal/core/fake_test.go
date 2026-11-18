@@ -69,72 +69,91 @@ func newFake() *fakeRuntime {
 func (f *fakeRuntime) record(call string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	f.calls = append(f.calls, call)
 }
 
-func (f *fakeRuntime) Available(ctx context.Context) error {
+func (f *fakeRuntime) Available(_ context.Context) error {
 	f.record("available")
+
 	return f.unavailable
 }
 
-func (f *fakeRuntime) Up(ctx context.Context, p runtime.Project) error {
+func (f *fakeRuntime) Up(_ context.Context, p runtime.Project) error {
 	f.record("up")
+
 	if f.onUp != nil {
 		if err := f.onUp(); err != nil {
 			return err
 		}
 	}
+
 	if f.upErr != nil {
 		return f.upErr
 	}
+
 	f.projects = append(f.projects, p)
 	f.filesSeen = map[string][]byte{}
+
 	for _, file := range p.Files {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return err
 		}
+
 		f.filesSeen[filepath.Base(file)] = data
 	}
+
 	experiment := p.Name[len("bb-"):]
+
 	var list []runtime.Container
+
 	for _, svc := range servicesInCompose(f.filesSeen["docker-compose.yml"]) {
 		c := runtime.Container{ID: "id-" + svc.name, Service: svc.name, Kind: svc.kind, State: "running", Health: "healthy", StartedAt: time.Unix(0, 0)}
 		if h, ok := f.healthOf[svc.name]; ok {
 			c.Health = h
 		}
+
 		if s, ok := f.stateOf[svc.name]; ok {
 			c.State = s
 		}
+
 		list = append(list, c)
 	}
+
 	f.containers[experiment] = list
+
 	return nil
 }
 
-func (f *fakeRuntime) Down(ctx context.Context, p runtime.Project, volumes bool) error {
+func (f *fakeRuntime) Down(_ context.Context, p runtime.Project, volumes bool) error {
 	if volumes {
 		f.record("down-volumes")
 	} else {
 		f.record("down")
 	}
+
 	delete(f.containers, p.Name[len("bb-"):])
+
 	return nil
 }
 
-func (f *fakeRuntime) RemoveOwned(ctx context.Context, experimentID string, volumes bool) error {
+func (f *fakeRuntime) RemoveOwned(_ context.Context, experimentID string, volumes bool) error {
 	if volumes {
 		f.record("remove-owned-volumes")
 	} else {
 		f.record("remove-owned")
 	}
+
 	f.removedOwned = append(f.removedOwned, experimentID)
+
 	return nil
 }
 
-func (f *fakeRuntime) Exec(ctx context.Context, experiment, service string, cmd []string) ([]byte, error) {
+func (f *fakeRuntime) Exec(_ context.Context, _, service string, cmd []string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	line := strings.Join(cmd, " ")
 	f.execs = append(f.execs, service+": "+line)
 	// "service|part" matches commands containing part; "service" matches any.
@@ -143,31 +162,38 @@ func (f *fakeRuntime) Exec(ctx context.Context, experiment, service string, cmd 
 			return []byte(out), nil
 		}
 	}
+
 	if out, ok := f.execOut[service]; ok {
 		return []byte(out), nil
 	}
+
 	return nil, fmt.Errorf("fake: no exec output for %s", service)
 }
 
-func (f *fakeRuntime) Build(ctx context.Context, p runtime.Project, services []string) error {
+func (f *fakeRuntime) Build(_ context.Context, _ runtime.Project, services []string) error {
 	f.record("build " + strings.Join(services, ","))
+
 	return nil
 }
 
-func (f *fakeRuntime) ImageUser(ctx context.Context, p runtime.Project, service string) (runtime.ImageUser, error) {
+func (f *fakeRuntime) ImageUser(_ context.Context, _ runtime.Project, service string) (runtime.ImageUser, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	u := f.imageUser[service]
 	if u.User == "unresolvable" {
 		return u, runtime.ErrUserUnresolved
 	}
+
 	return u, nil
 }
 
-func (f *fakeRuntime) Containers(ctx context.Context, experiment string) ([]runtime.Container, error) {
+func (f *fakeRuntime) Containers(_ context.Context, experiment string) ([]runtime.Container, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	f.polls++
+
 	list := f.containers[experiment]
 	for i := range list {
 		if n, ok := f.restartOnPoll[list[i].Service]; ok && f.polls == n {
@@ -176,17 +202,20 @@ func (f *fakeRuntime) Containers(ctx context.Context, experiment string) ([]runt
 			list[i].ExitCode = 1
 		}
 	}
+
 	return list, nil
 }
 
-func (f *fakeRuntime) Stats(ctx context.Context, ids []string) (map[string]runtime.Usage, error) {
+func (f *fakeRuntime) Stats(_ context.Context, ids []string) (map[string]runtime.Usage, error) {
 	f.mu.Lock()
 	f.statsCalls++
 	f.mu.Unlock()
+
 	out := map[string]runtime.Usage{}
 	for _, id := range ids {
 		out[id] = runtime.Usage{CPUPercent: 1.5, MemoryBytes: 64 << 20}
 	}
+
 	return out, nil
 }
 
@@ -194,19 +223,23 @@ func (f *fakeRuntime) StatsStream(ctx context.Context) iter.Seq2[runtime.Sample,
 	f.mu.Lock()
 	f.streams++
 	f.mu.Unlock()
+
 	return func(yield func(runtime.Sample, error) bool) {
 		defer func() {
 			f.mu.Lock()
 			f.streamsEnded++
 			f.mu.Unlock()
 		}()
+
 		for {
 			select {
 			case <-ctx.Done():
 				time.Sleep(f.streamExit)
+
 				return
 			case err := <-f.streamErr:
 				yield(runtime.Sample{}, err)
+
 				return
 			case batch := <-f.stream:
 				for _, s := range batch {
@@ -219,8 +252,9 @@ func (f *fakeRuntime) StatsStream(ctx context.Context) iter.Seq2[runtime.Sample,
 	}
 }
 
-func (f *fakeRuntime) Logs(ctx context.Context, p runtime.Project, services []string, follow bool, tail int) iter.Seq2[runtime.LogLine, error] {
+func (f *fakeRuntime) Logs(_ context.Context, _ runtime.Project, services []string, _ bool, _ int) iter.Seq2[runtime.LogLine, error] {
 	f.logArgs = services
+
 	return func(yield func(runtime.LogLine, error) bool) {
 		for _, l := range f.logs {
 			if !yield(l, nil) {
@@ -230,17 +264,18 @@ func (f *fakeRuntime) Logs(ctx context.Context, p runtime.Project, services []st
 	}
 }
 
-func (f *fakeRuntime) Subnets(ctx context.Context) ([]runtime.Network, error) {
+func (f *fakeRuntime) Subnets(_ context.Context) ([]runtime.Network, error) {
 	return f.subnets, nil
 }
 
-func (f *fakeRuntime) Owners(ctx context.Context, experiment string) ([]string, error) {
+func (f *fakeRuntime) Owners(_ context.Context, _ string) ([]string, error) {
 	return f.owners, nil
 }
 
-func (f *fakeRuntime) PublishedPorts(ctx context.Context) ([]runtime.PublishedPort, error) {
+func (f *fakeRuntime) PublishedPorts(_ context.Context) ([]runtime.PublishedPort, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
 	return f.published, nil
 }
 
@@ -259,7 +294,8 @@ type harness struct {
 // TestMain clears BB_DOMAIN once, so harnesses see the default domain
 // without each test setting the environment, which parallel tests cannot.
 func TestMain(m *testing.M) {
-	os.Unsetenv("BB_DOMAIN")
+	_ = os.Unsetenv("BB_DOMAIN")
+
 	os.Exit(m.Run())
 }
 
@@ -272,9 +308,11 @@ var parallelTests sync.Map
 // A test that sets the environment uses newEnvHarness instead.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+
 	if _, done := parallelTests.LoadOrStore(t, true); !done {
 		t.Parallel()
 	}
+
 	return newEnvHarness(t)
 }
 
@@ -283,6 +321,7 @@ func newHarness(t *testing.T) *harness {
 func newEnvHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{t: t, rt: newFake(), dir: filepath.Join(t.TempDir(), "lab"), now: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC), bound: map[int]bool{}}
+
 	eng, err := New(Options{
 		Home:          filepath.Join(t.TempDir(), "home"),
 		Runtime:       h.rt,
@@ -297,7 +336,9 @@ func newEnvHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	h.eng = eng
+
 	return h
 }
 
@@ -305,6 +346,7 @@ func (h *harness) ctx() context.Context { return context.Background() }
 
 func (h *harness) init() {
 	h.t.Helper()
+
 	if _, err := h.eng.Init(h.ctx(), InitRequest{Dir: h.dir, Name: "lab"}); err != nil {
 		h.t.Fatal(err)
 	}
@@ -312,6 +354,7 @@ func (h *harness) init() {
 
 func (h *harness) add(typ string) {
 	h.t.Helper()
+
 	if _, err := h.eng.AddService(h.ctx(), AddServiceRequest{Dir: h.dir, Type: typ}); err != nil {
 		h.t.Fatal(err)
 	}
@@ -319,6 +362,7 @@ func (h *harness) add(typ string) {
 
 func (h *harness) writeSpec(src string) {
 	h.t.Helper()
+
 	if err := os.WriteFile(filepath.Join(h.dir, "experiment.yaml"), []byte(src), 0o644); err != nil {
 		h.t.Fatal(err)
 	}
@@ -326,10 +370,12 @@ func (h *harness) writeSpec(src string) {
 
 func (h *harness) read(rel string) string {
 	h.t.Helper()
+
 	data, err := os.ReadFile(filepath.Join(h.dir, rel))
 	if err != nil {
 		h.t.Fatal(err)
 	}
+
 	return string(data)
 }
 
@@ -342,10 +388,13 @@ func servicesInCompose(data []byte) []composeService {
 			Labels map[string]string `yaml:"labels"`
 		} `yaml:"services"`
 	}
+
 	_ = yaml.Unmarshal(data, &doc)
+
 	var out []composeService
 	for name, s := range doc.Services {
 		out = append(out, composeService{name: name, kind: s.Labels["breadboard.kind"]})
 	}
+
 	return out
 }

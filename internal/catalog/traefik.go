@@ -65,6 +65,7 @@ func traefik() *Entry {
 // provider from traefikDynamicDir.
 func traefikContainer(static, tls, dynamic []byte) Container {
 	staticPath := ConfigDir + "/" + traefikStaticFile
+
 	return Container{
 		Command: []string{"traefik", "--configFile=" + staticPath},
 		Files: []File{
@@ -140,6 +141,7 @@ func traefikStaticDoc(s Server, cert string) ymap {
 			value:   ym("address", fmt.Sprintf(":%d", ProxyPassthroughPort), "http", ym("aliasHeadersStrategy", "delete", "encodedCharacters", traefikEncodedCharacters())),
 		})
 	}
+
 	entrypoints = append(entrypoints, yfield{
 		key:     traefikAPIEntry,
 		comment: "Loopback only: the API, the dashboard and /ping.",
@@ -157,6 +159,7 @@ func traefikStaticDoc(s Server, cert string) ymap {
 		"api", ym("insecure", true, "dashboard", true),
 		"ping", ym("entryPoint", traefikAPIEntry),
 	)
+
 	return doc
 }
 
@@ -166,6 +169,7 @@ func traefikService(u Upstream) string {
 	if u.Passthrough() {
 		return traefikTLSPrefix + u.Name
 	}
+
 	return u.Name
 }
 
@@ -182,6 +186,7 @@ func traefikTLSConfig(s Server) []byte {
 		ycomment("TLS 1.2 or newer towards clients."),
 		"options", ym("default", ym("minVersion", "VersionTLS12")),
 	))
+
 	return encodeYAMLDoc(header, doc)
 }
 
@@ -207,11 +212,14 @@ func traefikDynamicConfig(s Server) []byte {
 		if len(mws) > 0 {
 			r = append(r, yfield{key: "middlewares", value: mws})
 		}
+
 		routers = append(routers, yfield{key: name, value: r, comment: comment})
 	}
+
 	switch len(l7) {
 	case 0:
 		router("no-upstream", "PathPrefix(`/`)", "no-upstream", "No upstream yet: a service without servers answers 503.")
+
 		services = append(services, yfield{key: "no-upstream", value: ym("loadBalancer", ym("servers", yseq{}))})
 	case 1:
 		router(traefikRoutePrefix+l7[0].Name, "PathPrefix(`/`)", l7[0].Name, "Every request goes to "+l7[0].Service+".")
@@ -222,18 +230,23 @@ func traefikDynamicConfig(s Server) []byte {
 				fmt.Sprintf("%s goes to %s with the prefix stripped.", u.Prefix(), u.Service), mw)
 			middlewares = append(middlewares, yfield{key: mw, value: ym("stripPrefix", ym("prefixes", yseq{strings.TrimSuffix(u.Prefix(), "/")}))})
 		}
+
 		router(traefikDefaultPrefix+l7[0].Name, "PathPrefix(`/`)", l7[0].Name,
 			"Every other path goes to the first upstream: by default a longer rule\nhas a higher priority, so the prefixes above win.")
 	}
+
 	for _, u := range l7 {
 		var servers yseq
+
 		for _, host := range u.Servers {
 			scheme := "https"
 			if u.Mode == spec.TLSOff {
 				scheme = "http"
 			}
+
 			servers = append(servers, ym("url", fmt.Sprintf("%s://%s:%d", scheme, host, u.Port)))
 		}
+
 		lb := ym(
 			ycomment("Weighted round robin. Other strategies: p2c (power of two choices),\nhrw (highest random weight) and leasttime."),
 			"strategy", "wrr",
@@ -247,6 +260,7 @@ func traefikDynamicConfig(s Server) []byte {
 				"timeout", "2s",
 			)})
 		}
+
 		if u.Mode == spec.TLSOn {
 			lb = append(lb, yfield{key: "serversTransport", value: u.Name})
 			transports = append(transports, yfield{key: u.Name, comment: fmt.Sprintf("Re-encrypt: TLS with SNI %s, verified against the lab CA.", u.ServerName), value: ym(
@@ -254,20 +268,25 @@ func traefikDynamicConfig(s Server) []byte {
 				"rootCAs", yseq{CAFile},
 			)})
 		}
+
 		services = append(services, yfield{key: u.Name, comment: proxyModeComment(u), value: ym("loadBalancer", lb)})
 	}
+
 	http := ym("routers", routers)
 	if len(middlewares) > 0 {
 		http = append(http, yfield{key: "middlewares", value: middlewares})
 	}
+
 	http = append(http, yfield{key: "services", value: services})
 	if len(transports) > 0 {
 		http = append(http, yfield{key: "serversTransports", value: transports})
 	}
+
 	doc := ym("http", http)
 
 	if len(pass) > 0 {
 		tcpRouters, tcpServices := ym(), ym()
+
 		for _, u := range pass {
 			name := traefikService(u)
 			tcpRouters = append(tcpRouters, yfield{key: name, comment: "SNI " + u.ServerName + " goes to " + u.Service + " still encrypted.", value: ym(
@@ -276,22 +295,26 @@ func traefikDynamicConfig(s Server) []byte {
 				"service", name,
 				"tls", ym("passthrough", true),
 			)})
+
 			var servers yseq
 			for _, host := range u.Servers {
 				servers = append(servers, ym("address", fmt.Sprintf("%s:%d", host, u.Port)))
 			}
+
 			tcpServices = append(tcpServices, yfield{key: name, comment: proxyModeComment(u), value: ym("loadBalancer", ym(
 				"servers", servers,
 				ycomment("A TCP connect every 2s."),
 				"healthCheck", ym("interval", "2s", "timeout", "2s"),
 			))})
 		}
+
 		doc = append(doc, yfield{
 			key:     "tcp",
 			comment: "Passthrough: a name no router claims is closed.",
 			value:   ym("routers", tcpRouters, "services", tcpServices),
 		})
 	}
+
 	return traefikLiteral(encodeYAMLDoc(header, doc))
 }
 

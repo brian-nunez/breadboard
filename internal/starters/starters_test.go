@@ -17,33 +17,40 @@ func TestEveryStarterRenders(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", s.ID, err)
 		}
+
 		have := map[string]string{}
 		for _, f := range files {
 			have[f.Path] = string(f.Data)
 		}
+
 		for _, want := range []string{"Dockerfile", "README.md", "go.mod", "go.sum"} {
 			if _, ok := have[want]; !ok {
 				t.Errorf("%s has no %s", s.ID, want)
 			}
 		}
+
 		if !strings.Contains(have["go.mod"], "go "+GoVersion) {
 			t.Errorf("%s go.mod does not target Go %s", s.ID, GoVersion)
 		}
+
 		df := have["Dockerfile"]
 		for _, want := range []string{"AS dev", "AS prod", "USER ", "golang:" + GoImage, "LABEL maintainer=", "go build -o /usr/local/bin/ ./cmd/..."} {
 			if !strings.Contains(df, want) {
 				t.Errorf("%s Dockerfile lacks %q", s.ID, want)
 			}
 		}
+
 		if strings.Contains(df, ":latest") {
 			t.Errorf("%s Dockerfile uses a latest tag", s.ID)
 		}
+
 		readme := have["README.md"]
 		for _, want := range []string{"## Try this", "## Break this"} {
 			if !strings.Contains(readme, want) {
 				t.Errorf("%s README lacks %q", s.ID, want)
 			}
 		}
+
 		for path, data := range have {
 			if strings.Contains(data, `"github.com/brian-nunez/`) {
 				t.Errorf("%s: %s imports a Breadboard or bkit package; starters use official libraries only", s.ID, path)
@@ -58,31 +65,38 @@ func TestRenderedStartersBuild(t *testing.T) {
 	if testing.Short() {
 		t.Skip("downloads modules")
 	}
+
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not on PATH")
 	}
+
 	for _, s := range All() {
 		t.Run(s.ID, func(t *testing.T) {
 			// Each starter builds in its own directory; the go command
 			// shares its module and build caches safely.
 			t.Parallel()
 			dir := t.TempDir()
+
 			files, err := Render(s, s.DefaultLab("lab", "bb.internal"))
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			for _, f := range files {
 				p := filepath.Join(dir, filepath.FromSlash(f.Path))
 				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 					t.Fatal(err)
 				}
+
 				if err := os.WriteFile(p, f.Data, 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
+
 			for _, args := range [][]string{{"build", "./..."}, {"vet", "./..."}} {
 				cmd := exec.Command("go", args...)
 				cmd.Dir = dir
+
 				cmd.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "GOTOOLCHAIN=go"+GoVersion)
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
@@ -96,6 +110,7 @@ func TestLookup(t *testing.T) {
 	if _, ok := Lookup("kafka/producer-consumer"); !ok {
 		t.Fatal("kafka/producer-consumer missing")
 	}
+
 	if _, ok := Lookup("nope"); ok {
 		t.Fatal("Lookup found a missing starter")
 	}
@@ -105,11 +120,13 @@ func TestLookup(t *testing.T) {
 // experiment never clashes with itself.
 func TestStarterAppNamesAreUnique(t *testing.T) {
 	owner := map[string]string{}
+
 	for _, s := range All() {
 		for _, a := range s.Apps {
 			if prev, ok := owner[a.Name]; ok {
 				t.Errorf("app %q is in both %s and %s", a.Name, prev, s.ID)
 			}
+
 			owner[a.Name] = s.ID
 		}
 	}
@@ -120,21 +137,25 @@ func TestStarterAppNamesAreUnique(t *testing.T) {
 // or a type it requires.
 func TestStarterServiceNamesAreUnique(t *testing.T) {
 	owner := map[string]string{}
+
 	for _, s := range All() {
 		for _, a := range s.Apps {
 			owner[a.Name] = s.ID
 		}
 	}
+
 	for _, s := range All() {
 		for _, svc := range s.Services {
 			if prev, ok := owner[svc.Name]; ok {
 				t.Errorf("service %q is in both %s and %s", svc.Name, prev, s.ID)
 			}
+
 			owner[svc.Name] = s.ID
 			// A required type is added under its own name.
 			if _, ok := catalog.Lookup(svc.Name); ok {
 				t.Errorf("%s service %q is named after a catalog type", s.ID, svc.Name)
 			}
+
 			for _, u := range svc.Upstreams {
 				if !slices.ContainsFunc(s.Apps, func(a App) bool { return a.Name == u.Service }) && !slices.Contains(s.Requires, u.Service) {
 					t.Errorf("%s service %s upstream %q is neither an app of the starter nor a type it requires", s.ID, svc.Name, u.Service)
@@ -152,14 +173,17 @@ func TestStarterAppsRunTheirBuiltBinary(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		have := map[string]bool{}
 		for _, f := range files {
 			have[f.Path] = true
 		}
+
 		for _, a := range s.Apps {
 			if len(a.Command) != 1 || a.Command[0] != a.Name {
 				t.Errorf("%s app %s command = %v, want [%s]", s.ID, a.Name, a.Command, a.Name)
 			}
+
 			if !have["cmd/"+a.Name+"/main.go"] {
 				t.Errorf("%s app %s has no cmd/%s/main.go", s.ID, a.Name, a.Name)
 			}
@@ -175,19 +199,24 @@ func TestTemplatesNameTheLabsInfra(t *testing.T) {
 	if !ok {
 		t.Fatal("pgbouncer/pooling-modes is not registered")
 	}
+
 	lab := Lab{Experiment: "lab", Domain: "lab.test", Infra: map[string]Infra{
 		"postgres": {Name: "db", Config: map[string]string{"database": "orders", "user": "shop"}},
 	}}
+
 	files, err := Render(s, lab)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var ini string
+
 	for _, f := range files {
 		if f.Path == "pgbouncer.ini" {
 			ini = string(f.Data)
 		}
 	}
+
 	for _, want := range []string{
 		"\norders = host=db.lab.test port=5432 dbname=orders pool_mode=transaction pool_size=5\n",
 		"\norders_session = host=db.lab.test port=5432 dbname=orders pool_mode=session pool_size=8\n",
@@ -197,6 +226,7 @@ func TestTemplatesNameTheLabsInfra(t *testing.T) {
 			t.Errorf("pgbouncer.ini lacks %q:\n%s", want, ini)
 		}
 	}
+
 	if strings.Contains(ini, "postgres.lab.test") || strings.Contains(ini, "dbname=app") || strings.HasPrefix(ini, "\n") {
 		t.Errorf("pgbouncer.ini still assumes the defaults or starts with a blank line:\n%s", ini)
 	}
@@ -206,10 +236,12 @@ func TestTemplatesNameTheLabsInfra(t *testing.T) {
 	if _, err := Render(s, Lab{Experiment: "lab", Domain: "lab.test"}); err == nil {
 		t.Error("rendered without the required postgres")
 	}
+
 	d := Data{infra: lab.Infra}
 	if _, err := d.Service("redis"); err == nil {
 		t.Error("Service named a type the starter does not require")
 	}
+
 	if _, err := d.Config("postgres", "nope"); err == nil {
 		t.Error("Config returned an unknown option")
 	}

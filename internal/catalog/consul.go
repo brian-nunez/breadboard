@@ -11,6 +11,7 @@ func consul() *Entry {
 		httpsPort = 8501
 		httpPort  = 8500
 	)
+
 	return &Entry{
 		ID:      "consul",
 		Title:   "Consul",
@@ -30,6 +31,7 @@ func consul() *Entry {
 			// on for Phase 2 client agents, encrypted with the gossip key, and
 			// server RPC requires TLS with a certificate from the CA.
 			ports := map[string]any{"http": -1, "https": httpsPort, "grpc": -1, "grpc_tls": -1, "dns": -1, "serf_wan": -1}
+
 			cfg := map[string]any{
 				"datacenter":              "bb",
 				"node_name":               s.Name,
@@ -60,10 +62,12 @@ func consul() *Entry {
 				ports["http"] = httpPort
 				cfg["addresses"] = map[string]any{"http": s.Plain.Address}
 			}
+
 			data, err := json.MarshalIndent(cfg, "", "  ")
 			if err != nil {
 				panic(err) // static types only
 			}
+
 			return Container{
 				// The gossip key goes on the command line (compose resolves it in
 				// dotenv mode), never into the mounted config file. Consul stores
@@ -99,6 +103,7 @@ func consul() *Entry {
 			if s.Check != "" {
 				check = map[string]any{"http": fmt.Sprintf("https://%s:%d%s", s.AppFQDN, s.Port, s.Check), "interval": "5s", "timeout": "2s"}
 			}
+
 			cfg := map[string]any{
 				"datacenter":                  "bb",
 				"node_name":                   s.App,
@@ -130,10 +135,12 @@ func consul() *Entry {
 					"check":   check,
 				}},
 			}
+
 			data, err := json.MarshalIndent(cfg, "", "  ")
 			if err != nil {
 				panic(err) // static types only
 			}
+
 			return Container{
 				Command: []string{"agent", "-config-file=" + ConfigDir + "/consul.json", "-encrypt=" + s.Secret("gossip-key")},
 				Environment: []EnvVar{
@@ -158,6 +165,7 @@ func consul() *Entry {
 			if c.Plain != nil {
 				return []EnvVar{{Name: "CONSUL_HTTP_ADDR", Value: fmt.Sprintf("http://%s:%d", c.Plain.FQDN, httpPort)}}
 			}
+
 			return []EnvVar{
 				{Name: "CONSUL_HTTP_ADDR", Value: fmt.Sprintf("https://%s:%d", c.FQDN, httpsPort)},
 				{Name: "CONSUL_CACERT", Value: TrustBundleFile},

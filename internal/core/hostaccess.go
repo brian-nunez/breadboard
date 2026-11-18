@@ -42,6 +42,7 @@ type HostURL struct {
 func hostPortStart(experiment string) int {
 	h := fnv.New32a()
 	h.Write([]byte(experiment))
+
 	return hostPortFirst + int(h.Sum32()%hostPortCount)
 }
 
@@ -51,7 +52,9 @@ func loopbackPortFree(port int) bool {
 	if err != nil {
 		return false
 	}
-	l.Close()
+
+	_ = l.Close()
+
 	return true
 }
 
@@ -68,29 +71,37 @@ func (e *Engine) hostPort(ctx context.Context, m *model.Model, ps *state.Project
 	if _, ok := m.HostRouter(); !ok {
 		return 0, nil
 	}
+
 	if !probe {
 		if ps.HostPort != 0 {
 			return ps.HostPort, nil
 		}
+
 		return hostPortStart(m.Name), nil
 	}
+
 	published, err := e.rt.PublishedPorts(ctx)
 	if err != nil {
 		return 0, err
 	}
+
 	free := func(port int) bool {
 		held := false
+
 		for _, pp := range published {
 			if pp.HostPort != port {
 				continue
 			}
+
 			if pp.ExperimentID != "" && pp.ExperimentID == ps.ExperimentID && pp.Service == spec.HostRouterName {
 				// This lab's own router: running, it holds the port;
 				// stopped, it only reserves it, and the bind check
 				// decides whether another program took the port since.
 				held = held || pp.Running
+
 				continue
 			}
+
 			return false
 		}
 		// This lab's running router holds it: binding would fail only
@@ -100,18 +111,23 @@ func (e *Engine) hostPort(ctx context.Context, m *model.Model, ps *state.Project
 	if ps.HostPort != 0 && free(ps.HostPort) {
 		return ps.HostPort, nil
 	}
+
 	start := hostPortStart(m.Name) - hostPortFirst
 	for i := range hostPortCount {
 		port := hostPortFirst + (start+i)%hostPortCount
 		if port == ps.HostPort || !free(port) {
 			continue
 		}
+
 		if ps.HostPort != 0 {
 			ev.warn(fmt.Sprintf("host port %d is taken; host access moved to %d", ps.HostPort, port))
 		}
+
 		ps.HostPort = port
+
 		return port, nil
 	}
+
 	return 0, fmt.Errorf("no free host port from %d to %d on 127.0.0.1 for host access", hostPortFirst, hostPortFirst+hostPortCount-1)
 }
 
@@ -126,36 +142,47 @@ func (e *Engine) reconcileHostCert(p *project, m *model.Model, ps *state.Project
 		if err := p.RemoveNamedCert(spec.HostRouterName, state.HostCert); err != nil {
 			return nil, err
 		}
+
 		delete(ps.Certificates, hostCertKey)
+
 		return nil, nil
 	}
+
 	ca, created, err := e.ensureHostCA()
 	if err != nil {
 		return nil, err
 	}
+
 	if created {
 		ev.emit(Event{Kind: EventInfo, Message: fmt.Sprintf("Created the Breadboard host CA for *.%s in %s", pki.HostDomain, e.home.CADir())})
 	}
+
 	names := catalog.HostNames(router.HostTargets)
 	now := e.now()
+
 	certPEM, keyPEM, ok, err := p.ReadNamedCert(router.Name, state.HostCert)
 	if err != nil {
 		return nil, err
 	}
+
 	if ok {
 		cert, err := pki.ParseCert(certPEM)
 		if err == nil && pki.KeyMatches(cert, keyPEM) && !ca.HostNeedsReissue(cert, names, now) {
 			return &compose.Cert{Cert: certPEM, Key: keyPEM}, nil
 		}
 	}
+
 	leaf, err := ca.IssueHost(names, now)
 	if err != nil {
 		return nil, fmt.Errorf("issue the host certificate: %w", err)
 	}
+
 	if err := p.WriteNamedCert(router.Name, state.HostCert, leaf.CertPEM, leaf.KeyPEM); err != nil {
 		return nil, err
 	}
+
 	ps.Certificates[hostCertKey] = state.CertRecord{Issuer: hostCAName, Serial: leaf.Cert.SerialNumber.Text(16), NotAfter: leaf.Cert.NotAfter}
+
 	return &compose.Cert{Cert: leaf.CertPEM, Key: leaf.KeyPEM}, nil
 }
 
@@ -171,6 +198,7 @@ func hostURLs(m *model.Model, port int) []HostURL {
 	if !ok || port == 0 {
 		return nil
 	}
+
 	var out []HostURL
 	for _, t := range router.HostTargets {
 		out = append(out, HostURL{URL: hostURL(t.Name, port), Target: t.Target})
@@ -180,6 +208,7 @@ func hostURLs(m *model.Model, port int) []HostURL {
 			}
 		}
 	}
+
 	return out
 }
 
@@ -190,12 +219,15 @@ func serviceHostURLs(m *model.Model, svc *model.Service, port int) []string {
 	if svc.Kind == model.Sidecar {
 		return nil
 	}
+
 	var out []string
+
 	for _, u := range hostURLs(m, port) {
 		if u.Target == svc.Group() && (u.Instance == "" || u.Instance == svc.Name) {
 			out = append(out, u.URL)
 		}
 	}
+
 	return out
 }
 
@@ -205,5 +237,6 @@ func recordedHostPort(p *project) int {
 	if err != nil {
 		return 0
 	}
+
 	return ps.HostPort
 }

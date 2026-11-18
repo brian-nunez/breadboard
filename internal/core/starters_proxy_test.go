@@ -73,6 +73,7 @@ http {
 // the proxy. Its templates are the probe app plus nginx.conf.
 func proxyFixture(t *testing.T) (starters.Starter, renderFunc) {
 	t.Helper()
+
 	st := starters.Starter{
 		ID:       "test/proxy",
 		Template: "test/proxy",
@@ -90,17 +91,21 @@ func proxyFixture(t *testing.T) (starters.Starter, renderFunc) {
 	}
 	fsys := fstest.MapFS{st.Template + "/nginx.conf.tmpl": {Data: []byte(proxyFixtureNginx)}}
 	src := filepath.Join("testdata", "sidecars", "probe")
+
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, e := range entries {
 		data, err := os.ReadFile(filepath.Join(src, e.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		fsys[path.Join(st.Template, e.Name()+".tmpl")] = &fstest.MapFile{Data: data}
 	}
+
 	return st, func(s starters.Starter, lab starters.Lab) ([]starters.File, error) {
 		return starters.RenderFS(fsys, s, lab)
 	}
@@ -113,33 +118,42 @@ func TestApplyStarterWithProxy(t *testing.T) {
 	h := newEnvHarness(t)
 	t.Setenv("BB_DOMAIN", "practice.internal")
 	h.init()
+
 	st, render := proxyFixture(t)
+
 	res, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if strings.Join(res.AddedServices, ",") != "fixture-edge" || strings.Join(res.AddedApps, ",") != "fixture-web,fixture-client" {
 		t.Fatalf("result = %+v", res)
 	}
+
 	yaml := h.read("experiment.yaml")
 	if !strings.Contains(yaml, "  fixture-edge:\n    type: nginx\n    upstreams:\n      - service: fixture-web\n        port: 8443\n    file: ./proxy-fixture/nginx.conf\n") {
 		t.Errorf("experiment.yaml:\n%s", yaml)
 	}
+
 	if !strings.Contains(yaml, "uses: [fixture-edge]") {
 		t.Errorf("the client does not use the proxy by its name:\n%s", yaml)
 	}
+
 	doc, err := spec.Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s, err := decodeAndValidate(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	svc, _ := serviceNamed(s, "fixture-edge")
 	if svc.File != "./proxy-fixture/nginx.conf" || len(svc.Upstreams) != 1 || svc.Upstreams[0] != (spec.Upstream{Service: "fixture-web", Port: 8443}) {
 		t.Errorf("decoded service = %+v", svc)
 	}
+
 	conf := h.read("proxy-fixture/nginx.conf")
 	if !strings.Contains(conf, "server fixture-web.practice.internal:8443 resolve;") || !strings.Contains(conf, "for lab.") {
 		t.Errorf("nginx.conf was not rendered with the domain and experiment:\n%s", conf)
@@ -149,15 +163,19 @@ func TestApplyStarterWithProxy(t *testing.T) {
 	if _, err := h.eng.ExportCompose(h.ctx(), ExportComposeRequest{Dir: h.dir, Out: out}); err != nil {
 		t.Fatal(err)
 	}
+
 	var found bool
+
 	_ = filepath.WalkDir(out, func(p string, d os.DirEntry, err error) error {
 		if err == nil && !d.IsDir() {
 			if data, _ := os.ReadFile(p); strings.Contains(string(data), "shipped nginx.conf") {
 				found = true
 			}
 		}
+
 		return nil
 	})
+
 	if !found {
 		t.Error("the export does not carry the shipped nginx.conf")
 	}
@@ -166,9 +184,11 @@ func TestApplyStarterWithProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(again.AddedServices) != 0 || strings.Join(again.ExistingServices, ",") != "fixture-edge" || len(again.Written) != 0 {
 		t.Errorf("re-apply = %+v", again)
 	}
+
 	if h.read("experiment.yaml") != yaml {
 		t.Error("re-applying changed experiment.yaml")
 	}
@@ -180,8 +200,10 @@ func TestApplyStarterProxyResolvesTypes(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.writeSpec("version: 1\nname: lab\nservices:\n  db:\n    type: postgres\n")
+
 	st, render := proxyFixture(t)
 	st.Requires = []string{"postgres"}
+
 	st.Services = []starters.Service{
 		{Name: "fixture-pool", Type: "pgbouncer", Upstreams: []spec.Upstream{{Service: "postgres", TLS: spec.TLS{Mode: spec.TLSOff, Reason: "watch the pool in plaintext"}}}},
 		{Name: "fixture-edge", Type: "nginx", Upstreams: []spec.Upstream{
@@ -193,13 +215,16 @@ func TestApplyStarterProxyResolvesTypes(t *testing.T) {
 		// The same target twice is invalid: validation runs before any file.
 		t.Fatalf("err = %v", err)
 	}
+
 	if _, err := os.Stat(filepath.Join(h.dir, "proxy-fixture")); !os.IsNotExist(err) {
 		t.Fatalf("files were written before validation: %v", err)
 	}
+
 	st.Services[1].Upstreams = st.Services[1].Upstreams[:1]
 	if _, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	yaml := h.read("experiment.yaml")
 	for _, want := range []string{
 		"  fixture-pool:\n    type: pgbouncer\n    upstreams:\n      - service: db\n        tls:\n          mode: off\n          reason: watch the pool in plaintext\n",
@@ -209,6 +234,7 @@ func TestApplyStarterProxyResolvesTypes(t *testing.T) {
 			t.Errorf("experiment.yaml lacks %q:\n%s", want, yaml)
 		}
 	}
+
 	if strings.Contains(yaml, "  postgres:") {
 		t.Errorf("a second Postgres was added:\n%s", yaml)
 	}
@@ -227,11 +253,14 @@ func TestApplyStarterProxyNameTaken(t *testing.T) {
 			h := newHarness(t)
 			h.init()
 			h.writeSpec("version: 1\nname: lab\nservices:\n" + existing)
+
 			st, render := proxyFixture(t)
+
 			_, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir})
 			if !errors.Is(err, ErrExists) {
 				t.Fatalf("err = %v, want ErrExists", err)
 			}
+
 			if _, err := os.Stat(filepath.Join(h.dir, "proxy-fixture")); !os.IsNotExist(err) {
 				t.Fatalf("files were written: %v", err)
 			}
@@ -242,11 +271,14 @@ func TestApplyStarterProxyNameTaken(t *testing.T) {
 	// as the starter's by its upstream to the starter's app in this directory.
 	h := newHarness(t)
 	h.init()
+
 	st, render := proxyFixture(t)
 	if _, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	h.writeSpec(strings.Replace(h.read("experiment.yaml"), "file: ./proxy-fixture/nginx.conf", "file: ./mine.conf", 1))
+
 	res, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir})
 	if err != nil || strings.Join(res.ExistingServices, ",") != "fixture-edge" {
 		t.Fatalf("re-apply after editing file: %+v, %v", res, err)
@@ -260,28 +292,37 @@ func TestApplyStarterProxyNameTaken(t *testing.T) {
 func TestApplyStarterInfraProxyRepointedFile(t *testing.T) {
 	h := newHarness(t)
 	h.init()
+
 	if _, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: "pgbouncer/pooling-modes"}); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.MkdirAll(filepath.Join(h.dir, "mine"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(h.dir, "mine", "pgbouncer.ini"), []byte(h.read("pooling-modes/pgbouncer.ini")), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	before := h.read("experiment.yaml")
+
 	edited := strings.Replace(before, "file: ./pooling-modes/pgbouncer.ini", "file: ./mine/pgbouncer.ini", 1)
 	if edited == before {
 		t.Fatalf("pool-central has no file to repoint:\n%s", before)
 	}
+
 	h.writeSpec(edited)
+
 	res, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: "pgbouncer/pooling-modes"})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !slices.Contains(res.ExistingServices, "pool-central") || len(res.AddedServices) != 0 || len(res.AddedApps) != 0 {
 		t.Fatalf("re-apply = %+v", res)
 	}
+
 	if h.read("experiment.yaml") != edited {
 		t.Errorf("re-apply changed experiment.yaml:\n%s", h.read("experiment.yaml"))
 	}
@@ -292,14 +333,18 @@ func TestApplyStarterInfraProxyRepointedFile(t *testing.T) {
 func TestApplyStarterProxyUnrelatedClient(t *testing.T) {
 	h := newHarness(t)
 	h.init()
+
 	if err := os.MkdirAll(filepath.Join(h.dir, "proxy-fixture"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	h.writeSpec("version: 1\nname: lab\nservices:\n  fixture-edge:\n    type: nginx\n    file: ./elsewhere/nginx.conf\napps:\n  mine:\n    path: ./proxy-fixture\n    uses: [fixture-edge]\n")
+
 	st, render := proxyFixture(t)
 	if _, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir}); !errors.Is(err, ErrExists) {
 		t.Fatalf("err = %v, want ErrExists", err)
 	}
+
 	if _, err := os.Stat(filepath.Join(h.dir, "proxy-fixture", "nginx.conf")); !os.IsNotExist(err) {
 		t.Fatalf("files were written: %v", err)
 	}
@@ -310,11 +355,14 @@ func TestApplyStarterProxyUnrelatedClient(t *testing.T) {
 func TestApplyStarterProxyFileMissing(t *testing.T) {
 	h := newHarness(t)
 	h.init()
+
 	st, render := proxyFixture(t)
+
 	st.Services[0].File = "haproxy.cfg"
 	if _, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir}); err == nil || !strings.Contains(err.Error(), "haproxy.cfg.tmpl") {
 		t.Fatalf("err = %v", err)
 	}
+
 	if strings.Contains(h.read("experiment.yaml"), "fixture-edge") {
 		t.Fatal("experiment.yaml was written")
 	}
@@ -328,6 +376,7 @@ func TestApplyStarterServiceConfigAndStaticFile(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.writeSpec("version: 1\nname: lab\nservices:\n  db:\n    type: postgres\n")
+
 	st, _ := proxyFixture(t)
 	st.Requires = []string{"postgres"}
 	st.Apps[1].Uses = []string{"fixture-pool"} // so a re-apply knows the pool (D-137)
@@ -339,12 +388,14 @@ func TestApplyStarterServiceConfigAndStaticFile(t *testing.T) {
 		st.Template + "/traefik-static.yml.tmpl": {Data: []byte("metrics:\n  prometheus:\n    entryPoint: traefik\n")},
 		st.Template + "/Dockerfile.tmpl":         {Data: []byte("FROM scratch AS dev\n")},
 	}
+
 	render := func(s starters.Starter, lab starters.Lab) ([]starters.File, error) {
 		return starters.RenderFS(fsys, s, lab)
 	}
 	if _, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir}); err == nil || !strings.Contains(err.Error(), "services.fixture-pool.config.pool_mode") {
 		t.Fatalf("a bad config value: err = %v", err)
 	}
+
 	if _, err := os.Stat(filepath.Join(h.dir, "proxy-fixture")); !os.IsNotExist(err) {
 		t.Fatalf("files were written before validation: %v", err)
 	}
@@ -353,6 +404,7 @@ func TestApplyStarterServiceConfigAndStaticFile(t *testing.T) {
 	if _, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	yaml := h.read("experiment.yaml")
 	for _, want := range []string{
 		"  fixture-pool:\n    type: pgbouncer\n    config:\n      pool_mode: transaction\n      pool_size: \"5\"\n    upstreams: [db]\n",
@@ -362,18 +414,22 @@ func TestApplyStarterServiceConfigAndStaticFile(t *testing.T) {
 			t.Errorf("experiment.yaml lacks %q:\n%s", want, yaml)
 		}
 	}
+
 	doc, err := spec.Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s, err := decodeAndValidate(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	pool, _ := serviceNamed(s, "fixture-pool")
 	if pool.Config["pool_mode"] != "transaction" || pool.Config["pool_size"] != "5" || len(pool.Config) != 2 {
 		t.Errorf("pool config = %v", pool.Config)
 	}
+
 	tr, _ := serviceNamed(s, "fixture-traefik")
 	if tr.StaticFile != "./proxy-fixture/traefik-static.yml" || tr.File != "" {
 		t.Errorf("traefik = %+v", tr)
@@ -383,14 +439,17 @@ func TestApplyStarterServiceConfigAndStaticFile(t *testing.T) {
 	if _, err := h.eng.ExportCompose(h.ctx(), ExportComposeRequest{Dir: h.dir, Out: out}); err != nil {
 		t.Fatal(err)
 	}
+
 	merged, err := os.ReadFile(filepath.Join(out, "config", "fixture-traefik", "traefik.yml"))
 	if err != nil || !strings.Contains(string(merged), "metrics:\n  prometheus:\n    entryPoint: traefik\n") || !strings.Contains(string(merged), "entryPoints:") {
 		t.Errorf("the export's traefik.yml (%v):\n%s", err, merged)
 	}
+
 	readme, _ := os.ReadFile(filepath.Join(out, "README.md"))
 	if !strings.Contains(string(readme), "- fixture-traefik: `./proxy-fixture/traefik-static.yml` (static_file) is merged into `config/fixture-traefik/traefik.yml`.") {
 		t.Errorf("the export README does not name the static_file:\n%s", readme)
 	}
+
 	d, err := h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: "fixture-traefik"})
 	if err != nil || d.StaticFile != "./proxy-fixture/traefik-static.yml" || d.File != "" {
 		t.Errorf("service details: %v %+v", err, d)
@@ -400,9 +459,11 @@ func TestApplyStarterServiceConfigAndStaticFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(again.AddedServices) != 0 || strings.Join(again.ExistingServices, ",") != "fixture-pool,fixture-traefik" {
 		t.Errorf("re-apply = %+v", again)
 	}
+
 	if h.read("experiment.yaml") != yaml {
 		t.Error("re-applying changed experiment.yaml")
 	}

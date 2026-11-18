@@ -27,25 +27,31 @@ func (e *Engine) exploreSidecar(ctx context.Context, req ExploreRequest, typ str
 	if err := e.rt.Available(ctx); err != nil {
 		return nil, nil, nil, nil, err
 	}
+
 	p, err := e.open(req.Dir)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+
 	st, err := e.settings(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+
 	m, err := model.Resolve(p.spec, st.Domain)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+
 	sc, inst := findSidecar(m, req.Service, typ)
 	if sc == nil {
 		return nil, nil, nil, nil, fmt.Errorf("no %s sidecar for %q: %w", typ, req.Service, ErrNotFound)
 	}
+
 	run := func(cmd ...string) ([]byte, error) {
 		return e.rt.Exec(ctx, m.Name, sc.Name, cmd)
 	}
+
 	return m, sc, inst, run, nil
 }
 
@@ -53,17 +59,20 @@ func findSidecar(m *model.Model, name, typ string) (sc, inst *model.Service) {
 	isType := func(s *model.Service) bool {
 		return s.Kind == model.Sidecar && s.SidecarType != nil && s.SidecarType.ID == typ
 	}
+
 	svc, ok := m.Service(name)
 	if !ok {
 		if insts := m.Instances(name); len(insts) > 0 {
 			svc, ok = insts[0], true
 		}
 	}
+
 	switch {
 	case !ok:
 		return nil, nil
 	case isType(svc):
 		parent, _ := m.Service(svc.Parent)
+
 		return svc, parent
 	case svc.Kind == model.App:
 		for _, n := range svc.Sidecars {
@@ -72,6 +81,7 @@ func findSidecar(m *model.Model, name, typ string) (sc, inst *model.Service) {
 			}
 		}
 	}
+
 	return nil, nil
 }
 
@@ -162,8 +172,10 @@ func (e *Engine) EnvoyClusters(ctx context.Context, req ExploreRequest) (*EnvoyC
 		if err != nil {
 			return nil, err
 		}
+
 		return e.envoyInfra(m, svc, run)
 	}
+
 	m, sc, inst, run, err := e.exploreSidecar(ctx, req, spec.SidecarEnvoy)
 	if err != nil {
 		return nil, err
@@ -171,6 +183,7 @@ func (e *Engine) EnvoyClusters(ctx context.Context, req ExploreRequest) (*EnvoyC
 	// The names whose addresses Envoy may connect to: every instance of an
 	// app target, or a service's name.
 	var names []string
+
 	for _, t := range sc.Targets {
 		if insts := m.Instances(t.Service); len(insts) > 0 {
 			for _, i := range insts {
@@ -180,14 +193,17 @@ func (e *Engine) EnvoyClusters(ctx context.Context, req ExploreRequest) (*EnvoyC
 			names = append(names, svc.FQDN)
 		}
 	}
+
 	out, err := run(append([]string{"bash", "-c", envoyAdminScript, "bb-envoy"}, names...)...)
 	if err != nil {
 		return nil, err
 	}
+
 	res, err := parseEnvoy(string(out), "."+m.Domain)
 	if err != nil {
 		return nil, err
 	}
+
 	res.Sidecar, res.App = sc.Name, inst.Name
 	for i := range res.Clusters {
 		c := &res.Clusters[i]
@@ -201,12 +217,14 @@ func (e *Engine) EnvoyClusters(ctx context.Context, req ExploreRequest) (*EnvoyC
 		case c.Name == envoyInboundPassCluster:
 			c.Role, c.Target = "inbound passthrough", inst.Group()
 		}
+
 		for j := range c.Hosts {
 			if c.Hosts[j].Instance == "" && strings.HasPrefix(c.Hosts[j].Address, "127.0.0.1:") {
 				c.Hosts[j].Instance = inst.Name // the app, on loopback
 			}
 		}
 	}
+
 	return res, nil
 }
 
@@ -214,10 +232,12 @@ func (e *Engine) EnvoyClusters(ctx context.Context, req ExploreRequest) (*EnvoyC
 // from resolved names to give instance names.
 func parseEnvoy(out, suffix string) (*EnvoyClusters, error) {
 	sections := splitSections(out)
+
 	body, err := httpBody(sections["clusters"])
 	if err != nil {
 		return nil, fmt.Errorf("envoy /clusters: %w", err)
 	}
+
 	var cj struct {
 		ClusterStatuses []struct {
 			Name         string `json:"name"`
@@ -232,13 +252,17 @@ func parseEnvoy(out, suffix string) (*EnvoyClusters, error) {
 	if err := json.Unmarshal(body, &cj); err != nil {
 		return nil, fmt.Errorf("envoy /clusters: %w", err)
 	}
+
 	hosts := map[string]string{}
+
 	for _, line := range strings.Split(sections["hosts"], "\n") {
 		if f := strings.Fields(line); len(f) >= 2 {
 			hosts[f[0]] = strings.TrimSuffix(f[1], suffix)
 		}
 	}
+
 	stats := map[string]int64{}
+
 	if b, err := httpBody(sections["stats"]); err == nil {
 		for _, line := range strings.Split(string(b), "\n") {
 			k, v, ok := strings.Cut(strings.TrimSpace(line), ": ")
@@ -247,7 +271,9 @@ func parseEnvoy(out, suffix string) (*EnvoyClusters, error) {
 			}
 		}
 	}
+
 	res := &EnvoyClusters{}
+
 	for _, c := range cj.ClusterStatuses {
 		cl := EnvoyCluster{
 			Name:              c.Name,
@@ -281,16 +307,19 @@ func parseEnvoy(out, suffix string) (*EnvoyClusters, error) {
 					host.ActiveRequests = n
 				}
 			}
+
 			host.Flags = healthFlags(h.HealthStatus)
 			host.Healthy = len(host.Flags) == 0
 			host.Ejected = slices.Contains(host.Flags, "failed_outlier_check")
 			cl.Hosts = append(cl.Hosts, host)
 		}
+
 		slices.SortStableFunc(cl.Hosts, func(a, b EnvoyHost) int {
 			return cmp.Or(cmp.Compare(a.Instance, b.Instance), cmp.Compare(a.Address, b.Address))
 		})
 		res.Clusters = append(res.Clusters, cl)
 	}
+
 	if b, err := httpBody(sections["listeners"]); err == nil {
 		var lj struct {
 			ListenerStatuses []struct {
@@ -301,10 +330,12 @@ func parseEnvoy(out, suffix string) (*EnvoyClusters, error) {
 		if err := json.Unmarshal(b, &lj); err != nil {
 			return nil, fmt.Errorf("envoy /listeners: %w", err)
 		}
+
 		for _, l := range lj.ListenerStatuses {
 			res.Listeners = append(res.Listeners, EnvoyListener{Name: l.Name, Address: l.LocalAddress.String()})
 		}
 	}
+
 	return res, nil
 }
 
@@ -330,20 +361,25 @@ type envoyHostStat struct {
 // the discovery status when it is not HEALTHY.
 func healthFlags(status map[string]json.RawMessage) []string {
 	var flags []string
+
 	for k, raw := range status {
 		if k == "eds_health_status" {
 			var s string
 			if json.Unmarshal(raw, &s) == nil && s != "" && s != "HEALTHY" {
 				flags = append(flags, "eds_"+strings.ToLower(s))
 			}
+
 			continue
 		}
+
 		var b bool
 		if json.Unmarshal(raw, &b) == nil && b {
 			flags = append(flags, k)
 		}
 	}
+
 	slices.Sort(flags)
+
 	return flags
 }
 
@@ -359,26 +395,33 @@ func httpBody(raw string) ([]byte, error) {
 		if err != nil && (err != io.EOF || l == "") {
 			return "", err
 		}
+
 		return strings.TrimSuffix(strings.TrimSuffix(l, "\n"), "\r"), nil
 	}
+
 	statusLine, err := line()
 	if err != nil {
 		return nil, fmt.Errorf("no response")
 	}
+
 	proto, status, ok := strings.Cut(statusLine, " ")
 	if !ok || !strings.HasPrefix(proto, "HTTP/") {
 		return nil, fmt.Errorf("not an HTTP response: %q", statusLine)
 	}
+
 	code, _, _ := strings.Cut(status, " ")
 	chunked, length := false, -1
+
 	for {
 		h, err := line()
 		if err != nil {
 			return nil, fmt.Errorf("headers: %w", err)
 		}
+
 		if h == "" {
 			break
 		}
+
 		k, v, _ := strings.Cut(h, ":")
 		switch strings.ToLower(strings.TrimSpace(k)) {
 		case "transfer-encoding":
@@ -387,7 +430,9 @@ func httpBody(raw string) ([]byte, error) {
 			length, _ = strconv.Atoi(strings.TrimSpace(v))
 		}
 	}
+
 	var body []byte
+
 	switch {
 	case chunked:
 		for {
@@ -395,19 +440,25 @@ func httpBody(raw string) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("chunk size: %w", err)
 			}
+
 			sz, _, _ = strings.Cut(sz, ";") // chunk extensions
+
 			n, err := strconv.ParseInt(strings.TrimSpace(sz), 16, 64)
 			if err != nil || n < 0 {
 				return nil, fmt.Errorf("chunk size %q", sz)
 			}
+
 			if n == 0 {
 				break
 			}
+
 			chunk := make([]byte, n)
 			if _, err := io.ReadFull(r, chunk); err != nil {
 				return nil, fmt.Errorf("chunk: %w", err)
 			}
+
 			body = append(body, chunk...)
+
 			if end, err := line(); err != nil || end != "" {
 				return nil, fmt.Errorf("chunk of %d bytes not followed by a line end", n)
 			}
@@ -422,9 +473,11 @@ func httpBody(raw string) ([]byte, error) {
 			return nil, err
 		}
 	}
+
 	if code != "200" {
 		return nil, fmt.Errorf("%s: %s", status, strings.TrimSpace(string(body)))
 	}
+
 	return body, nil
 }
 
@@ -486,21 +539,27 @@ func (e *Engine) PgBouncerPools(ctx context.Context, req ExploreRequest) (*PgBou
 		if err != nil {
 			return nil, err
 		}
+
 		return e.pgbouncerInfra(svc, run)
 	}
+
 	_, sc, inst, run, err := e.exploreSidecar(ctx, req, spec.SidecarPgBouncer)
 	if err != nil {
 		return nil, err
 	}
+
 	pb := sc.Sidecar.PgBouncer
+
 	out, err := run("sh", "-c", pgbouncerScript, "bb-pgbouncer", strconv.Itoa(pb.Port))
 	if err != nil {
 		return nil, err
 	}
+
 	pools, err := parsePgBouncer(string(out))
 	if err != nil {
 		return nil, err
 	}
+
 	return &PgBouncerPools{Sidecar: sc.Name, App: inst.Name, Service: pb.Service, PoolMode: pb.PoolMode, PoolSize: pb.PoolSize, Port: pb.Port, Pools: pools}, nil
 }
 
@@ -509,27 +568,35 @@ func (e *Engine) PgBouncerPools(ctx context.Context, req ExploreRequest) (*PgBou
 // database is left out: it is the console this explorer used.
 func parsePgBouncer(out string) ([]PgBouncerPool, error) {
 	sections := splitSections(out)
+
 	pools, err := tsvRows(sections["pools"], "database", "user")
 	if err != nil {
 		return nil, fmt.Errorf("SHOW POOLS: %w", err)
 	}
+
 	stats, err := tsvRows(sections["stats"], "database")
 	if err != nil {
 		return nil, fmt.Errorf("SHOW STATS: %w", err)
 	}
+
 	byDB := map[string]map[string]string{}
 	for _, s := range stats {
 		byDB[s["database"]] = s
 	}
+
 	num := func(row map[string]string, col string) int64 {
 		n, _ := strconv.ParseInt(row[col], 10, 64)
+
 		return n
 	}
+
 	var res []PgBouncerPool
+
 	for _, p := range pools {
 		if p["database"] == "pgbouncer" {
 			continue
 		}
+
 		s := byDB[p["database"]]
 		res = append(res, PgBouncerPool{
 			Database:       p["database"],
@@ -550,19 +617,24 @@ func parsePgBouncer(out string) ([]PgBouncerPool, error) {
 			AvgWaitMicros:  num(s, "avg_wait_time"),
 		})
 	}
+
 	return res, nil
 }
 
 // tsvRows parses psql's unaligned, tab-separated output: a header line,
 // then one line per row. Every column in need must be in the header.
 func tsvRows(out string, need ...string) ([]map[string]string, error) {
-	var header []string
-	var rows []map[string]string
+	var (
+		header []string
+		rows   []map[string]string
+	)
+
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			continue
 		}
+
 		f := strings.Split(line, "\t")
 		if header == nil {
 			header = f
@@ -571,18 +643,24 @@ func tsvRows(out string, need ...string) ([]map[string]string, error) {
 					return nil, fmt.Errorf("no %s column in %q", n, line)
 				}
 			}
+
 			continue
 		}
+
 		row := map[string]string{}
+
 		for i, h := range header {
 			if i < len(f) {
 				row[h] = f[i]
 			}
 		}
+
 		rows = append(rows, row)
 	}
+
 	if header == nil {
 		return nil, fmt.Errorf("no output")
 	}
+
 	return rows, nil
 }

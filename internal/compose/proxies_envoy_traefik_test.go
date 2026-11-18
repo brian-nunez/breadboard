@@ -17,6 +17,7 @@ import (
 func proxyLabOf(typ string) *spec.Spec {
 	s := proxyLab()
 	s.Services[1].Type = typ
+
 	return s
 }
 
@@ -37,6 +38,7 @@ func TestTraefikAllModesGolden(t *testing.T) {
 func TestTraefikUserFileReplacesTheRoutes(t *testing.T) {
 	s := proxyLabOf("traefik")
 	s.Services[1].File = "edge/dynamic.yml"
+
 	b := renderWith(t, s, secrets.Inline, map[string]string{"edge/dynamic.yml": "# mine\n"})
 	for path, mine := range map[string]bool{"config/edge/dynamic.yml": true, "config/edge/traefik.yml": false, "config/edge/tls.yml": false} {
 		f, ok := b.File(path)
@@ -44,6 +46,7 @@ func TestTraefikUserFileReplacesTheRoutes(t *testing.T) {
 			t.Errorf("%s: present %v, replaced %v, want replaced %v", path, ok, !mine, mine)
 		}
 	}
+
 	f, _ := b.File(ComposeFile)
 	for _, mount := range []string{
 		"./config/edge/dynamic.yml:/etc/bb/traefik/dynamic.yml:ro",
@@ -54,6 +57,7 @@ func TestTraefikUserFileReplacesTheRoutes(t *testing.T) {
 			t.Errorf("compose lacks mount %s", mount)
 		}
 	}
+
 	if strings.Contains(string(f.Data), "docker.sock") {
 		t.Error("Traefik mounts the Docker socket")
 	}
@@ -85,21 +89,27 @@ func TestTraefikStaticFileGolden(t *testing.T) {
 	golden(t, "traefik-static", b)
 
 	gen := renderWith(t, proxyLabOf("traefik"), secrets.Inline, nil)
+
 	for _, name := range []string{"dynamic.yml", "tls.yml"} {
 		mine, _ := b.File("config/edge/" + name)
+
 		want, _ := gen.File("config/edge/" + name)
 		if !bytes.Equal(mine.Data, want.Data) {
 			t.Errorf("%s changed with a static_file", name)
 		}
 	}
+
 	f, _ := b.File("config/edge/traefik.yml")
+
 	var doc map[string]any
 	if err := yaml.Unmarshal(f.Data, &doc); err != nil {
 		t.Fatalf("merged traefik.yml is not YAML: %v", err)
 	}
+
 	if lvl := doc["log"].(map[string]any)["level"]; lvl != "DEBUG" {
 		t.Errorf("log.level = %v, want DEBUG", lvl)
 	}
+
 	for _, key := range []string{"entryPoints", "providers", "api", "ping", "global", "accessLog", "metrics", "tracing"} {
 		if _, ok := doc[key]; !ok {
 			t.Errorf("merged traefik.yml lacks %s", key)
@@ -109,6 +119,7 @@ func TestTraefikStaticFileGolden(t *testing.T) {
 	if hash(t, b, "edge") == hash(t, gen, "edge") {
 		t.Error("the static_file does not change the config hash")
 	}
+
 	edited := renderWith(t, s, secrets.Inline, map[string]string{"edge/static.yml": strings.Replace(traefikStatic, "0.5", "1.0", 1)})
 	if hash(t, edited, "edge") == hash(t, b, "edge") {
 		t.Error("an edit to the static_file does not change the config hash")
@@ -118,17 +129,21 @@ func TestTraefikStaticFileGolden(t *testing.T) {
 func TestTraefikStaticFileErrors(t *testing.T) {
 	s := proxyLabOf("traefik")
 	s.Services[1].StaticFile = "edge/static.yml"
+
 	m, err := model.Resolve(s, "bb.internal")
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	render := func(content string) error {
 		_, err := renderModelErr(m, secrets.Inline, func(p string) ([]byte, error) {
 			if p != "edge/static.yml" {
 				t.Fatalf("read %s", p)
 			}
+
 			return []byte(content), nil
 		})
+
 		return err
 	}
 	for _, tc := range []struct{ content, want string }{
@@ -158,6 +173,7 @@ func TestTraefikStaticFileErrors(t *testing.T) {
 			t.Errorf("%q: error %v, want one containing %q", tc.content, err, tc.want)
 		}
 	}
+
 	_, err = renderModelErr(m, secrets.Inline, func(string) ([]byte, error) { return nil, errors.New("open edge/static.yml: no such file") })
 	if err == nil || !strings.Contains(err.Error(), "edge: static_file: open edge/static.yml") {
 		t.Errorf("missing file: %v", err)

@@ -13,6 +13,7 @@ import (
 
 func TestNginxConfigShapes(t *testing.T) {
 	e, _ := Lookup("nginx")
+
 	cfg := string(nginxConfig(haproxyServer()))
 	for _, want := range []string{
 		"listen 8443 ssl;",
@@ -39,6 +40,7 @@ func TestNginxConfigShapes(t *testing.T) {
 			t.Errorf("config lacks %q:\n%s", want, cfg)
 		}
 	}
+
 	if strings.Contains(cfg, "    health_check") {
 		t.Error("the config uses health_check, which is NGINX Plus only")
 	}
@@ -49,27 +51,33 @@ func TestNginxConfigShapes(t *testing.T) {
 	// One upstream takes every request: no prefix routing or stream block.
 	one := haproxyServer()
 	one.Upstreams = one.Upstreams[:1]
+
 	cfg = string(nginxConfig(one))
 	if strings.Contains(cfg, "location /web/") || strings.Contains(cfg, "stream {") || strings.Count(cfg, "location / {") != 1 {
 		t.Errorf("a single upstream routes by path or listens for passthrough:\n%s", cfg)
 	}
 	// No upstream: the proxy still starts and answers 503.
 	none := haproxyServer()
+
 	none.Upstreams = nil
 	if cfg := string(nginxConfig(none)); strings.Contains(cfg, "upstream be_") || !strings.Contains(cfg, "return 503;") {
 		t.Errorf("a proxy without upstreams:\n%s", cfg)
 	}
+
 	c := e.Server(haproxyServer())
 	if h := strings.Join(c.Health.Test, " "); !strings.Contains(h, "--cacert "+CAFile) || !strings.Contains(h, "127.0.0.1:8404/healthz") || !strings.Contains(h, "-X TRACE") {
 		t.Errorf("health check = %v", c.Health.Test)
 	}
+
 	if e.DataPath != "" {
 		t.Error("a proxy has a data volume")
 	}
+
 	info, _ := Types("nginx")
 	if info.Proxy == nil || len(info.Proxy.Modes) != 3 || !info.Proxy.HTTP || !info.HTTPS {
 		t.Errorf("type info = %+v", info)
 	}
+
 	if got := info.Env("edge", false); len(got) != 2 || got[0] != "EDGE_URL" || got[1] != "EDGE_PASSTHROUGH_ADDR" {
 		t.Errorf("Env = %v", got)
 	}
@@ -82,20 +90,26 @@ func TestNginxConfigChecks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("needs Docker")
 	}
+
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Skip("Docker is not available")
 	}
+
 	t.Parallel()
+
 	e, _ := Lookup("nginx")
 	now := time.Now()
+
 	ca, err := pki.NewCA("bb.internal", now)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	leaf, err := ca.Issue(pki.LeafRequest{DNSNames: []string{"edge.bb.internal"}, Identity: pki.Identity("bb.internal", "lab", "edge")}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	one, none := haproxyServer(), haproxyServer()
 	one.Upstreams, none.Upstreams = one.Upstreams[:1], nil
 	dir := t.TempDir()
@@ -108,6 +122,7 @@ func TestNginxConfigChecks(t *testing.T) {
 		"config/empty.conf": nginxConfig(none),
 	}
 	writeTree(t, dir, files)
+
 	for _, cfg := range []string{"all.conf", "one.conf", "empty.conf"} {
 		// --network none: the upstream names cannot resolve, as when the
 		// backends start after the proxy.
@@ -125,15 +140,18 @@ func TestNginxConfigChecks(t *testing.T) {
 // mount read-only.
 func writeTree(t *testing.T, dir string, files map[string][]byte) {
 	t.Helper()
+
 	for p, data := range files {
 		full := filepath.Join(dir, filepath.FromSlash(p))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		if err := os.WriteFile(full, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

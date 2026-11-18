@@ -127,10 +127,12 @@ func (s *Server) addSpecTools() {
 		if err != nil {
 			return initOut{}, err
 		}
+
 		res, err := s.eng.Init(ctx, core.InitRequest{Dir: dir, Name: in.Name})
 		if err != nil {
 			return initOut{}, err
 		}
+
 		return initOut{Dir: res.Dir, Name: res.Name, SpecCreated: res.SpecCreated, StateCreated: res.StateCreated, HomeCreated: res.HomeCreated, CACreated: res.CACreated, CAPath: res.CAPath}, nil
 	})
 
@@ -142,10 +144,12 @@ func (s *Server) addSpecTools() {
 		if err != nil {
 			return addOut{}, err
 		}
+
 		res, err := s.eng.AddService(ctx, core.AddServiceRequest{Dir: dir, Type: in.Type, Name: in.Name})
 		if err != nil {
 			return addOut{}, err
 		}
+
 		return addOut{Name: res.Name, Type: res.Type}, nil
 	})
 
@@ -157,18 +161,22 @@ func (s *Server) addSpecTools() {
 		if err != nil {
 			return addAppOut{}, err
 		}
+
 		res, err := s.eng.AddApp(ctx, core.AddAppRequest{Dir: dir, Name: in.Name, Uses: in.Uses, Path: in.Path})
 		if err != nil {
 			return addAppOut{}, err
 		}
+
 		out := addAppOut{Name: res.Name, Dir: res.Dir, Command: res.Command, Files: orEmpty(res.Files), Uses: []appUse{}}
 		for _, u := range res.Uses {
 			au := appUse{Service: u.Service, Type: u.Type, Title: u.Title, Plaintext: u.Plaintext, Env: []envVar{}}
 			for _, v := range u.Env {
 				au.Env = append(au.Env, envVarView(v))
 			}
+
 			out.Uses = append(out.Uses, au)
 		}
+
 		return out, nil
 	})
 
@@ -180,10 +188,12 @@ func (s *Server) addSpecTools() {
 		if err != nil {
 			return removeOut{}, err
 		}
+
 		res, err := s.eng.RemoveService(ctx, core.RemoveServiceRequest{Dir: dir, Name: in.Name})
 		if err != nil {
 			return removeOut{}, err
 		}
+
 		return removeOut{Name: res.Name, Kind: res.Kind}, nil
 	})
 
@@ -195,11 +205,14 @@ func (s *Server) addSpecTools() {
 		if err != nil {
 			return applyStarterOut{}, err
 		}
+
 		p := newProgress(ctx, req)
+
 		res, err := s.eng.ApplyStarter(ctx, core.ApplyStarterRequest{Dir: dir, ID: in.ID, Target: in.Target, Events: p.sink})
 		if err != nil {
 			return applyStarterOut{}, err
 		}
+
 		return applyStarterOut{
 			Dir: res.Dir, Written: orEmpty(res.Written), Unchanged: orEmpty(res.Unchanged), Conflicts: orEmpty(res.Conflicts),
 			AddedServices: orEmpty(res.AddedServices), AddedApps: orEmpty(res.AddedApps), ExistingApps: orEmpty(res.ExistingApps),
@@ -215,10 +228,12 @@ func (s *Server) addSpecTools() {
 		if err != nil {
 			return migrateOut{}, err
 		}
+
 		res, err := s.eng.Migrate(ctx, core.MigrateRequest{Dir: dir})
 		if err != nil {
 			return migrateOut{}, err
 		}
+
 		return migrateOut{From: res.From, To: res.To, Changed: res.Changed}, nil
 	})
 
@@ -230,6 +245,7 @@ func (s *Server) addSpecTools() {
 		if err != nil {
 			return configSetOut{}, err
 		}
+
 		return configSetOut{Setting: settingView(res.Setting), OverriddenBy: res.OverriddenBy}, nil
 	})
 
@@ -241,17 +257,21 @@ func (s *Server) addSpecTools() {
 		if err != nil {
 			return exportOut{}, err
 		}
+
 		out := ""
 		if in.Out != "" {
 			if out, err = s.dir(in.Out); err != nil {
 				return exportOut{}, err
 			}
 		}
+
 		p := newProgress(ctx, req)
+
 		res, err := s.eng.ExportCompose(ctx, core.ExportComposeRequest{Dir: dir, Out: out, Secrets: in.Secrets, Events: p.sink})
 		if err != nil {
 			return exportOut{}, err
 		}
+
 		return exportOut{Dir: res.Dir, Files: orEmpty(res.Files), Events: p.list()}, nil
 	})
 }

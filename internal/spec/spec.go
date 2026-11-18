@@ -78,6 +78,7 @@ func (u Upstream) Route() string {
 	if u.Name != "" {
 		return u.Name
 	}
+
 	return u.Service
 }
 
@@ -86,6 +87,7 @@ func (u Upstream) Mode() string {
 	if u.TLS.Mode == "" {
 		return TLSOn
 	}
+
 	return u.TLS.Mode
 }
 
@@ -94,6 +96,7 @@ func (u Upstream) Mode() string {
 // confines its plaintext port to its private segment.
 func TerminateTargets(s *Spec) map[string]bool {
 	out := map[string]bool{}
+
 	for _, svc := range s.Services {
 		for _, u := range svc.Upstreams {
 			if _, ok := s.App(u.Service); ok && u.Mode() == TLSOff {
@@ -101,6 +104,7 @@ func TerminateTargets(s *Spec) map[string]bool {
 			}
 		}
 	}
+
 	return out
 }
 
@@ -154,9 +158,11 @@ func (a App) HostPort() (int, bool) {
 	if a.Host == nil {
 		return 0, false
 	}
+
 	if a.Host.Port != 0 {
 		return a.Host.Port, true
 	}
+
 	return a.TLSPort()
 }
 
@@ -203,6 +209,7 @@ func (s *Spec) Service(name string) (Service, bool) {
 	if i < 0 {
 		return Service{}, false
 	}
+
 	return s.Services[i], true
 }
 
@@ -212,17 +219,20 @@ func (s *Spec) App(name string) (App, bool) {
 	if i < 0 {
 		return App{}, false
 	}
+
 	return s.Apps[i], true
 }
 
 // ServicesOfType returns the names of infra services of a catalog type, in spec order.
 func (s *Spec) ServicesOfType(typ string) []string {
 	var out []string
+
 	for _, svc := range s.Services {
 		if svc.Type == typ {
 			out = append(out, svc.Name)
 		}
 	}
+
 	return out
 }
 
@@ -236,6 +246,7 @@ func (v Violation) String() string {
 	if v.Path == "" {
 		return v.Message
 	}
+
 	return v.Path + ": " + v.Message
 }
 
@@ -249,6 +260,7 @@ func (e *ValidationError) Error() string {
 	for i, v := range e.Violations {
 		lines[i] = v.String()
 	}
+
 	return fmt.Sprintf("%s:\n  %s", errs.ErrValidation, strings.Join(lines, "\n  "))
 }
 
@@ -260,6 +272,7 @@ func violations(vs []Violation) error {
 	if len(vs) == 0 {
 		return nil
 	}
+
 	return &ValidationError{Violations: vs}
 }
 

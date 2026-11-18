@@ -58,6 +58,7 @@ func (e *Engine) AddApp(ctx context.Context, req AddAppRequest) (*AddAppResult, 
 	if err != nil {
 		return nil, err
 	}
+
 	p, unlock, err := e.openLocked(req.Dir, "add app")
 	if err != nil {
 		return nil, err
@@ -68,9 +69,11 @@ func (e *Engine) AddApp(ctx context.Context, req AddAppRequest) (*AddAppResult, 
 	if !spec.IsServiceOK(name) {
 		return nil, invalidRequest("app name %q must be a lowercase DNS label (a-z, 0-9, -) of at most 63 characters", name)
 	}
+
 	if name == spec.HostRouterName {
 		return nil, invalidRequest("app name %s is reserved for the host router; choose another name", name)
 	}
+
 	if p.doc.HasName(name) {
 		return nil, fmt.Errorf("a service or app named %q %w in experiment.yaml; choose another name", name, ErrExists)
 	}
@@ -81,7 +84,9 @@ func (e *Engine) AddApp(ctx context.Context, req AddAppRequest) (*AddAppResult, 
 			uses = append(uses, s.Name)
 		}
 	}
+
 	var vs []string
+
 	for i, u := range uses {
 		at := fmt.Sprintf("uses[%d]", i)
 		switch _, isApp := p.spec.App(u); {
@@ -93,6 +98,7 @@ func (e *Engine) AddApp(ctx context.Context, req AddAppRequest) (*AddAppResult, 
 			vs = append(vs, fmt.Sprintf("%s: %s is not a service in experiment.yaml; add it with bb add <type> first", at, u))
 		}
 	}
+
 	if len(vs) > 0 {
 		return nil, invalidRequest("%s", strings.Join(vs, "; "))
 	}
@@ -101,19 +107,23 @@ func (e *Engine) AddApp(ctx context.Context, req AddAppRequest) (*AddAppResult, 
 	if req.Path != "" {
 		target = filepath.ToSlash(filepath.Clean(req.Path))
 	}
+
 	target = strings.TrimPrefix(target, "./")
 	if filepath.IsAbs(target) || target == ".." || strings.HasPrefix(target, "../") || target == "." ||
 		target == state.DirName || strings.HasPrefix(target, state.DirName+"/") || strings.ContainsAny(target, ":,\n") {
 		return nil, invalidRequest("app path %q must be a new directory inside the project, outside .bb", req.Path)
 	}
+
 	root := filepath.Join(p.Dir, filepath.FromSlash(target))
 	if err := resolvesInside(p.Dir, root); err != nil {
 		return nil, err
 	}
+
 	existed, err := checkNewDir(root)
 	if err != nil {
 		return nil, err
 	}
+
 	res := &AddAppResult{Name: name, Dir: "./" + target, Command: []string{name}}
 
 	// The spec change, validated before any file is written.
@@ -121,10 +131,12 @@ func (e *Engine) AddApp(ctx context.Context, req AddAppRequest) (*AddAppResult, 
 	for _, u := range uses {
 		app.Uses = append(app.Uses, spec.Use{Service: u})
 	}
+
 	doc := p.doc
 	if err := doc.AddApp(app); err != nil {
 		return nil, err
 	}
+
 	s, err := decodeAndValidate(doc)
 	if err != nil {
 		return nil, err
@@ -136,40 +148,51 @@ func (e *Engine) AddApp(ctx context.Context, req AddAppRequest) (*AddAppResult, 
 	if err != nil {
 		return nil, err
 	}
+
 	svc, ok := m.Service(name)
 	if !ok {
 		return nil, fmt.Errorf("app %s is missing from the resolved model", name)
 	}
+
 	masked := func(string) func(string) string { return func(string) string { return "" } }
+
 	groups, err := compose.AppEnv(m, svc, masked, nil)
 	if err != nil {
 		return nil, err
 	}
+
 	scaffold := starters.AppScaffold{Name: name, Experiment: s.Name}
 	for _, svc := range s.Services {
 		scaffold.Taken = append(scaffold.Taken, svc.Name)
 	}
+
 	for _, a := range s.Apps {
 		scaffold.Taken = append(scaffold.Taken, a.Name)
 	}
+
 	for _, g := range groups {
 		if g.Service == "" || g.Sidecar {
 			continue // Breadboard's own variables; the scaffold explains them in prose
 		}
+
 		infra, _ := m.Service(g.Service)
 		use := starters.AppUse{Service: g.Service, Type: infra.Entry.ID, Title: infra.Entry.Title, Summary: infra.Entry.Summary, Plaintext: g.Plaintext}
+
 		au := AppUse{Service: g.Service, Type: infra.Entry.ID, Title: infra.Entry.Title, Plaintext: g.Plaintext}
 		for _, v := range g.Vars {
 			value := v.Value
 			if v.Secret {
 				value = ""
 			}
+
 			use.Vars = append(use.Vars, starters.AppVar{Name: v.Name, Base: starters.EnvBase(g.Service, v.Name), Value: value, Secret: v.Secret})
 			au.Env = append(au.Env, EnvVar{Name: v.Name, Value: value, Secret: v.Secret})
 		}
+
 		scaffold.Uses = append(scaffold.Uses, use)
 		res.Uses = append(res.Uses, au)
 	}
+
 	files, err := starters.RenderApp(scaffold)
 	if err != nil {
 		return nil, err
@@ -183,21 +206,28 @@ func (e *Engine) AddApp(ctx context.Context, req AddAppRequest) (*AddAppResult, 
 			for _, en := range entries {
 				_ = os.RemoveAll(filepath.Join(root, en.Name()))
 			}
+
 			return
 		}
+
 		_ = os.RemoveAll(root)
 	}
 	if err := writeAppFiles(root, files); err != nil {
 		undo()
+
 		return nil, err
 	}
+
 	for _, f := range files {
 		res.Files = append(res.Files, filepath.ToSlash(filepath.Join(target, f.Path)))
 	}
+
 	if _, err := p.save(doc); err != nil {
 		undo()
+
 		return nil, err
 	}
+
 	return res, nil
 }
 
@@ -223,20 +253,25 @@ func resolvesInside(project, dir string) error {
 	if err != nil {
 		return err
 	}
+
 	stateDir := filepath.Join(base, state.DirName)
-	if real, err := filepath.EvalSymlinks(stateDir); err == nil {
-		stateDir = real
+	if resolved, err := filepath.EvalSymlinks(stateDir); err == nil {
+		stateDir = resolved
 	}
+
 	dest, err := canonical(dir)
 	if err != nil {
 		return err
 	}
+
 	if !within(base, dest) || dest == base {
 		return invalidRequest("app path %s leads outside the project through a symlink; choose a directory inside it", dir)
 	}
+
 	if within(stateDir, dest) {
 		return invalidRequest("app path %s leads into %s through a symlink; choose a directory outside it", dir, state.DirName)
 	}
+
 	return nil
 }
 
@@ -244,15 +279,19 @@ func resolvesInside(project, dir string) error {
 // and appends the part that does not exist yet.
 func canonical(dir string) (string, error) {
 	var rest []string
+
 	for d := dir; ; d = filepath.Dir(d) {
-		real, err := filepath.EvalSymlinks(d)
+		resolved, err := filepath.EvalSymlinks(d)
 		if err == nil {
 			slices.Reverse(rest)
-			return filepath.Join(append([]string{real}, rest...)...), nil
+
+			return filepath.Join(append([]string{resolved}, rest...)...), nil
 		}
+
 		if !isNotExist(err) || d == filepath.Dir(d) {
 			return "", err
 		}
+
 		rest = append(rest, filepath.Base(d))
 	}
 }
@@ -260,6 +299,7 @@ func canonical(dir string) (string, error) {
 // within reports whether path is root or below it.
 func within(root, path string) bool {
 	rel, err := filepath.Rel(root, path)
+
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
@@ -276,13 +316,16 @@ func checkNewDir(dir string) (existed bool, err error) {
 	case !fi.IsDir():
 		return false, fmt.Errorf("%s %w and is not a directory; choose another directory", dir, ErrExists)
 	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false, err
 	}
+
 	if len(entries) > 0 {
 		return true, fmt.Errorf("%s %w and has files, which bb add app never overwrites; choose another directory", dir, ErrExists)
 	}
+
 	return true, nil
 }
 
@@ -290,14 +333,17 @@ func checkNewDir(dir string) (existed bool, err error) {
 // missing.
 func writeAppFiles(root string, files []starters.File) error {
 	var errs []error
+
 	for _, f := range files {
 		path := filepath.Join(root, filepath.FromSlash(f.Path))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
+
 		if err := state.WriteFile(path, f.Data, 0o644); err != nil {
 			errs = append(errs, err)
 		}
 	}
+
 	return errors.Join(errs...)
 }

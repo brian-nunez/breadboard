@@ -20,6 +20,7 @@ func labBlock(k int) netip.Prefix {
 func labAddr(k, host int) string {
 	b := labBlock(k).Addr().As4()
 	b[3] = byte(host)
+
 	return netip.AddrFrom4(b).String()
 }
 
@@ -28,20 +29,25 @@ func plaintextLab(t *testing.T, name string) *harness {
 	t.Helper()
 	h := setupStarter(t)
 	h.add("postgres")
+
 	spec := h.read("experiment.yaml") + "  pooler:\n    path: ./producer-consumer\n    uses:\n      - service: postgres\n        tls: {mode: off, reason: terminate TLS at a pooler}\n"
 	if name != "lab" {
 		spec = strings.Replace(spec, "name: lab\n", "name: "+name+"\n", 1)
 	}
+
 	h.writeSpec(spec)
+
 	return h
 }
 
 func (h *harness) segment() string {
 	h.t.Helper()
+
 	ps, err := state.Project{Dir: h.dir}.LoadState()
 	if err != nil {
 		h.t.Fatal(err)
 	}
+
 	return ps.Segments["plain-postgres"]
 }
 
@@ -58,6 +64,7 @@ func TestLabsStartTheirSubnetSearchApart(t *testing.T) {
 			if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 				t.Fatal(err)
 			}
+
 			if want := fmt.Sprintf("10.213.%d.0/24", subnetStart(name)); h.segment() != want {
 				t.Fatalf("segment = %s, want %s", h.segment(), want)
 			}
@@ -71,9 +78,11 @@ func TestSubnetSearchWraps(t *testing.T) {
 	for i := subnetStart("lab"); i < 256; i++ {
 		h.rt.subnets = append(h.rt.subnets, runtime.Network{Subnet: netip.MustParsePrefix(fmt.Sprintf("10.213.%d.0/24", i)), ExperimentID: "someone-else"})
 	}
+
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	if h.segment() != "10.213.0.0/24" {
 		t.Fatalf("segment = %s, want the pool's first block after wrapping", h.segment())
 	}
@@ -84,25 +93,30 @@ func TestSubnetSearchWraps(t *testing.T) {
 func TestRetryAvoidsTheSubnetThatFailed(t *testing.T) {
 	h := plaintextLab(t, "lab")
 	ups := 0
+
 	h.rt.onUp = func() error {
 		ups++
 		if ups == 1 {
 			return fmt.Errorf("%w: docker compose up: exit status 1", runtime.ErrSubnetTaken)
 		}
+
 		return nil
 	}
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	if ups != 2 || h.segment() != labBlock(1).String() {
 		t.Fatalf("ups = %d, segment = %s; want a second up on %s", ups, h.segment(), labBlock(1))
 	}
 
 	// The next bb up starts afresh: the subnet it holds is kept.
 	ups = 1
+
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	if h.segment() != labBlock(1).String() {
 		t.Fatalf("segment moved to %s", h.segment())
 	}
@@ -113,18 +127,22 @@ func TestRetryAvoidsTheSubnetThatFailed(t *testing.T) {
 func TestRetryKeepsASubnetItsOwnNetworkHolds(t *testing.T) {
 	h := plaintextLab(t, "lab")
 	ups := 0
+
 	h.rt.onUp = func() error {
 		ups++
 		if ups == 1 {
 			ps, _ := state.Project{Dir: h.dir}.LoadState()
 			h.rt.subnets = []runtime.Network{{Name: "bb-lab_plain-postgres", Subnet: labBlock(0), ExperimentID: ps.ExperimentID}}
+
 			return fmt.Errorf("%w: docker compose up: exit status 1", runtime.ErrSubnetTaken)
 		}
+
 		return nil
 	}
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	if ups != 2 || h.segment() != labBlock(0).String() {
 		t.Fatalf("ups = %d, segment = %s; want %s kept", ups, h.segment(), labBlock(0))
 	}
@@ -137,18 +155,23 @@ func TestStoredSubnetIsKept(t *testing.T) {
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	p := state.Project{Dir: h.dir}
+
 	ps, err := p.LoadState()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	ps.Segments["plain-postgres"] = "10.213.0.0/24"
 	if err := p.SaveState(ps, "test"); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	if h.segment() != "10.213.0.0/24" {
 		t.Fatalf("segment = %s, want the stored subnet kept", h.segment())
 	}

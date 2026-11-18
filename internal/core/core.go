@@ -122,43 +122,54 @@ func New(opts Options) (*Engine, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		e.home = state.Home{Dir: dir}
 	}
+
 	if e.rt == nil {
 		e.rt = runtime.New()
 	}
+
 	if e.now == nil {
 		e.now = time.Now
 	}
+
 	if e.version == "" {
 		e.version = buildVersion()
 	}
+
 	if e.systemRoots == nil {
 		e.systemRoots = hostRoots
 	}
+
 	if e.healthTimeout == 0 {
 		e.healthTimeout = 5 * time.Minute
 	}
+
 	if e.pollInterval == 0 {
 		e.pollInterval = 2 * time.Second
 	}
+
 	if e.portFree == nil {
 		e.portFree = loopbackPortFree
 	}
+
 	if e.startupSettle == 0 {
 		e.startupSettle = 5 * time.Second
 	}
+
 	return e, nil
 }
 
 // EventKind classifies progress events.
 type EventKind string
 
+// The kinds of progress event.
 const (
 	EventStep    EventKind = "step"    // a pipeline step started
 	EventHealth  EventKind = "health"  // a service's health changed
 	EventWarning EventKind = "warning" // something the user should know
-	EventInfo    EventKind = "info"
+	EventInfo    EventKind = "info"    // general progress information
 )
 
 // Event is one progress report.
@@ -194,6 +205,7 @@ func (e *Engine) Version() VersionInfo {
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		info.GoVersion = bi.GoVersion
 	}
+
 	return info
 }
 
@@ -202,6 +214,7 @@ func buildVersion() string {
 	if !ok || bi.Main.Version == "" || bi.Main.Version == "(devel)" {
 		return "devel"
 	}
+
 	return bi.Main.Version
 }
 
@@ -220,6 +233,7 @@ func hostRoots() []byte {
 			return data
 		}
 	}
+
 	return nil
 }
 

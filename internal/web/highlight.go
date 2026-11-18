@@ -27,19 +27,26 @@ func highlightGo(code string) []string {
 	src := []byte(code)
 	fset := token.NewFileSet()
 	file := fset.AddFile("", fset.Base(), len(src))
+
 	var s scanner.Scanner
 	s.Init(file, src, nil, scanner.ScanComments)
 
 	type segment struct{ class, text string }
+
 	var segs []segment
+
 	last := 0
+
 	for {
 		pos, tok, lit := s.Scan()
 		if tok == token.EOF {
 			break
 		}
+
 		off := file.Offset(pos)
+
 		var class string
+
 		switch {
 		case tok.IsKeyword():
 			class, lit = goKeywordClass, tok.String()
@@ -59,24 +66,31 @@ func highlightGo(code string) []string {
 		if class == "" || lit == "" || off < last || !strings.HasPrefix(code[off:], lit) {
 			continue
 		}
+
 		if off > last {
 			segs = append(segs, segment{"", code[last:off]})
 		}
+
 		segs = append(segs, segment{class, lit})
 		last = off + len(lit)
 	}
+
 	if last < len(code) {
 		segs = append(segs, segment{"", code[last:]})
 	}
 
-	var lines []string
-	var b strings.Builder
+	var (
+		lines []string
+		b     strings.Builder
+	)
+
 	for _, sg := range segs {
 		for i, part := range strings.Split(sg.text, "\n") {
 			if i > 0 {
 				lines = append(lines, b.String())
 				b.Reset()
 			}
+
 			switch {
 			case part == "":
 			case sg.class == "":
@@ -86,5 +100,6 @@ func highlightGo(code string) []string {
 			}
 		}
 	}
+
 	return append(lines, b.String())
 }

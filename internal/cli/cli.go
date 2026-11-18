@@ -70,43 +70,59 @@ func Run(ctx context.Context, eng *core.Engine, args []string, stdout, stderr io
 	global := flag.NewFlagSet("bb", flag.ContinueOnError)
 	global.SetOutput(io.Discard)
 	global.StringVar(&c.dir, "C", "", "run as if bb was started in `dir`")
+
 	if err := global.Parse(args); err != nil {
-		fmt.Fprintf(stderr, "bb: %v\n\n", err)
+		_, _ = fmt.Fprintf(stderr, "bb: %v\n\n", err)
 		c.usage(stderr)
+
 		return exitUsage
 	}
+
 	args = global.Args()
 	if len(args) == 0 {
 		c.usage(stdout)
+
 		return exitOK
 	}
+
 	name, rest := args[0], args[1:]
 	if name == "-h" || name == "--help" {
 		c.usage(stdout)
+
 		return exitOK
 	}
+
 	for _, cmd := range commands {
 		if cmd.name != name {
 			continue
 		}
+
 		err := cmd.run(c, rest)
 		if err == nil {
 			return exitOK
 		}
+
 		var ue usageError
 		if errors.As(err, &ue) {
-			fmt.Fprintf(stderr, "bb %s: %s\nusage: bb %s %s\n", cmd.name, ue.msg, cmd.name, cmd.args)
+			_, _ = fmt.Fprintf(stderr, "bb %s: %s\nusage: bb %s %s\n", cmd.name, ue.msg, cmd.name, cmd.args)
+
 			return exitUsage
 		}
+
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprintf(stdout, "usage: bb %s %s\n\n%s\n", cmd.name, cmd.args, cmd.summary)
+			_, _ = fmt.Fprintf(stdout, "usage: bb %s %s\n\n%s\n", cmd.name, cmd.args, cmd.summary)
+
 			return exitOK
 		}
+
 		c.printError(err)
+
 		return exitError
 	}
-	fmt.Fprintf(stderr, "bb: unknown command %q\n\n", name)
+
+	_, _ = fmt.Fprintf(stderr, "bb: unknown command %q\n\n", name)
 	c.usage(stderr)
+
 	return exitUsage
 }
 
@@ -117,48 +133,58 @@ func (e usageError) Error() string { return e.msg }
 func usagef(format string, args ...any) error { return usageError{fmt.Sprintf(format, args...)} }
 
 func (c *cli) usage(w io.Writer) {
-	fmt.Fprintln(w, "bb (Breadboard): a local lab for real system design.")
-	fmt.Fprintln(w, "\nusage: bb [-C dir] <command> [arguments]")
-	fmt.Fprintln(w, "\ncommands:")
+	_, _ = fmt.Fprintln(w, "bb (Breadboard): a local lab for real system design.")
+	_, _ = fmt.Fprintln(w, "\nusage: bb [-C dir] <command> [arguments]")
+	_, _ = fmt.Fprintln(w, "\ncommands:")
+
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	for _, cmd := range commands {
-		fmt.Fprintf(tw, "  %s\t%s\n", cmd.name, cmd.summary)
+		_, _ = fmt.Fprintf(tw, "  %s\t%s\n", cmd.name, cmd.summary)
 	}
-	tw.Flush()
-	fmt.Fprintln(w, "\nRun bb help <command> for its arguments.")
+
+	_ = tw.Flush()
+	_, _ = fmt.Fprintln(w, "\nRun bb help <command> for its arguments.")
 }
 
 func (c *cli) help(args []string) error {
 	if len(args) == 0 {
 		c.usage(c.out)
+
 		return nil
 	}
+
 	for _, cmd := range commands {
 		if cmd.name == args[0] {
-			fmt.Fprintf(c.out, "usage: bb %s %s\n\n%s\n", cmd.name, cmd.args, cmd.summary)
+			_, _ = fmt.Fprintf(c.out, "usage: bb %s %s\n\n%s\n", cmd.name, cmd.args, cmd.summary)
+
 			return nil
 		}
 	}
+
 	return usagef("unknown command %q", args[0])
 }
 
 func (c *cli) printError(err error) {
 	var ve *core.ValidationError
 	if errors.As(err, &ve) {
-		fmt.Fprintln(c.errOut, "bb: experiment.yaml is invalid:")
+		_, _ = fmt.Fprintln(c.errOut, "bb: experiment.yaml is invalid:")
+
 		for _, v := range ve.Violations {
-			fmt.Fprintf(c.errOut, "  %s\n", v)
+			_, _ = fmt.Fprintf(c.errOut, "  %s\n", v)
 		}
+
 		return
 	}
-	fmt.Fprintf(c.errOut, "bb: %v\n", err)
+
+	_, _ = fmt.Fprintf(c.errOut, "bb: %v\n", err)
+
 	switch {
 	case errors.Is(err, core.ErrDockerUnavailable):
-		fmt.Fprintln(c.errOut, "Start Docker (Docker Desktop, OrbStack, or the docker daemon) and try again.")
+		_, _ = fmt.Fprintln(c.errOut, "Start Docker (Docker Desktop, OrbStack, or the docker daemon) and try again.")
 	case errors.Is(err, core.ErrBusy):
-		fmt.Fprintln(c.errOut, "Wait for it to finish, then try again.")
+		_, _ = fmt.Fprintln(c.errOut, "Wait for it to finish, then try again.")
 	case errors.Is(err, core.ErrNewerFormat):
-		fmt.Fprintln(c.errOut, "Upgrade bb: go install github.com/brian-nunez/breadboard/bb@latest")
+		_, _ = fmt.Fprintln(c.errOut, "Upgrade bb: go install github.com/brian-nunez/breadboard/bb@latest")
 	}
 }
 
@@ -168,21 +194,27 @@ func newFlagSet(name string) *flag.FlagSet { return flag.NewFlagSet(name, flag.C
 // arguments, as in `bb logs consumer -f`.
 func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	fs.SetOutput(io.Discard)
+
 	var positional []string
+
 	for {
 		if err := fs.Parse(args); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return nil, err
 			}
+
 			return nil, usagef("%v", err)
 		}
+
 		args = fs.Args()
 		if len(args) == 0 {
 			return positional, nil
 		}
+
 		if args[0] == "--" {
 			return append(positional, args[1:]...), nil
 		}
+
 		positional = append(positional, args[0])
 		args = args[1:]
 	}
@@ -193,8 +225,10 @@ func exactly(args []string, n int, what string) error {
 		if n == 0 {
 			return usagef("unexpected argument %q", args[0])
 		}
+
 		return usagef("expected %s", what)
 	}
+
 	return nil
 }
 
@@ -202,6 +236,7 @@ func atMost(args []string, n int) error {
 	if len(args) > n {
 		return usagef("unexpected argument %q", args[n])
 	}
+
 	return nil
 }
 
@@ -214,13 +249,13 @@ func (c *cli) events() core.EventSink {
 	return func(ev core.Event) {
 		switch ev.Kind {
 		case core.EventStep:
-			fmt.Fprintf(c.errOut, "==> %s\n", ev.Message)
+			_, _ = fmt.Fprintf(c.errOut, "==> %s\n", ev.Message)
 		case core.EventHealth:
-			fmt.Fprintf(c.errOut, "    %-14s %s\n", ev.Service, ev.Health)
+			_, _ = fmt.Fprintf(c.errOut, "    %-14s %s\n", ev.Service, ev.Health)
 		case core.EventWarning:
-			fmt.Fprintf(c.errOut, "warning: %s\n", ev.Message)
+			_, _ = fmt.Fprintf(c.errOut, "warning: %s\n", ev.Message)
 		default:
-			fmt.Fprintf(c.errOut, "    %s\n", ev.Message)
+			_, _ = fmt.Fprintf(c.errOut, "    %s\n", ev.Message)
 		}
 	}
 }
@@ -229,6 +264,7 @@ func plural(n int, one, many string) string {
 	if n == 1 {
 		return one
 	}
+
 	return many
 }
 
@@ -236,5 +272,6 @@ func join(items []string) string {
 	if len(items) == 0 {
 		return "-"
 	}
+
 	return strings.Join(items, ", ")
 }

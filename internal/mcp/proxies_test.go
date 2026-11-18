@@ -12,6 +12,7 @@ import (
 func TestProxiesAreVisible(t *testing.T) {
 	h := newHarness(t, false)
 	h.mustCall(t, "init", map[string]any{"name": "lab"})
+
 	spec := `version: 1
 name: lab
 services:
@@ -62,6 +63,7 @@ apps:
 	if err := os.WriteFile(filepath.Join(h.root, "experiment.yaml"), []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	st := h.mustCall(t, "status", nil)
 	for _, s := range st["services"].([]any) {
 		if s := s.(map[string]any); s["name"] == "edge" {
@@ -71,11 +73,14 @@ apps:
 			}
 		}
 	}
+
 	d := h.mustCall(t, "service_details", map[string]any{"service": "edge"})
+
 	ups := d["upstreams"].([]any)
 	if len(ups) != 3 {
 		t.Fatalf("upstreams = %v", ups)
 	}
+
 	if u := ups[2].(map[string]any); u["mode"] != "passthrough" || u["sni"] != "payments.bb.internal" || u["listen_port"] != 9443.0 {
 		t.Errorf("payments upstream = %v", u)
 	}
@@ -85,8 +90,10 @@ apps:
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		return b
 	}
+
 	h.rt.mu.Lock()
 	h.rt.exec = map[string][]byte{
 		"edge":   read("haproxy-stats.txt"),
@@ -99,22 +106,27 @@ apps:
 
 	hs := h.mustCall(t, "haproxy_stats", map[string]any{"service": "edge"})
 	be := hs["backends"].([]any)[0].(map[string]any)
+
 	sv := be["servers"].([]any)[0].(map[string]any)
 	if be["upstream"].(map[string]any)["mode"] != "on" || sv["instance"] != "web-1" || sv["total_sessions"] != 20.0 || sv["up"] != true {
 		t.Errorf("haproxy_stats backend = %v", be)
 	}
+
 	tr := h.mustCall(t, "traefik_routes", map[string]any{"service": "router"})
 	if len(tr["routers"].([]any)) != 4 || len(tr["services"].([]any)) != 3 {
 		t.Errorf("traefik_routes = %v", tr)
 	}
+
 	ng := h.mustCall(t, "nginx_status", map[string]any{"service": "front"})
 	if ng["requests"] != 205.0 || len(ng["upstreams"].([]any)) != 1 {
 		t.Errorf("nginx_status = %v", ng)
 	}
+
 	env := h.mustCall(t, "envoy_clusters", map[string]any{"service": "gw"})
 	if env["proxy"] != "gw" || env["sidecar"] != nil || len(env["clusters"].([]any)) != 3 {
 		t.Errorf("envoy_clusters on an infra Envoy = %v", env)
 	}
+
 	pb := h.mustCall(t, "pgbouncer_pools", map[string]any{"service": "pool"})
 	if pb["proxy"] != "pool" || pb["service"] != "postgres" || pb["port"] != 6432.0 {
 		t.Errorf("pgbouncer_pools on an infra pool = %v", pb)

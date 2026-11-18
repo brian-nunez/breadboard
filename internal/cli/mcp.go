@@ -17,16 +17,20 @@ var mcpTransport = func() sdk.Transport { return &sdk.StdioTransport{} }
 func (c *cli) mcpCmd(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	readOnly := fs.Bool("read-only", false, "expose only the tools that change nothing you own")
+
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
+
 	if err := exactly(pos, 0, ""); err != nil {
 		return err
 	}
+
 	srv, err := mcp.New(c.eng, mcp.Options{Dir: c.dir, ReadOnly: *readOnly})
 	if err != nil {
 		return err
 	}
+
 	return srv.Run(c.ctx, mcpTransport())
 }

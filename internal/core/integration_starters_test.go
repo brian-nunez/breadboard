@@ -27,41 +27,51 @@ func starterLab(t *testing.T, prefix string, ids ...string) (*Engine, string, st
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
 	})
+
 	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, id := range ids {
 		if _, err := eng.ApplyStarter(ctx, ApplyStarterRequest{Dir: dir, ID: id}); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	upHealthy(t, eng, dir)
+
 	return eng, dir, name
 }
 
 func upHealthy(t *testing.T, eng *Engine, dir string) {
 	t.Helper()
+
 	start := time.Now()
+
 	res, err := eng.Up(context.Background(), UpRequest{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, s := range res.Services {
 		if s.Health != HealthHealthy {
 			t.Fatalf("%s is %s", s.Name, s.Health)
 		}
 	}
+
 	t.Logf("up took %s", time.Since(start).Round(time.Second))
 }
 
 // eventually polls cond until it holds or timeout passes.
 func eventually(t *testing.T, timeout time.Duration, what string, cond func() bool) {
 	t.Helper()
+
 	deadline := time.Now().Add(timeout)
 	for !cond() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out after %s waiting for %s", timeout, what)
 		}
+
 		time.Sleep(time.Second)
 	}
 }
@@ -69,17 +79,20 @@ func eventually(t *testing.T, timeout time.Duration, what string, cond func() bo
 // matches returns the first capture group of re for every matching line.
 func matches(lines []string, re *regexp.Regexp) []string {
 	var out []string
+
 	for _, l := range lines {
 		if m := re.FindStringSubmatch(l); m != nil {
 			out = append(out, m[1])
 		}
 	}
+
 	return out
 }
 
 func psql(t *testing.T, experiment, query string) []string {
 	t.Helper()
 	out := docker(t, "exec", containerOf(t, experiment, "postgres"), "psql", "-U", "postgres", "-d", "app", "-tAc", query)
+
 	return strings.Fields(out)
 }
 
@@ -105,14 +118,19 @@ func TestIntegrationSinkToPostgres(t *testing.T) {
 	docker(t, "stop", containerOf(t, name, "sink-producer"))
 	want := matches(logsOf(t, eng, dir, "sink-producer"), produced)
 	slices.Sort(want)
+
 	var got []string
+
 	eventually(t, time.Minute, "the sink to catch up", func() bool {
 		got = psql(t, name, "select id from orders order by id")
+
 		return len(got) >= len(want)
 	})
+
 	if !slices.Equal(got, want) {
 		t.Fatalf("stored %d orders, produced %d\nstored:   %v\nproduced: %v", len(got), len(want), got, want)
 	}
+
 	t.Logf("produced %d orders; each stored exactly once across a sink crash", len(want))
 }
 
@@ -139,12 +157,15 @@ func TestIntegrationCacheInvalidation(t *testing.T) {
 		return len(matches(logsOf(t, eng, dir, "cache-writer"), updated)) >= n+3
 	})
 	docker(t, "stop", containerOf(t, name, "cache-writer"))
+
 	stopped := time.Now()
 	truth := map[string]string{}
+
 	for _, row := range psql(t, name, "select id || '=' || price_cents from products") {
 		id, price, _ := strings.Cut(row, "=")
 		truth[id] = price
 	}
+
 	skip := len(logsOf(t, eng, dir, "cache-reader"))
 
 	// The latest read of every product must show its current price, within a
@@ -155,21 +176,25 @@ func TestIntegrationCacheInvalidation(t *testing.T) {
 				lines := logsOf(t, eng, dir, app)
 				t.Logf("%s (last 15 lines):\n%s", app, strings.Join(lines[max(0, len(lines)-15):], "\n"))
 			}
+
 			t.Logf("database: %v", truth)
 		}
 	})
 	eventually(t, 12*time.Second, "the reader to serve current prices", func() bool {
 		lines := logsOf(t, eng, dir, "cache-reader")
 		latest := map[string]string{}
+
 		for _, m := range matches(lines[min(skip, len(lines)):], read) {
 			id, price, _ := strings.Cut(m, " price=")
 			latest[id] = price
 		}
+
 		for id, price := range truth {
 			if latest[id] != price {
 				return false
 			}
 		}
+
 		return true
 	})
 	t.Logf("reader matched the database %s after the last write", time.Since(stopped).Round(time.Second))
@@ -187,16 +212,20 @@ func TestIntegrationS3Compatible(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
 	})
+
 	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, "experiment.yaml"), []byte(fmt.Sprintf(
 		"version: 1\nname: %s\nservices:\n  s3:\n    type: s3-compatible\n    config:\n      buckets: uploads,reports\n  redis:\n    type: redis\n", name)), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	upHealthy(t, eng, dir)
 
 	s3 := containerOf(t, name, "s3")
+
 	list := docker(t, "exec", s3, "sh", "-c", `curl -sf --cacert /etc/bb/ca.pem --aws-sigv4 aws:amz:us-east-1:s3 --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" https://s3.bb.internal:8333/`)
 	for _, b := range []string{"<Name>uploads</Name>", "<Name>reports</Name>"} {
 		if !strings.Contains(list, b) {
@@ -218,8 +247,11 @@ func TestIntegrationS3Compatible(t *testing.T) {
 	// The probe depends on package downloads and short network timeouts, and
 	// failed once under a loaded full-suite run. A missing rejection is retried;
 	// a reachable internal port is never retried, since that is a real leak.
-	var out string
-	var problems []string
+	var (
+		out      string
+		problems []string
+	)
+
 	for attempt := 1; attempt <= 3; attempt++ {
 		out, _ = dockerMay("run", "--rm", "--network", "bb-"+name+"_default",
 			"-v", other+":/other:ro", "-v", filepath.Join(dir, ".bb", "runtime", "ca.pem")+":/ca.pem:ro",
@@ -227,21 +259,27 @@ func TestIntegrationS3Compatible(t *testing.T) {
 		if strings.Contains(out, "open ") {
 			t.Fatalf("internal SeaweedFS ports are reachable from another container:\n%s", out)
 		}
+
 		problems = nil
 		if !strings.Contains(out, "other-cert-rejected") {
 			problems = append(problems, "gRPC port 18333 accepted another service's certificate")
 		}
+
 		if !strings.Contains(out, "http: 400") && !strings.Contains(out, "http: 000") {
 			problems = append(problems, "plain HTTP to 8333 was not refused")
 		}
+
 		if !strings.HasSuffix(strings.TrimSpace(out), "1") {
 			problems = append(problems, "gRPC port 18333 accepted a client without a certificate")
 		}
+
 		if len(problems) == 0 {
 			return
 		}
+
 		t.Logf("probe attempt %d: %s\n%s", attempt, strings.Join(problems, "; "), out)
 	}
+
 	t.Errorf("%s:\n%s", strings.Join(problems, "; "), out)
 }
 
@@ -250,11 +288,15 @@ func TestIntegrationS3Compatible(t *testing.T) {
 // credential-free client downloads the exact bytes through a presigned URL.
 func TestIntegrationS3ObjectsBasics(t *testing.T) {
 	eng, dir, _ := starterLab(t, "objs", "s3/objects-basics")
+
 	var lines []string
+
 	eventually(t, time.Minute, "the walkthrough to finish", func() bool {
 		lines = logsOf(t, eng, dir, "objects")
+
 		return slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "done;") })
 	})
+
 	text := strings.Join(lines, "\n")
 	for _, want := range []string{
 		"listed key=notes/readme.txt",
@@ -266,6 +308,7 @@ func TestIntegrationS3ObjectsBasics(t *testing.T) {
 			t.Errorf("objects log lacks %q", want)
 		}
 	}
+
 	if strings.Contains(text, "listed key=notes/2026/") {
 		t.Error("the delimiter listing descended into notes/2026/")
 	}
@@ -282,18 +325,23 @@ func TestIntegrationSecondUpKeepsMounts(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
 	})
+
 	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := eng.AddService(ctx, AddServiceRequest{Dir: dir, Type: "redis"}); err != nil {
 		t.Fatal(err)
 	}
+
 	upHealthy(t, eng, dir)
 	id := containerOf(t, name, "redis")
 	upHealthy(t, eng, dir)
+
 	if again := containerOf(t, name, "redis"); again != id {
 		t.Fatal("the second up recreated an unchanged container; the test needs it kept")
 	}
+
 	for _, f := range []string{"/etc/bb/ca.pem", "/etc/bb/trust-bundle.pem", "/etc/bb/tls/tls.crt", "/etc/bb/tls/tls.key"} {
 		if out, err := dockerMay("exec", id, "test", "-s", f); err != nil {
 			t.Errorf("%s is missing in the running container after a second up: %v %s", f, err, out)
@@ -314,7 +362,9 @@ func TestIntegrationConsulServiceDiscovery(t *testing.T) {
 	if spec := readFile(t, filepath.Join(dir, "experiment.yaml")); !strings.Contains(spec, "register:") {
 		t.Fatalf("experiment.yaml has no register block:\n%s", spec)
 	}
+
 	called := regexp.MustCompile(`(called greeter at greeter\.bb\.internal:8443 \(1 healthy\): hello from greeter)`)
+
 	eventually(t, time.Minute, "the caller to reach the greeter through Consul", func() bool {
 		return len(matches(logsOf(t, eng, dir, "caller"), called)) > 0
 	})
@@ -322,16 +372,19 @@ func TestIntegrationConsulServiceDiscovery(t *testing.T) {
 	skip := len(logsOf(t, eng, dir, "caller"))
 	eventually(t, time.Minute, "Consul to stop returning the stopped greeter", func() bool {
 		lines := logsOf(t, eng, dir, "caller")
+
 		return slices.ContainsFunc(lines[min(skip, len(lines)):], func(l string) bool { return strings.Contains(l, "no healthy greeter instances") })
 	})
 }
 
 func readFile(t *testing.T, path string) string {
 	t.Helper()
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return string(data)
 }
 
@@ -340,6 +393,7 @@ func readFile(t *testing.T, path string) string {
 func TestIntegrationConsulSelfRegistration(t *testing.T) {
 	eng, dir, name := starterLab(t, "selfreg", "consul/self-registration")
 	called := regexp.MustCompile(`(called self-greeter at self-greeter\.bb\.internal:8443 \(1 healthy\): hello from self-greeter)`)
+
 	eventually(t, time.Minute, "the caller to reach the self-registered greeter", func() bool {
 		return len(matches(logsOf(t, eng, dir, "self-caller"), called)) > 0
 	})
@@ -347,6 +401,7 @@ func TestIntegrationConsulSelfRegistration(t *testing.T) {
 	skip := len(logsOf(t, eng, dir, "self-caller"))
 	eventually(t, time.Minute, "Consul to stop returning the stopped greeter", func() bool {
 		lines := logsOf(t, eng, dir, "self-caller")
+
 		return slices.ContainsFunc(lines[min(skip, len(lines)):], func(l string) bool { return strings.Contains(l, "no healthy self-greeter instances") })
 	})
 	// The service received SIGTERM and removed itself.
@@ -365,13 +420,16 @@ func TestIntegrationUpCatchesACrashAfterStart(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
 	})
+
 	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
 		t.Fatal(err)
 	}
+
 	app := filepath.Join(dir, "flaky")
 	if err := os.MkdirAll(app, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	for f, c := range map[string]string{
 		"go.mod":     "module flaky\n\ngo 1.27.4\n",
 		"main.go":    "package main\n\nimport (\n\t\"log\"\n\t\"time\"\n)\n\nfunc main() {\n\tlog.Print(\"started\")\n\ttime.Sleep(3 * time.Second)\n\tlog.Fatal(\"lost the database\")\n}\n",
@@ -381,14 +439,17 @@ func TestIntegrationUpCatchesACrashAfterStart(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
 	if err := os.WriteFile(filepath.Join(dir, "experiment.yaml"), []byte(fmt.Sprintf(
 		"version: 1\nname: %s\napps:\n  flaky:\n    path: ./flaky\n    command: [flaky]\n", name)), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	_, err := eng.Up(ctx, UpRequest{Dir: dir})
 	if !errors.Is(err, ErrUnhealthy) || !strings.Contains(err.Error(), "flaky restarted during startup") {
 		t.Fatalf("Up = %v, want flaky restarted during startup", err)
 	}
+
 	t.Logf("Up failed as it should: %v", err)
 }
 
@@ -396,35 +457,42 @@ func TestIntegrationUpCatchesACrashAfterStart(t *testing.T) {
 // against the pinned images, through docker exec of each one's own tools.
 func TestIntegrationExplorers(t *testing.T) {
 	eng, dir, name := starterLab(t, "explore", "consul/service-discovery")
+
 	ctx := context.Background()
 	for _, typ := range []string{"postgres", "redis"} {
 		if _, err := eng.AddService(ctx, AddServiceRequest{Dir: dir, Type: typ}); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	upHealthy(t, eng, dir)
 	docker(t, "exec", containerOf(t, name, "postgres"), "psql", "-U", "postgres", "-d", "app", "-c", "create table orders(id int); insert into orders select generate_series(1, 42);")
 	docker(t, "exec", containerOf(t, name, "redis"), "sh", "-c", `redis-cli --tls --cacert /etc/bb/ca.pem -h redis.bb.internal --no-auth-warning -a "$REDIS_PASSWORD" set product:apple 100 EX 600`)
 
 	req := func(s string) ExploreRequest { return ExploreRequest{Dir: dir, Service: s} }
+
 	pg, err := eng.PostgresTables(ctx, req("postgres"))
 	if err != nil || len(pg.Tables) != 1 || pg.Tables[0].Name != "orders" || pg.Tables[0].Rows != 42 || pg.Tables[0].Bytes == 0 {
 		t.Errorf("PostgresTables = %+v %v", pg, err)
 	}
+
 	keys, err := eng.RedisKeys(ctx, req("redis"))
 	if err != nil || keys.Total != 1 || len(keys.Keys) != 1 || keys.Keys[0].Key != "product:apple" || keys.Keys[0].Type != "string" || keys.Keys[0].TTL <= 0 {
 		t.Errorf("RedisKeys = %+v %v", keys, err)
 	}
+
 	eventually(t, time.Minute, "the greeter to pass its check in the catalog", func() bool {
 		cat, err := eng.ConsulCatalog(ctx, req("consul"))
 		if err != nil {
 			return false
 		}
+
 		for _, s := range cat.Services {
 			if s.Name == "greeter" && s.Passing == 1 {
 				return len(cat.Nodes) == 2
 			}
 		}
+
 		return false
 	})
 }
@@ -433,22 +501,27 @@ func TestIntegrationExplorers(t *testing.T) {
 // requests inside the pinned images.
 func TestIntegrationKafkaAndS3Explorers(t *testing.T) {
 	eng, dir, name := starterLab(t, "explore2", "kafka/producer-consumer")
+
 	ctx := context.Background()
 	if _, err := eng.AddService(ctx, AddServiceRequest{Dir: dir, Type: "s3-compatible"}); err != nil {
 		t.Fatal(err)
 	}
+
 	upHealthy(t, eng, dir)
 	eventually(t, time.Minute, "the consumer group to commit", func() bool {
 		k, err := eng.KafkaTopics(ctx, ExploreRequest{Dir: dir, Service: "kafka"})
 		if err != nil || len(k.Groups) == 0 {
 			return false
 		}
+
 		orders := k.Topics[0]
+
 		return orders.Name == "orders" && orders.Partitions == 3 && orders.Messages > 0 &&
 			k.Groups[0].Name == "orders-consumers" && k.Groups[0].Members == 1
 	})
 	docker(t, "exec", containerOf(t, name, "s3-compatible"), "sh", "-c",
 		`S="--aws-sigv4 aws:amz:us-east-1:s3 --user $AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY --cacert /etc/bb/ca.pem"; E=https://s3-compatible.bb.internal:8333; curl -sf $S -X PUT $E/media >/dev/null && echo hello > /tmp/x && curl -sf $S -T /tmp/x $E/media/x.txt`)
+
 	s3, err := eng.S3Buckets(ctx, ExploreRequest{Dir: dir, Service: "s3-compatible"})
 	if err != nil || len(s3.Buckets) != 1 || s3.Buckets[0].Name != "media" || s3.Buckets[0].Objects != 1 || s3.Buckets[0].Bytes != 6 {
 		t.Errorf("S3Buckets = %+v %v", s3, err)

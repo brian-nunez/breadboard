@@ -169,6 +169,7 @@ func Lookup(id string) (*Type, bool) {
 	if i < 0 {
 		return nil, false
 	}
+
 	return types[i], true
 }
 
@@ -177,6 +178,7 @@ func (t *Type) RenderSidecar(in Input) (Output, error) {
 	if t.Render == nil {
 		return Output{}, fmt.Errorf("sidecar type %s is not implemented yet", t.ID)
 	}
+
 	return t.Render(in)
 }
 
@@ -227,6 +229,7 @@ func consulAgent() *Type {
 			if r == nil || r.Entry == nil || r.Entry.Sidecar == nil {
 				return Output{}, fmt.Errorf("sidecar %s: no service registry to register with", in.Name)
 			}
+
 			c := r.Entry.Sidecar(catalog.Sidecar{
 				App:      in.App.Service,
 				AppFQDN:  in.App.FQDN,
@@ -241,6 +244,7 @@ func consulAgent() *Type {
 				uid := strconv.Itoa(TransparentAgentUID)
 				c.Environment = append(c.Environment, catalog.EnvVar{Name: "CONSUL_UID", Value: uid}, catalog.EnvVar{Name: "CONSUL_GID", Value: uid})
 			}
+
 			return Output{Container: c, Needs: []string{r.RegistryService}}, nil
 		},
 	}

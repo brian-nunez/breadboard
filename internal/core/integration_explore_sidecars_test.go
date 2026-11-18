@@ -34,40 +34,53 @@ func TestIntegrationEnvoyExplorer(t *testing.T) {
 	// knows every replica, then send traffic.
 	eventually(t, time.Minute, "Envoy to know all three replicas", func() bool {
 		res, err := eng.EnvoyClusters(ctx, ExploreRequest{Dir: dir, Service: "caller"})
+
 		return err == nil && len(res.Clusters) == 1 && len(res.Clusters[0].Hosts) == 3
 	})
+
 	if out, err := execIn(t, name, "caller", `probe hits "$WEB_URL" 30`); err != nil {
 		t.Fatalf("hits: %v\n%s", err, out)
 	}
+
 	res, err := eng.EnvoyClusters(ctx, ExploreRequest{Dir: dir, Service: "caller"})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if res.Sidecar != "caller-envoy" || len(res.Listeners) != 1 || res.Listeners[0].Address != "127.0.0.1:9001" {
 		t.Errorf("caller envoy = %+v", res)
 	}
+
 	c := res.Clusters[0]
 	if c.Name != "outbound_web" || c.Role != "outbound" || c.Target != "web" {
 		t.Fatalf("cluster = %+v", c)
 	}
-	var instances []string
-	var total int64
+
+	var (
+		instances []string
+		total     int64
+	)
+
 	for _, h := range c.Hosts {
 		instances = append(instances, h.Instance)
+
 		total += h.Requests
 		if !h.Healthy || h.Requests == 0 {
 			t.Errorf("host %+v: want healthy with traffic", h)
 		}
 	}
+
 	if !slices.Equal(instances, []string{"web-1", "web-2", "web-3"}) || total < 30 {
 		t.Errorf("hosts %v with %d requests", instances, total)
 	}
+
 	t.Logf("per replica: %+v", c.Hosts)
 
 	in, err := eng.EnvoyClusters(ctx, ExploreRequest{Dir: dir, Service: "web-2"})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(in.Clusters) != 1 || in.Clusters[0].Role != "inbound" || in.Clusters[0].Hosts[0].Address != "127.0.0.1:8080" || in.Clusters[0].Hosts[0].Instance != "web-2" {
 		t.Errorf("web-2 envoy = %+v", in)
 	}
@@ -95,16 +108,20 @@ apps:
 			t.Fatalf("query through PgBouncer: %v\n%s", err, out)
 		}
 	}
+
 	res, err := eng.PgBouncerPools(context.Background(), ExploreRequest{Dir: dir, Service: "db"})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if res.Sidecar != "db-pgbouncer" || res.Service != "postgres" || res.PoolMode != "session" || res.PoolSize != 4 || len(res.Pools) != 1 {
 		t.Fatalf("pools = %+v", res)
 	}
+
 	p := res.Pools[0]
 	if p.Database != "app" || p.PoolMode != "session" || p.Queries < 3 || p.ServersIdle+p.ServersUsed+p.ServersActive < 1 {
 		t.Errorf("app pool = %+v", p)
 	}
+
 	t.Logf("pool: %+v", p)
 }

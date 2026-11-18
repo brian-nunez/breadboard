@@ -12,11 +12,13 @@ import (
 // gatewayStarters are the registered wave D starters, the gw/ area.
 func gatewayStarters() []string {
 	var ids []string
+
 	for _, st := range starters.All() {
 		if strings.HasPrefix(st.ID, "gw/") {
 			ids = append(ids, st.ID)
 		}
 	}
+
 	return ids
 }
 
@@ -25,13 +27,16 @@ func TestGatewayDocsAreInSearch(t *testing.T) {
 	s := newServer(t)
 	cookie := map[string]string{"Cookie": signIn(t, s)}
 	index := s.get(t, "/search-index", cookie).Body.String()
+
 	tc, ok := findTech("api-gateways")
 	if !ok {
 		t.Fatal("docs section api-gateways is not registered")
 	}
+
 	if len(tc.Guides) != 7 {
 		t.Errorf("api-gateways has %d guides, want the 7 of the wave D design", len(tc.Guides))
 	}
+
 	for _, url := range append([]string{"/docs/api-gateways"}, guideURLs(tc)...) {
 		if !strings.Contains(index, `"`+url+`"`) {
 			t.Errorf("search has no %s", url)
@@ -45,40 +50,50 @@ func TestGatewayGuidesLinkStartersAndDocs(t *testing.T) {
 	s := newServer(t)
 	cookie := map[string]string{"Cookie": signIn(t, s)}
 	tc, _ := findTech("api-gateways")
+
 	gw := gatewayStarters()
 	if len(gw) != 10 {
 		t.Errorf("%d gw/ starters are registered, want the 10 of the wave D design", len(gw))
 	}
+
 	linked := map[string]bool{}
+
 	for _, url := range guideURLs(tc) {
 		rec := s.get(t, url, cookie)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s = %d", url, rec.Code)
 		}
+
 		body := rec.Body.String()
 		if !strings.Contains(body, `href="/starters/gw/`) {
 			t.Errorf("%s links no gateway starter", url)
 		}
+
 		if strings.Contains(body, "@doc") {
 			t.Errorf("%s renders a component call as text", url)
 		}
+
 		if !strings.Contains(body, "<svg") {
 			t.Errorf("%s has no diagram", url)
 		}
+
 		if !strings.Contains(body, `id="official"`) || !regexp.MustCompile(`href="https://(www\.envoyproxy\.io/docs/envoy/v1\.40|doc\.traefik\.io/traefik/v3\.7/|nginx\.org/en/docs/)`).MatchString(body) {
 			t.Errorf("%s does not end with official docs for the pinned proxies", url)
 		}
+
 		for _, id := range gw {
 			if strings.Contains(body, `href="/starters/`+id+`"`) {
 				linked[id] = true
 			}
 		}
 	}
+
 	for _, id := range gw {
 		if !linked[id] {
 			t.Errorf("no gateway guide links %s", id)
 		}
 	}
+
 	official := s.get(t, "/docs/api-gateways", cookie).Body.String()
 	for _, version := range []string{"envoy/v1.40", "traefik/v3.7", "nginx.org/en/docs/"} {
 		if !strings.Contains(official, version) {
@@ -92,6 +107,7 @@ func TestGatewayGuidesLinkStartersAndDocs(t *testing.T) {
 func TestRateLimitGuideCoversAlgorithms(t *testing.T) {
 	s := newServer(t)
 	cookie := map[string]string{"Cookie": signIn(t, s)}
+
 	body := s.get(t, "/docs/api-gateways/rate-limiting", cookie).Body.String()
 	for _, want := range []string{
 		`id="token-bucket"`, `id="leaky-bucket"`, `id="fixed-window"`, `id="sliding-window"`, `id="local-global"`,
@@ -124,6 +140,7 @@ func guideURLs(tc tech) []string {
 	for i, g := range tc.Guides {
 		urls[i] = "/docs/" + tc.ID + "/" + g.Slug
 	}
+
 	return urls
 }
 
@@ -135,8 +152,10 @@ func TestGRPCGuideVerifiesBackendName(t *testing.T) {
 			t.Errorf("gRPC guide's cluster example lacks %q", want)
 		}
 	}
+
 	s := newServer(t)
 	cookie := map[string]string{"Cookie": signIn(t, s)}
+
 	body := s.get(t, "/docs/api-gateways/grpc", cookie).Body.String()
 	if !strings.Contains(body, "match_typed_subject_alt_names") {
 		t.Error("gRPC guide does not render the SAN matcher")
@@ -152,11 +171,14 @@ func TestGRPCGuideDeadlineMatchesStatus(t *testing.T) {
 			t.Errorf("gRPC guide's routes example lacks %q", want)
 		}
 	}
+
 	if regexp.MustCompile(`(^|[ {])timeout: `).MatchString(gwGRPCRoutesCode) {
 		t.Error("gRPC guide's routes example sets a route timeout, which ends a call with UNAVAILABLE, not DEADLINE_EXCEEDED")
 	}
+
 	s := newServer(t)
 	cookie := map[string]string{"Cookie": signIn(t, s)}
+
 	body := s.get(t, "/docs/api-gateways/grpc", cookie).Body.String()
 	for _, want := range []string{"DEADLINE_EXCEEDED (downstream duration timeout)", "HTTP 504", "UNAVAILABLE (upstream request timeout)"} {
 		if !strings.Contains(body, want) {
@@ -170,12 +192,14 @@ func TestGRPCGuideDeadlineMatchesStatus(t *testing.T) {
 func TestResilienceGuideBudgetIsConcurrency(t *testing.T) {
 	s := newServer(t)
 	cookie := map[string]string{"Cookie": signIn(t, s)}
+
 	body := s.get(t, "/docs/api-gateways/resilience", cookie).Body.String()
 	for _, want := range []string{"active plus pending", "min_retry_concurrency", "One failing request on an otherwise idle cluster still gets all three of its retries", "specific to its traffic"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("resilience guide lacks %q", want)
 		}
 	}
+
 	for _, bad := range []string{"1.2 times normal", "near 1.2"} {
 		if strings.Contains(body, bad) {
 			t.Errorf("resilience guide still promises %q", bad)

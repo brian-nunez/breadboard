@@ -95,6 +95,7 @@ func (n node) Stack() []int {
 	for i := min(n.Replicas()-1, 2); i >= 1; i-- {
 		out = append(out, i*stackDx)
 	}
+
 	return out
 }
 
@@ -106,6 +107,7 @@ func (n node) Label() string {
 	if n.App != "" && len(n.Instances) > 1 {
 		return n.App
 	}
+
 	return n.Name
 }
 
@@ -116,7 +118,6 @@ func (n node) InstanceDot(i int) int { return n.X + 54 + 4 + i*12 }
 type appGroup struct {
 	name      string
 	instances []row
-	sidecars  map[string][]row // by parent instance
 }
 
 // layout positions every service. Apps fill the left column in experiment
@@ -126,7 +127,9 @@ func layout(rows []row, selected string) graph {
 	if hasProxies(rows) {
 		return flowLayout(rows, selected)
 	}
+
 	groups, infra, sidecars := groupRows(rows)
+
 	return layoutTwoColumns(selected, groups, infra, sidecars)
 }
 
@@ -135,6 +138,7 @@ func layout(rows []row, selected string) graph {
 func groupRows(rows []row) (groups []*appGroup, infra []row, sidecars map[string][]row) {
 	byGroup := map[string]*appGroup{}
 	sidecars = map[string][]row{}
+
 	for _, r := range rows {
 		switch r.Kind {
 		case "infra":
@@ -143,15 +147,18 @@ func groupRows(rows []row) (groups []*appGroup, infra []row, sidecars map[string
 			sidecars[r.Parent] = append(sidecars[r.Parent], r)
 		default:
 			name := cmp.Or(r.App, r.Name)
+
 			g, ok := byGroup[name]
 			if !ok {
 				g = &appGroup{name: name}
 				byGroup[name] = g
 				groups = append(groups, g)
 			}
+
 			g.instances = append(g.instances, r)
 		}
 	}
+
 	return groups, infra, sidecars
 }
 
@@ -159,41 +166,52 @@ func groupRows(rows []row) (groups []*appGroup, infra []row, sidecars map[string
 // infrastructure.
 func layoutTwoColumns(selected string, groups []*appGroup, infra []row, sidecars map[string][]row) graph {
 	appEdges := false
+
 	for _, g := range groups {
 		for _, e := range g.instances[0].Uses {
 			appEdges = appEdges || e.ToApp
 		}
 	}
+
 	codeX := graphPad
 	if appEdges {
 		codeX += appGutter
 	}
+
 	g := graph{CodeX: codeX, InfraX: codeX + nodeW + colGap}
 	g.Columns = []column{{"YOUR CODE", g.CodeX}, {"INFRASTRUCTURE", g.InfraX}}
 	top := graphPad + headerH
 	pos := map[string]node{} // by app, instance, and infra name
 	y := top
+
 	var apps []node
+
 	for _, grp := range groups {
 		first := grp.instances[0]
+
 		n := node{row: first, X: g.CodeX, Y: y, H: nodeH}
 		if len(grp.instances) > 1 {
 			n.Instances = grp.instances
 		}
+
 		for _, inst := range grp.instances {
 			n.Selected = n.Selected || inst.Name == selected
 		}
+
 		n.Chips = chips(n, grp.instances, sidecars, selected)
 		if len(n.Chips) > 0 {
 			last := n.Chips[len(n.Chips)-1]
 			n.H = last.Y + chipH - n.Y
 		}
+
 		pos[grp.name] = n
 		for _, inst := range grp.instances {
 			pos[inst.Name] = n
 		}
+
 		apps = append(apps, n)
 		g.Nodes = append(g.Nodes, n)
+
 		y += n.H + rowGap
 		if n.Pod() {
 			y += 2 * podPad
@@ -201,60 +219,76 @@ func layoutTwoColumns(selected string, groups []*appGroup, infra []row, sidecars
 	}
 	// Barycentre of the rows of the apps each infra service is used by.
 	weight := map[string]float64{}
+
 	for _, r := range infra {
 		var sum, cnt float64
+
 		for _, a := range apps {
 			uses := slices.ContainsFunc(a.Uses, func(e core.Edge) bool { return e.To == r.Name })
+
 			registers := slices.ContainsFunc(sidecars[a.Name], func(s row) bool { return s.Registry == r.Name })
 			if uses || registers {
 				sum += float64(a.Y)
 				cnt++
 			}
 		}
+
 		weight[r.Name] = 1e9 // unused: last
 		if cnt > 0 {
 			weight[r.Name] = sum / cnt
 		}
 	}
+
 	slices.SortStableFunc(infra, func(a, b row) int { return cmp.Compare(weight[a.Name], weight[b.Name]) })
+
 	iy := top
+
 	for _, r := range infra {
 		want := int(weight[r.Name])
 		if want > iy && want < 1e9 {
 			iy = want
 		}
+
 		n := node{row: r, X: g.InfraX, Y: iy, H: nodeH, Selected: r.Name == selected}
 		pos[r.Name] = n
 		g.Nodes = append(g.Nodes, n)
 		iy += nodeH + rowGap
 	}
+
 	for _, a := range apps {
 		for _, e := range a.Uses {
 			to, ok := pos[e.To]
 			if !ok {
 				continue
 			}
+
 			if e.ToApp {
 				g.Edges = append(g.Edges, loop(a, to, edgeLabel(e.TLS, e.Port)))
+
 				continue
 			}
+
 			g.Edges = append(g.Edges, curve(a.CX(), a.CY(), to, edgeLabel(e.TLS, e.Port), !e.TLS, e.Reason, false))
 		}
+
 		for _, c := range a.Chips {
 			for _, s := range sidecars[a.Name] {
 				if s.Name != c.Name || s.Registry == "" {
 					continue
 				}
+
 				if to, ok := pos[s.Registry]; ok {
 					g.Edges = append(g.Edges, curve(a.CX()+podPad, c.Y+chipH/2, to, "registers", false, "", true))
 				}
 			}
 		}
 	}
+
 	g.Width = g.InfraX + nodeW + graphPad
 	for _, n := range g.Nodes {
 		g.Height = max(g.Height, n.Y+n.H+podPad+graphPad)
 	}
+
 	return g
 }
 
@@ -263,13 +297,16 @@ func layoutTwoColumns(selected string, groups []*appGroup, infra []row, sidecars
 // instance.
 func chips(n node, instances []row, sidecars map[string][]row, selected string) []chip {
 	var out []chip
+
 	x, y := n.X, n.Y+nodeH+chipGap
+
 	for i, s := range sidecars[instances[0].Name] {
 		c := chip{Name: s.Name, Type: s.Type, Label: s.Type, Color: s.Status().Color}
 		if s.Sidecar != nil && s.Sidecar.Transparent {
 			c.Transparent = true
 			c.Label += " · transparent"
 		}
+
 		for _, inst := range instances {
 			list := sidecars[inst.Name]
 			if i < len(list) {
@@ -277,14 +314,17 @@ func chips(n node, instances []row, sidecars map[string][]row, selected string) 
 				c.Color = worse(c.Color, list[i].Status().Color)
 			}
 		}
+
 		c.W = labelWidth(c.Label) + 14 + chipLogoW(c) // room for the status dot and logo
 		if x > n.X && x+c.W > n.X+nodeW {
 			x, y = n.X, y+chipH+chipGap
 		}
+
 		c.X, c.Y = x, y
 		out = append(out, c)
 		x += c.W + chipGap
 	}
+
 	return out
 }
 
@@ -293,6 +333,7 @@ func chipLogoW(c chip) int {
 	if logoSrc(c.Type) != "" {
 		return 16
 	}
+
 	return 0
 }
 
@@ -302,6 +343,7 @@ func worse(a, b string) string {
 	if rank[b] > rank[a] {
 		return b
 	}
+
 	return a
 }
 
@@ -309,6 +351,7 @@ func edgeLabel(tls bool, port int) string {
 	if tls {
 		return fmt.Sprintf("TLS :%d", port)
 	}
+
 	return fmt.Sprintf("plaintext :%d", port)
 }
 
@@ -319,7 +362,9 @@ func curve(x1, y1 int, to node, label string, plaintext bool, reason string, reg
 	if to.Pod() {
 		x2 -= podPad
 	}
+
 	mid := (x1 + x2) / 2
+
 	return edge{
 		Path:        fmt.Sprintf("M%d %d C%d %d, %d %d, %d %d", x1, y1, mid, y1, mid, y2, x2, y2),
 		LabelX:      mid,
@@ -338,11 +383,14 @@ func loop(from, to node, label string) edge {
 	if from.Pod() {
 		x1 -= podPad
 	}
+
 	x2, y2 := to.X-6, to.CY()
 	if to.Pod() {
 		x2 -= podPad
 	}
+
 	bend := graphPad + 8
+
 	return edge{
 		Path:   fmt.Sprintf("M%d %d C%d %d, %d %d, %d %d", x1, y1, bend, y1, bend, y2, x2, y2),
 		LabelX: bend + (x1-bend)/4 + 8,
@@ -356,19 +404,23 @@ func loop(from, to node, label string) edge {
 // instance by its app's name (an Envoy outbound target is the whole app).
 func inbound(rows []row, r row) []string {
 	var out []string
+
 	for _, from := range rows {
 		if from.Instance > 1 {
 			continue // an app is listed once
 		}
+
 		for _, e := range from.Uses {
 			if e.To == r.Name || (r.App != "" && e.To == r.App) {
 				out = append(out, cmp.Or(from.App, from.Name))
 			}
 		}
+
 		if from.Registry != "" && from.Registry == r.Name {
 			out = append(out, from.Name)
 		}
 	}
+
 	return out
 }
 

@@ -48,11 +48,14 @@ func TestStatusShowsProxyUpstreams(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.writeSpec(proxySpec)
+
 	res, err := h.eng.Status(h.ctx(), StatusRequest{Dir: h.dir})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	rows := rowsByName(res.Services)
+
 	var got []string
 	for _, e := range rows["edge"].Uses {
 		got = append(got, e.To+"/"+e.Mode)
@@ -60,12 +63,15 @@ func TestStatusShowsProxyUpstreams(t *testing.T) {
 			t.Errorf("terminate edge = %+v", e)
 		}
 	}
+
 	if !slices.Equal(got, []string{"web/on", "api/off", "payments/passthrough"}) {
 		t.Errorf("edge uses = %v", got)
 	}
+
 	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "edge -> api:8080") }) {
 		t.Errorf("no plaintext warning for the terminate hop: %v", res.Warnings)
 	}
+
 	if c := rows["client"].Uses; len(c) != 1 || c[0].To != "edge" || c[0].Port != 8443 || !c[0].TLS {
 		t.Errorf("client uses = %+v", c)
 	}
@@ -74,10 +80,13 @@ func TestStatusShowsProxyUpstreams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !slices.Contains(d.UsedBy, "edge") {
 		t.Errorf("api used by %v", d.UsedBy)
 	}
+
 	var plain string
+
 	for _, g := range d.Env {
 		for _, v := range g.Vars {
 			if v.Name == "BB_PLAIN_LISTEN_ADDR" {
@@ -85,6 +94,7 @@ func TestStatusShowsProxyUpstreams(t *testing.T) {
 			}
 		}
 	}
+
 	if !strings.HasSuffix(plain, ":8080") {
 		t.Errorf("api BB_PLAIN_LISTEN_ADDR = %q", plain)
 	}
@@ -103,15 +113,19 @@ func TestProxyDetailsShowLiveListeners(t *testing.T) {
 		h := newHarness(t)
 		h.init()
 		h.writeSpec(tc.spec)
+
 		d, err := h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: "edge"})
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		listens := slices.ContainsFunc(d.Listeners, func(l Listener) bool { return l.Port == 9443 })
+
 		var env bool
 		for _, g := range d.Env {
 			env = env || slices.ContainsFunc(g.Vars, func(v EnvVar) bool { return v.Name == "EDGE_PASSTHROUGH_ADDR" && v.Value == "edge.bb.internal:9443" })
 		}
+
 		if listens != tc.want || env != tc.want || !slices.ContainsFunc(d.Listeners, func(l Listener) bool { return l.Port == 8443 }) {
 			t.Errorf("passthrough %v: listeners %+v env %+v", tc.want, d.Listeners, d.Env)
 		}
@@ -123,6 +137,7 @@ func TestRemoveServiceRefusesAnUpstream(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.writeSpec(proxySpec)
+
 	_, err := h.eng.RemoveService(h.ctx(), RemoveServiceRequest{Dir: h.dir, Name: "api"})
 	if !errors.Is(err, errs.ErrValidation) || !strings.Contains(err.Error(), "services.edge.upstreams[1]") {
 		t.Fatalf("RemoveService(api) = %v", err)
@@ -135,27 +150,34 @@ func TestAppSegmentWithoutIPRangeIsRecreated(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.writeSpec(proxySpec)
+
 	if err := os.MkdirAll(filepath.Join(h.dir, "probe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.WriteFile(filepath.Join(h.dir, "probe", "Dockerfile"), []byte("FROM scratch AS dev\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
+
 	ps, _ := state.Project{Dir: h.dir}.LoadState()
 	subnet := netip.MustParsePrefix(ps.Segments["plain-api"])
+
 	h.rt.containers["lab"] = []runtime.Container{{ID: "a", Service: "edge", State: "running", Health: "healthy"}}
 	for _, tc := range []struct {
 		ipRange netip.Prefix
 		down    bool
 	}{{netip.Prefix{}, true}, {compose.DynamicRange(subnet), false}} {
 		h.rt.subnets = []runtime.Network{{Name: "bb-lab_plain-api", Subnet: subnet, ExperimentID: ps.ExperimentID, IPRange: tc.ipRange}}
+
 		h.rt.calls = nil
 		if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 			t.Fatal(err)
 		}
+
 		i, j := slices.Index(h.rt.calls, "down"), slices.Index(h.rt.calls, "up")
 		if (i >= 0) != tc.down || j < i {
 			t.Errorf("ip_range %v: calls = %v, want down %v before up", tc.ipRange, h.rt.calls, tc.down)

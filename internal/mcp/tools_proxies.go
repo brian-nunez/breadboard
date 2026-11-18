@@ -169,10 +169,12 @@ func (s *Server) addProxyExplorers(explore func(exploreIn) (core.ExploreRequest,
 		if err != nil {
 			return haproxyOut{}, err
 		}
+
 		res, err := s.eng.HAProxyStats(ctx, req)
 		if err != nil {
 			return haproxyOut{}, err
 		}
+
 		return haproxyOut{
 			Service: res.Service,
 			Frontends: mapSlice(res.Frontends, func(f core.HAProxyFrontend) haproxyFrontend {
@@ -203,15 +205,19 @@ func (s *Server) addProxyExplorers(explore func(exploreIn) (core.ExploreRequest,
 		if err != nil {
 			return traefikOut{}, err
 		}
+
 		res, err := s.eng.TraefikRoutes(ctx, req)
 		if err != nil {
 			return traefikOut{}, err
 		}
+
 		return traefikOut{
 			Service: res.Service,
 			Routers: mapSlice(res.Routers, func(r core.TraefikRouter) traefikRouter {
-				return traefikRouter{Name: r.Name, Protocol: r.Protocol, EntryPoints: orEmpty(r.EntryPoints), Rule: r.Rule, Priority: r.Priority,
-					Middlewares: orEmpty(r.Middlewares), Service: r.Service, TLS: r.TLS, Status: r.Status, Errors: orEmpty(r.Errors)}
+				return traefikRouter{
+					Name: r.Name, Protocol: r.Protocol, EntryPoints: orEmpty(r.EntryPoints), Rule: r.Rule, Priority: r.Priority,
+					Middlewares: orEmpty(r.Middlewares), Service: r.Service, TLS: r.TLS, Status: r.Status, Errors: orEmpty(r.Errors),
+				}
 			}),
 			Services: mapSlice(res.Services, func(v core.TraefikService) traefikService {
 				return traefikService{
@@ -233,18 +239,22 @@ func (s *Server) addProxyExplorers(explore func(exploreIn) (core.ExploreRequest,
 		if err != nil {
 			return nginxOut{}, err
 		}
+
 		res, err := s.eng.NginxStatus(ctx, req)
 		if err != nil {
 			return nginxOut{}, err
 		}
+
 		return nginxOut{
 			Service: res.Service, Active: res.Active, Reading: res.Reading, Writing: res.Writing, Waiting: res.Waiting,
 			Accepts: res.Accepts, Handled: res.Handled, Requests: res.Requests,
 			Upstreams: mapSlice(res.Upstreams, func(u core.NginxUpstream) nginxUpstream {
-				return nginxUpstream{Route: u.Route, Target: u.Target, Mode: u.Mode, Port: u.Port,
+				return nginxUpstream{
+					Route: u.Route, Target: u.Target, Mode: u.Mode, Port: u.Port,
 					Backends: mapSlice(u.Backends, func(b core.NginxBackend) nginxBackend {
 						return nginxBackend{Instance: b.Instance, Name: b.Name, Address: b.Address}
-					})}
+					}),
+				}
 			}),
 		}, nil
 	})

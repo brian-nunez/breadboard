@@ -8,6 +8,7 @@ import (
 
 func redis() *Entry {
 	const port = 6379
+
 	return &Entry{
 		ID:      "redis",
 		Title:   "Redis",
@@ -36,6 +37,7 @@ func redis() *Entry {
 				"--appendonly yes",
 				"--dir /data",
 			}, " ")
+
 			return Container{
 				Entrypoint: []string{"/bin/sh", "-c", start},
 				Environment: []EnvVar{

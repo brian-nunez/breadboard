@@ -21,10 +21,13 @@ func TestEnvoySidecarConfigValidates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("needs Docker")
 	}
+
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Skip("Docker is not available")
 	}
+
 	t.Parallel()
+
 	retries := 0
 	configs := map[string]Input{
 		"outbound.yaml": envoyInput(spec.EnvoySidecar{
@@ -42,13 +45,16 @@ func TestEnvoySidecarConfigValidates(t *testing.T) {
 	}
 	typ, _ := Lookup(spec.SidecarEnvoy)
 	files := map[string][]byte{}
+
 	for name, in := range configs {
 		out, err := typ.RenderSidecar(in)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
+
 		files["config/"+name] = out.Files[0].Data
 	}
+
 	dir := sidecarLabFiles(t, files)
 	for name := range configs {
 		out, err := exec.Command("docker", "run", "--rm", "--network", "none", "-v", dir+":/etc/bb:ro",
@@ -56,6 +62,7 @@ func TestEnvoySidecarConfigValidates(t *testing.T) {
 		if err != nil || !strings.Contains(string(out), "configuration '/etc/bb/config/"+name+"' OK") {
 			t.Errorf("envoy --mode validate %s: %v\n%s", name, err, out)
 		}
+
 		if strings.Contains(strings.ToLower(string(out)), "deprecated") {
 			t.Errorf("envoy --mode validate %s warns about a deprecated field (D-162, D-203):\n%s", name, out)
 		}
@@ -66,31 +73,40 @@ func TestEnvoySidecarConfigValidates(t *testing.T) {
 // the given files under a fresh directory laid out like /etc/bb.
 func sidecarLabFiles(t *testing.T, files map[string][]byte) string {
 	t.Helper()
+
 	now := time.Now()
+
 	ca, err := pki.NewCA("bb.internal", now)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	leaf, err := ca.Issue(pki.LeafRequest{DNSNames: []string{"api.bb.internal"}, Identity: pki.Identity("bb.internal", "lab", "api")}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	dir := t.TempDir()
+
 	all := map[string][]byte{"tls/tls.crt": leaf.CertPEM, "tls/tls.key": leaf.KeyPEM, "ca.pem": ca.CertPEM}
 	for p, data := range files {
 		all[p] = data
 	}
+
 	for p, data := range all {
 		full := filepath.Join(dir, filepath.FromSlash(p))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
 		}
+
 		if err := os.WriteFile(full, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+
 	return dir
 }

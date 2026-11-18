@@ -53,12 +53,15 @@ apps:
 		if err != nil || !strings.Contains(out, "peer=edge.bb.internal") {
 			t.Fatalf("the client did not verify NGINX's certificate: %v\n%s", err, out)
 		}
+
 		eventually(t, time.Minute, "requests to reach more than one replica", func() bool {
 			out, err = execIn(t, name, "client", `probe hits "$EDGE_URL/web/" 30`)
 			if err != nil {
 				t.Logf("hits: %v %s", err, out)
+
 				return false
 			}
+
 			return strings.Count(out, "instance=web-") >= 2
 		})
 		t.Logf("distribution:\n%s", out)
@@ -72,6 +75,7 @@ apps:
 		if out, err := execIn(t, name, "edge", `wget -qO- http://127.0.0.1:8404/stub_status`); err != nil || !strings.Contains(out, "Active connections:") {
 			t.Errorf("stub_status: %v\n%s", err, out)
 		}
+
 		if out, err := execIn(t, name, "client", "probe dial edge.bb.internal:8404"); err == nil {
 			t.Errorf("stub_status is reachable from another container:\n%s", out)
 		}
@@ -79,16 +83,21 @@ apps:
 
 	t.Run("terminate", func(t *testing.T) {
 		var out string
+
 		eventually(t, time.Minute, "the terminated app to answer through NGINX", func() bool {
 			var err error
+
 			out, err = execIn(t, name, "client", `probe get "$EDGE_URL/api/"`)
+
 			return err == nil && strings.Contains(out, "instance=api-")
 		})
 		addr, err := execIn(t, name, "api-1", `echo "$BB_PLAIN_LISTEN_ADDR"`)
+
 		addr = strings.TrimSpace(addr)
 		if err != nil || !strings.HasPrefix(addr, "10.213.") || !strings.HasSuffix(addr, ":8080") {
 			t.Fatalf("api-1 BB_PLAIN_LISTEN_ADDR = %q (%v)", addr, err)
 		}
+
 		_, port, _ := strings.Cut(addr, ":")
 		// NGINX is on the segment: plain HTTP answers.
 		if out, err := execIn(t, name, "edge", "wget -qO- http://"+addr+"/"); err != nil || !strings.Contains(out, "instance=api-1") {
@@ -104,14 +113,19 @@ apps:
 
 	t.Run("passthrough", func(t *testing.T) {
 		var out string
+
 		eventually(t, time.Minute, "passthrough to reach the backend", func() bool {
 			var err error
+
 			out, err = execIn(t, name, "client", `test "$EDGE_PASSTHROUGH_ADDR" = edge.bb.internal:9443 && probe peer "$EDGE_PASSTHROUGH_ADDR" payments.bb.internal`)
+
 			return err == nil
 		})
+
 		if !strings.Contains(out, "peer=payments.bb.internal") || strings.Contains(out, "edge.bb.internal") || !strings.Contains(out, "instance=payments proto=tls") {
 			t.Errorf("the client did not see the backend's own certificate:\n%s", out)
 		}
+
 		if out, err := execIn(t, name, "client", "probe peer edge.bb.internal:9443 web.bb.internal"); err == nil {
 			t.Errorf("an SNI no upstream claims was routed:\n%s", out)
 		}
@@ -126,6 +140,7 @@ apps:
 // mode reaches Postgres in plaintext over its private segment.
 func TestIntegrationPgBouncerInfra(t *testing.T) {
 	const poolSize = 3
+
 	_, _, name := sidecarLab(t, "pgbi", fmt.Sprintf(`services:
   postgres:
     type: postgres
@@ -157,6 +172,7 @@ apps:
 		if out, err := execIn(t, name, app, `test "$PGHOST:$PGPORT:$PGSSLMODE" = pool.bb.internal:6432:verify-full && case "$DATABASE_URL" in *@pool.bb.internal:6432/app?sslmode=verify-full) ;; *) exit 1;; esac`); err != nil {
 			t.Fatalf("%s's Postgres variables do not point at the pool: %v\n%s", app, err, out)
 		}
+
 		if out, err := execIn(t, name, app, `psql "$DATABASE_URL" -tAc "select 'pooled'"`); err != nil || strings.TrimSpace(out) != "pooled" {
 			t.Fatalf("%s: query through the pool: %v\n%s", app, err, out)
 		}
@@ -176,8 +192,11 @@ apps:
 		return strings.TrimSpace(docker(t, "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerOf(t, name, service)))
 	}
 	poolIP, pgIP := ip("pool"), ip("postgres")
+
 	var wg sync.WaitGroup
+
 	errs := make(chan string, 2)
+
 	for _, app := range []string{"orders", "billing"} {
 		wg.Go(func() {
 			// 4 concurrent clients per app, each holding a transaction for 3s.
@@ -187,8 +206,12 @@ apps:
 			}
 		})
 	}
-	var peak int
-	var seen []string
+
+	var (
+		peak int
+		seen []string
+	)
+
 	deadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(deadline) {
 		var n int
@@ -196,37 +219,49 @@ apps:
 		// address; leave it out.
 		for _, r := range psql(t, name, fmt.Sprintf("select host(a.client_addr) || '/' || s.ssl from pg_stat_activity a join pg_stat_ssl s using (pid) where a.usename = 'app' and host(a.client_addr) <> '%s'", pgIP)) {
 			n++
+
 			if r != poolIP+"/true" {
 				t.Errorf("connection %s, want %s/true (PgBouncer, over TLS)", r, poolIP)
 			}
+
 			seen = append(seen, r)
 		}
+
 		peak = max(peak, n)
+
 		time.Sleep(300 * time.Millisecond)
 	}
+
 	wg.Wait()
 	close(errs)
+
 	for e := range errs {
 		t.Errorf("load: %s", e)
 	}
+
 	if peak == 0 {
 		t.Fatal("Postgres saw no connection from the pool")
 	}
+
 	if peak > poolSize {
 		t.Errorf("Postgres saw %d server connections, more than pool_size %d", peak, poolSize)
 	}
+
 	t.Logf("Postgres saw at most %d server connections (pool_size %d), all from the pool over TLS: %d samples", peak, poolSize, len(seen))
 
 	// The pools explorer's script works against the infra pool unchanged.
 	out := docker(t, "exec", containerOf(t, name, "pool"), "sh", "-c", pgbouncerScript, "bb-pgbouncer", "6432")
+
 	pools, err := parsePgBouncer(out)
 	if err != nil || len(pools) != 1 {
 		t.Fatalf("pools = %+v, %v\n%s", pools, err, out)
 	}
+
 	p := pools[0]
 	if p.Database != "app" || p.User != "app" || p.ServersActive+p.ServersIdle+p.ServersUsed+p.ServersLogin > poolSize || p.Transactions == 0 {
 		t.Errorf("pool = %+v", p)
 	}
+
 	t.Logf("SHOW POOLS: %+v", p)
 
 	// Terminate: the second pool logs in to Postgres without TLS, from its
@@ -234,15 +269,19 @@ apps:
 	if out, err := execIn(t, name, "orders", `psql "host=pool-plain.bb.internal port=6432 dbname=$PGDATABASE user=$PGUSER sslmode=verify-full" -tAc "select 'plain pooled'"`); err != nil || strings.TrimSpace(out) != "plain pooled" {
 		t.Fatalf("query through the plaintext pool: %v\n%s", err, out)
 	}
+
 	var segIP string
+
 	for _, f := range strings.Fields(docker(t, "inspect", "-f", `{{range $k, $v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}} {{end}}`, containerOf(t, name, "pool-plain"))) {
 		if k, v, _ := strings.Cut(f, "="); strings.HasSuffix(k, "_plain-postgres") {
 			segIP = v
 		}
 	}
+
 	if !strings.HasPrefix(segIP, "10.213.") {
 		t.Fatalf("pool-plain's segment address = %q", segIP)
 	}
+
 	rows := psql(t, name, "select host(a.client_addr) || '/' || s.ssl from pg_stat_activity a join pg_stat_ssl s using (pid) where a.usename = 'app' and host(a.client_addr) = '"+segIP+"'")
 	if len(rows) == 0 || rows[0] != segIP+"/false" {
 		t.Errorf("the plaintext pool's server connections = %v, want %s/false", rows, segIP)
@@ -261,6 +300,7 @@ apps:
 	if out, err := execIn(t, name, "orders", `psql "host=postgres.bb.internal port=5432 dbname=$PGDATABASE user=$PGUSER sslmode=verify-full sslrootcert=$PGSSLROOTCERT" -tAc "select 'tls'"`); err != nil || strings.TrimSpace(out) != "tls" {
 		t.Fatalf("orders cannot reach Postgres over TLS: %v\n%s", err, out)
 	}
+
 	out, err = execIn(t, name, "orders", `psql "host=postgres.bb.internal port=5432 dbname=$PGDATABASE user=$PGUSER sslmode=disable" -tAc 'select 1'`)
 	if err == nil || !strings.Contains(out, "no pg_hba.conf entry") {
 		t.Errorf("a default-network client in plaintext: %v\n%s", err, out)

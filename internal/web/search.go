@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 )
@@ -12,6 +13,16 @@ type searchEntry struct {
 	Kind  string `json:"kind"`
 	URL   string `json:"url"`
 	Logo  string `json:"logo,omitempty"`
+}
+
+// searchIndexPath is where the search dialog loads the index from: a file
+// on the static site.
+func searchIndexPath(ctx context.Context) string {
+	if isStatic(ctx) {
+		return "/search-index.json"
+	}
+
+	return "/search-index"
 }
 
 // searchIndex lists every page: docs, starters, and the experiment's
@@ -30,8 +41,10 @@ func (s *Server) searchIndex(w http.ResponseWriter, r *http.Request) {
 		out = append(out, searchEntry{cardTitle(d.Starters[id].Title), "Starter · " + id, "/starters/" + id, ""})
 	}
 
-	for _, row := range s.dashboard(r.Context()).Services {
-		out = append(out, searchEntry{row.Name, "Service", "/services/" + row.Name, logoSrc(row.Type)})
+	if !isStatic(r.Context()) {
+		for _, row := range s.dashboard(r.Context()).Services {
+			out = append(out, searchEntry{row.Name, "Service", "/services/" + row.Name, logoSrc(row.Type)})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

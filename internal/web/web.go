@@ -132,6 +132,11 @@ func (s *Server) Serve(ctx context.Context) error {
 
 // Handler returns the guarded router.
 func (s *Server) Handler() http.Handler {
+	return s.guard(s.routes())
+}
+
+// routes is the router without the guard.
+func (s *Server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
@@ -152,7 +157,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /docs/{tech}", s.docsTech)
 	mux.HandleFunc("GET /docs/{tech}/{guide}", s.docsGuide)
 
-	return s.guard(mux)
+	return mux
 }
 
 // overview is the dashboard's front page.

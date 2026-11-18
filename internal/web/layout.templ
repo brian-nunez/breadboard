@@ -46,7 +46,9 @@ templ topbar(current section) {
 		@logo()
 		@searchBox("hidden w-[360px] md:flex")
 		<nav class="ml-auto hidden items-center gap-6 text-sm md:flex">
-			@topLink("/dashboard", "Dashboard", current == sectionDashboard)
+			if !isStatic(ctx) {
+				@topLink("/dashboard", "Dashboard", current == sectionDashboard)
+			}
 			@topLink("/docs", "Docs", current == sectionDocs)
 			@topLink("/starters", "Starters", current == sectionStarters)
 		</nav>
@@ -54,8 +56,10 @@ templ topbar(current section) {
 			<summary class="cursor-pointer list-none rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium">Menu</summary>
 			<nav class="absolute right-0 mt-2 flex w-56 flex-col rounded-xl border border-slate-200 bg-white p-2 text-sm shadow-lg">
 				<button type="button" data-search-open class="rounded-lg px-3 py-2 text-left text-slate-700 hover:bg-slate-50">Search</button>
-				<a href="/dashboard" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Dashboard</a>
-				<a href="/architecture" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Architecture</a>
+				if !isStatic(ctx) {
+					<a href="/dashboard" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Dashboard</a>
+					<a href="/architecture" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Architecture</a>
+				}
 				<a href="/docs" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Docs</a>
 				<a href="/starters" class="rounded-lg px-3 py-2 text-slate-700 hover:bg-slate-50">Starters</a>
 			</nav>
@@ -75,7 +79,7 @@ templ searchBox(class string) {
 
 // searchDialog filters an index of every page, loaded on first open.
 templ searchDialog() {
-	<div id="search" class="fixed inset-0 z-50 hidden bg-slate-900/30 px-4 pt-24" data-search-index="/search-index">
+	<div id="search" class="fixed inset-0 z-50 hidden bg-slate-900/30 px-4 pt-24" data-search-index={ searchIndexPath(ctx) }>
 		<div class="mx-auto max-w-xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
 			<input type="search" placeholder="Search docs, starters, services" autocomplete="off" class="w-full border-b border-slate-200 px-4 py-3 text-[15px] outline-none" data-search-input/>
 			<ul class="max-h-80 overflow-y-auto p-2 text-sm" data-search-results></ul>
@@ -167,6 +171,17 @@ templ sideLink(href, label string, active bool) {
 		<a href={ templ.SafeURL(href) } class="rounded-lg bg-indigo-50 px-2.5 py-1.5 font-medium text-indigo-700">{ label }</a>
 	} else {
 		<a href={ templ.SafeURL(href) } class="rounded-lg px-2.5 py-1.5 text-slate-700 hover:bg-slate-50">{ label }</a>
+	}
+}
+
+// notFoundPage is the static site's 404.html.
+templ notFoundPage() {
+	@page("Page not found") {
+		@topbar("")
+		<main class="mx-auto max-w-[880px] px-6 py-12">
+			<h1 class="text-[32px] font-semibold">Page not found</h1>
+			<a href="/docs" class="mt-3 inline-block text-indigo-600 hover:text-indigo-700">Go to the docs →</a>
+		</main>
 	}
 }
 

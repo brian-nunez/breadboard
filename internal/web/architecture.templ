@@ -132,6 +132,10 @@ templ nodeCard(n node) {
 			<circle cx={ itoa(n.InstanceDot(i)) } cy={ itoa(n.Y + 40) } r="3" class={ dotClass(inst.Status().Color) }><title>{ inst.Name }: { inst.Status().Word }</title></circle>
 		}
 		<text x={ itoa(n.InstanceDot(len(n.Instances)) - 2) } y={ itoa(n.Y + 44) } class="fill-slate-500 text-[11px]">×{ itoa(len(n.Instances)) }</text>
+	} else if n.HostRouter {
+		<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 27) } class="fill-slate-900 text-[14px] font-semibold">{ n.Label() }</text>
+		<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 44) } class="fill-slate-500 text-[11px]">host router</text>
+		<circle cx={ itoa(n.X + 158) } cy={ itoa(n.Y + 28) } r="4" class={ dotClass(n.Status().Color) }></circle>
 	} else {
 		<text x={ itoa(n.X + 54) } y={ itoa(n.Y + 33) } class="fill-slate-900 text-[14px] font-semibold">{ n.Label() }</text>
 		<circle cx={ itoa(n.X + 158) } cy={ itoa(n.Y + 28) } r="4" class={ dotClass(n.Status().Color) }></circle>
@@ -204,6 +208,27 @@ templ inspector(d dashboardData, r row) {
 					if !e.TLS && e.Reason != "" {
 						<p class="text-xs text-red-700">Reason: { e.Reason }</p>
 					}
+				}
+			</div>
+		}
+		if r.HostRouter {
+			<div class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Routes from the host</div>
+			<div class="mt-2 flex flex-col gap-1.5 text-xs">
+				for _, u := range d.HostURLs {
+					<div>
+						<a href={ templ.SafeURL(u.URL) } target="_blank" rel="noopener" class="break-all font-mono text-indigo-600 hover:text-indigo-800">{ u.URL }</a>
+						<div class="text-slate-500">→ { hostRoute(d.Services, u) }</div>
+					</div>
+				}
+				if len(d.HostURLs) == 0 {
+					<span class="text-slate-500">The URLs appear after the next bb up.</span>
+				}
+			</div>
+		} else if len(r.HostURLs) > 0 {
+			<div class="mt-5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">From the host</div>
+			<div class="mt-2 flex flex-col gap-1.5">
+				for _, u := range r.HostURLs {
+					<a href={ templ.SafeURL(u) } target="_blank" rel="noopener" class="break-all font-mono text-xs text-indigo-600 hover:text-indigo-800">{ u }</a>
 				}
 			</div>
 		}

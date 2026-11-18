@@ -67,6 +67,8 @@ type serviceStatus struct {
 	Parent      string   `json:"parent,omitempty" jsonschema:"sidecars: the app instance whose network namespace they share"`
 	Registry    string   `json:"registry,omitempty" jsonschema:"registration agents: the registry they join"`
 	Sidecar     *sidecar `json:"sidecar,omitempty" jsonschema:"sidecars: what it is, its ports, and the env it gives the app"`
+	HostURLs    []string `json:"host_urls,omitempty" jsonschema:"URLs that reach it from the host through the host router: an app instance's app URL, then its own with replicas"`
+	HostRouter  bool     `json:"host_router,omitempty" jsonschema:"the lab's host router (bb-host), which serves every host URL"`
 }
 
 type edge struct {
@@ -136,7 +138,18 @@ func statusView(s core.ServiceStatus) serviceStatus {
 		Path: s.Path, Command: s.Command,
 		App: s.App, Instance: s.Instance, Replicas: s.Replicas, Sidecars: s.Sidecars,
 		Parent: s.Parent, Registry: s.Registry, Sidecar: sidecarPtr(s.Sidecar),
+		HostURLs: s.HostURLs, HostRouter: s.HostRouter,
 	}
+}
+
+type hostURL struct {
+	URL      string `json:"url"`
+	Target   string `json:"target" jsonschema:"the app or service in experiment.yaml"`
+	Instance string `json:"instance,omitempty" jsonschema:"the replica this URL reaches alone (api-2); absent for a URL that reaches every instance"`
+}
+
+func hostURLView(u core.HostURL) hostURL {
+	return hostURL{URL: u.URL, Target: u.Target, Instance: u.Instance}
 }
 
 func edgeView(e core.Edge) edge {

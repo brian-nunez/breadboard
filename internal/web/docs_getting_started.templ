@@ -29,6 +29,11 @@ func init() {
 				Body:     gettingStartedTLS(),
 			},
 			{
+				Slug: "host-access", Title: "Host access", Summary: "Open lab services from your browser at *.localhost names.",
+				Sections: []docSection{{"what", "What host does"}, {"trust", "Trust the host CA"}, {"names", "How *.localhost resolves"}, {"router", "What the router does"}, {"limits", "Limits"}},
+				Body:     hostAccessGuide(),
+			},
+			{
 				Slug: "starters", Title: "Starters", Summary: "Working code that uses the official client libraries.",
 				Starter:  "kafka/producer-consumer",
 				Sections: []docSection{{"what", "What a starter writes"}, {"build", "How starter apps run"}, {"apply", "Applying a starter"}, {"list", "The starters"}},
@@ -354,6 +359,9 @@ templ gettingStartedTLS() {
 	@docH2("host", "Trusting the CA on your machine")
 	@docP() {
 		Containers already trust the CA. Your machine does not, and Breadboard never adds it to your trust store. @docCodeWord("bb ca") shows the CA's subject, the domain it is constrained to, its validity and fingerprint, and the commands to trust it on macOS or Debian and Ubuntu if you choose to. @docCodeWord("bb ca --pem") prints the certificate itself.
+	}
+	@docP() {
+		You do not need to trust it to open lab services in a browser: @docLink("/docs/getting-started/host-access", "Host access") serves them through a router whose certificate comes from a separate CA that can sign only @docCodeWord("*.localhost") names.
 	}
 	@docTerminal("bb ca", "bb ca --pem > breadboard-ca.pem")
 }

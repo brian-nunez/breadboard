@@ -1,0 +1,94 @@
+package web
+
+// Host access (ADR-0017): reaching lab services from a browser or curl on
+// the host by *.localhost name. A guide under Getting started, because it
+// works the same for apps and every HTTPS infra service.
+
+// hostAccessYAML is the guide's example: an app with replicas that serves
+// TLS itself, and an HAProxy in front of it, both reachable from the host.
+const hostAccessYAML = `version: 1
+name: shop
+services:
+  edge:
+    type: haproxy
+    upstreams:
+      - service: api      # re-encrypt to every replica of api
+        port: 8443
+    host: true            # infra: the catalog's HTTPS listener, 8443
+apps:
+  api:
+    path: ./api
+    command: [api]
+    replicas: 3
+    host:
+      port: 8443          # the port api serves TLS on, with TLS_CERT_FILE`
+
+templ hostAccessGuide() {
+	@docLead() {
+		Add @docCodeWord("host") to an app or an HTTPS service and open it from a browser on your machine, by name, with a certificate the browser can verify. Nothing else in the lab changes.
+	}
+	@docH2("what", "What host does")
+	@docP() {
+		Each target answers at @docCodeWord("https://<target>.<experiment>.localhost:<port>")&#46; An app with replicas also answers once per replica, at @docCodeWord("<app>-<n>.<experiment>.localhost"), so you can reach one replica on purpose. The lab gets one extra container, the host router @docCodeWord("bb-host"), and only it is published on your machine, on @docCodeWord("127.0.0.1:<port>")&#46;
+	}
+	@docCode("experiment.yaml", hostAccessYAML)
+	@docTerminal("bb up")
+	@docP() {
+		After the health checks, @docCodeWord("bb up") prints the URLs, and @docCodeWord("bb status") repeats them. For the example above, with port 44312:
+	}
+	@docTable([]string{"URL", "Reaches"},
+		[]string{"https://edge.shop.localhost:44312", "edge, then every replica of api through HAProxy"},
+		[]string{"https://api.shop.localhost:44312", "every replica of api, in turn"},
+		[]string{"https://api-2.shop.localhost:44312", "api-2 only"},
+	)
+	@docList(
+		"An app's port is host.port. Without it, Breadboard uses the app's Envoy inbound.port, then its register.port. An app in transparent mode may only name one of those two.",
+		"An infra service takes host: true, and the router uses the first HTTPS listener in its catalog entry: a proxy's 8443, Consul's HTTPS API, S3 Compatible's endpoint. host.port is refused there.",
+		"The port is chosen once per lab, from 44300 to 44999, and recorded in .bb/state.json. Later runs keep it while it is free.",
+		"The web UI shows the URLs on each target's page, on the overview, and on bb-host's page.",
+	)
+	@docH2("trust", "Trust the host CA")
+	@docP() {
+		The router's certificate comes from a second CA, the host CA, which can sign only @docCodeWord("*.localhost") names: no real site, IP address, email address or lab identity. Your machine does not trust it until you choose to, and Breadboard never adds it to a trust store. @docCodeWord("bb ca") shows both CAs and prints the exact commands with your certificate's path:
+	}
+	@docList(
+		"macOS: security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db <BB_HOME>/ca/host.crt",
+		"Debian and Ubuntu: copy it to /usr/local/share/ca-certificates/breadboard-host.crt, then sudo update-ca-certificates.",
+		"Fedora and Arch: sudo trust anchor --store <BB_HOME>/ca/host.crt",
+		"Firefox keeps its own store: Settings > Privacy & Security > Certificates > View Certificates > Authorities > Import, then trust it to identify websites.",
+	)
+	@docP() {
+		To try it without trusting anything, hand curl the certificate for one request:
+	}
+	@docTerminal("bb ca --host --pem > host-ca.pem", "curl --cacert host-ca.pem https://api.shop.localhost:44312/")
+	@docH2("names", "How *.localhost resolves")
+	@docP() {
+		Browsers and curl resolve every name under @docCodeWord(".localhost") to loopback by themselves, so these URLs need no DNS setup. Other clients may ask the system resolver, which might not. For those, pin the name to 127.0.0.1, or add it to @docCodeWord("/etc/hosts"):
+	}
+	@docTerminal("curl --resolve api.shop.localhost:44312:127.0.0.1 --cacert host-ca.pem https://api.shop.localhost:44312/")
+	@docCode("/etc/hosts", "127.0.0.1 api.shop.localhost edge.shop.localhost")
+	@docH2("router", "What the router does")
+	@docP() {
+		@docCodeWord("bb-host") is Traefik, configured by Breadboard from your spec, with no Docker socket. Every hop stays TLS with verification:
+	}
+	@docSteps(
+		"Your browser connects to 127.0.0.1:<port> and sends the name it wants as SNI. The router presents the lab's host certificate, which names exactly the lab's host names, and requires TLS 1.2 or later.",
+		"It matches the request's Host to a route. A name it does not know gets a 404.",
+		"It opens a new TLS connection to the target, verified against the lab CA, as <target>.<domain> (or <app>-<n>.<domain> for one replica). An app's URL spreads requests over every replica, round robin.",
+		"The request keeps its Host header (api.shop.localhost:44312), and Traefik adds X-Forwarded-Host, X-Forwarded-Proto and X-Forwarded-For.",
+	)
+	@docP() {
+		The router does not health-check targets, so a stopped replica answers 502 until it is back. Its page in the web UI lists every route, and its Traefik routes tab reads the routers and servers live from Traefik.
+	}
+	@docH2("limits", "Limits")
+	@docList(
+		"HTTP over TLS only. Postgres, Redis, Kafka and PgBouncer are refused: reach them from an app in the lab, or publish an app's port with ports.",
+		"Bound to 127.0.0.1 only, never another interface or IPv6. Any program on your machine can reach a host URL, including web pages in a browser, so an app that changes state should check Origin as it would in production.",
+		"If another program takes the port while the lab is down, the next bb up picks a new one and warns: host port <old> is taken; host access moved to <new>. The URLs change with it.",
+		"The lab domain cannot be <experiment>.localhost or end in .<experiment>.localhost, where host names and lab names would overlap.",
+		"bb export compose includes the router, its certificate and the recorded port, so an exported stack serves the same URLs.",
+	)
+	@docP() {
+		For TLS inside the lab, see @docLink("/docs/getting-started/tls-by-default", "TLS by default"); for proxies that the router can front, @docLink("/docs/load-balancing", "Load balancing")&#46;
+	}
+}

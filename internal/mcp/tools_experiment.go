@@ -22,6 +22,8 @@ type statusOut struct {
 	Domain     string          `json:"domain"`
 	Services   []serviceStatus `json:"services"`
 	Warnings   []string        `json:"warnings" jsonschema:"TLS and resource warnings"`
+	HostURLs   []hostURL       `json:"host_urls,omitempty" jsonschema:"URLs that reach host targets from the host (https://<target>.<experiment>.localhost:<port>); absent without host access or before the first up"`
+	HostPort   int             `json:"host_port,omitempty" jsonschema:"the 127.0.0.1 port the host router is published on"`
 }
 
 type logsIn struct {
@@ -114,6 +116,8 @@ type serviceDetailsOut struct {
 	Parent      string       `json:"parent,omitempty"`
 	Registry    string       `json:"registry,omitempty"`
 	Sidecar     *sidecar     `json:"sidecar,omitempty" jsonschema:"sidecars: what it is"`
+	HostURLs    []string     `json:"host_urls,omitempty" jsonschema:"URLs that reach it from the host through the host router"`
+	HostRouter  bool         `json:"host_router,omitempty" jsonschema:"the lab's host router (bb-host), which serves every host URL"`
 }
 
 type exploreIn struct {
@@ -284,7 +288,8 @@ func (s *Server) addExperimentTools() {
 		if err != nil {
 			return statusOut{}, err
 		}
-		return statusOut{Experiment: res.Experiment, Domain: res.Domain, Services: mapSlice(res.Services, statusView), Warnings: orEmpty(res.Warnings)}, nil
+		return statusOut{Experiment: res.Experiment, Domain: res.Domain, Services: mapSlice(res.Services, statusView), Warnings: orEmpty(res.Warnings),
+			HostURLs: mapSlice(res.HostURLs, hostURLView), HostPort: res.HostPort}, nil
 	})
 
 	add(s, readTool, true, &sdk.Tool{
@@ -361,6 +366,7 @@ func (s *Server) addExperimentTools() {
 			Path: d.Path, Command: d.Command,
 			App: d.App, Instance: d.Instance, Replicas: d.Replicas, Sidecars: mapSlice(d.Sidecars, sidecarView),
 			Parent: d.Parent, Registry: d.Registry, Sidecar: sidecarPtr(d.Sidecar),
+			HostURLs: d.HostURLs, HostRouter: d.HostRouter,
 		}
 		if c := d.Certificate; c != nil {
 			out.Certificate = &certificate{Issuer: c.Issuer, DNSNames: orEmpty(c.DNSNames), Identity: c.Identity, NotAfter: timeView(c.NotAfter)}

@@ -227,7 +227,7 @@ func (s *Server) servicePage(ctx context.Context, name, tab string) servicePage 
 func (s *Server) exploreFragment(w http.ResponseWriter, r *http.Request) {
 	tab := cmp.Or(r.URL.Query().Get("tab"), "explore")
 	p := s.servicePage(r.Context(), r.PathValue("name"), tab)
-	if p.Tab != tab || !slices.Contains([]string{"explore", "envoy", "pgbouncer"}, tab) {
+	if p.Details == nil || p.Tab != tab || !slices.Contains([]string{"explore", "envoy", "pgbouncer"}, tab) {
 		http.NotFound(w, r)
 		return
 	}
@@ -336,6 +336,7 @@ func (s *Server) dashboard(ctx context.Context) dashboardData {
 		return d
 	}
 	d.Experiment, d.Domain, d.Warnings = st.Experiment, st.Domain, st.Warnings
+	d.HostURLs, d.HostPort = st.HostURLs, st.HostPort
 	for _, svc := range st.Services {
 		d.Services = append(d.Services, newRow(svc))
 	}

@@ -26,6 +26,10 @@ type dashboardData struct {
 	Domain       string
 	Services     []row
 	Warnings     []string
+	// HostURLs reach the lab's host targets from the host, in route order;
+	// HostPort is the host router's 127.0.0.1 port (ADR-0017).
+	HostURLs []core.HostURL
+	HostPort int
 }
 
 // row is one service as the dashboard shows it.
@@ -115,7 +119,41 @@ func (r row) Subtitle() string {
 	if r.Kind == "sidecar" {
 		return cmp.Or(r.Type, "sidecar") + " sidecar of " + r.Parent + " · " + r.Image
 	}
+	if r.HostRouter {
+		return "host router · " + r.Image
+	}
 	return r.Image
+}
+
+// hostTarget is where a host URL leads: the target, or the one instance it
+// reaches alone.
+func hostTarget(u core.HostURL) string {
+	if u.Instance != "" {
+		return u.Instance
+	}
+	return u.Target
+}
+
+// hostRouterName is the host router's service name, as status lists it.
+func hostRouterName(d dashboardData) string {
+	for _, r := range d.Services {
+		if r.HostRouter {
+			return r.Name
+		}
+	}
+	return "bb-host"
+}
+
+// hostRoute says which containers a host URL reaches: one replica, every
+// replica of an app, or the target itself.
+func hostRoute(rows []row, u core.HostURL) string {
+	switch {
+	case u.Instance != "":
+		return u.Instance + " only, one replica of " + u.Target
+	case len(instancesOf(rows, u.Target)) > 1:
+		return "every replica of " + u.Target
+	}
+	return u.Target
 }
 
 // Label is how a service is named where an app counts once: the app's name

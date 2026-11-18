@@ -96,8 +96,8 @@ There is no database. Everything is a file, and each kind of data has one home:
 
 - Defaults to `os.UserConfigDir()/breadboard` (`~/Library/Application Support/breadboard` on macOS); overridable by the `BB_HOME` env var. Directory mode `0700`.
 - `config.yaml`: install settings, loaded through bkit `settings` in layers: built-in defaults (`settings.Map`) → `config.yaml` (`settings.File` with the yaml driver) → `BB_*` env vars (`settings.Env`).
-- `ca/root.crt` and `ca/root.key` (`0600`): the install's CA ([`security.md`](security.md)).
-- `ca/host.crt` and `ca/host.key` (`0600`): the host CA for `*.localhost` names, created by `bb ca` or the first `bb up` with a `host` target (Phase 5 wave E, ADR-0017).
+- `ca/root.crt` (`0644`) and `ca/root.key` (`0600`): the install's CA ([`security.md`](security.md)).
+- `ca/host.crt` (`0644`) and `ca/host.key` (`0600`): the host CA for `*.localhost` names, created by `bb ca` or the first `bb up` with a `host` target (Phase 5 wave E, ADR-0017).
 - `ca/lock`: every project shares the CA, so project locks cannot protect it. Loading, creating, or replacing the CA holds an exclusive `flock` on this file; a second caller waits (up to 30 seconds) instead of failing, then sees the CA the first one saved. A key that does not match its certificate is treated as missing and replaced, and leaves signed by the old CA are reissued on the next `bb up`.
 
 ## Project state (`.bb/`)
@@ -206,7 +206,7 @@ Each command is a thin wrapper over one core operation.
 | `bb logs [service] [-f] [--tail n]` | Stream logs. |
 | `bb creds [service]` | Show generated credentials and connection strings. |
 | `bb learn <type>` | Print the catalog entry's learning notes. |
-| `bb ca [--pem] [--host]` | Show both CAs and how to trust them on the host (never auto-installs); `--pem` prints the lab CA's certificate, `--host --pem` the host CA's. |
+| `bb ca [--pem] [--host]` | Show both CAs and how to trust them on the host (never auto-installs); `--pem` prints the lab CA's certificate, `--host --pem` the host CA's; `--host` alone shows only the host CA. |
 | `bb config [get [key] \| set <key> <value>]` | List, read, or change install settings. |
 | `bb migrate` | Upgrade `experiment.yaml` to the current spec version. |
 | `bb export compose [--out dir] [--secrets inline\|dotenv]` | Write a standalone compose stack (default `export/compose`). |

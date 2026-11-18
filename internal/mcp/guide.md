@@ -13,7 +13,7 @@ Breadboard (`bb`) is a local lab for practising system design with real services
 ## Networking and TLS
 
 - Each service is reachable from the experiment's containers as `<service>.<domain>` (default domain `bb.internal`), for example `postgres.bb.internal:5432`. Nothing is published to the host unless the spec asks for it, and then only on `127.0.0.1`.
-- Breadboard runs its own CA (`ca`). Every service and app gets a certificate for its name, mounted at `/etc/bb/tls/tls.crt` and `/etc/bb/tls/tls.key`. The CA is at `/etc/bb/ca.pem`, and `SSL_CERT_FILE` points at a trust bundle (`/etc/bb/trust-bundle.pem`) holding it.
+- Breadboard runs its own CA (`ca`). Every service and app gets a certificate for its name, mounted at `/etc/bb/tls/tls.crt` and `/etc/bb/tls/tls.key`. The CA is at `/etc/bb/ca.pem`, and `SSL_CERT_FILE` points at a trust bundle (`/etc/bb/trust-bundle.pem`) holding it. A second CA, `host` in the `ca` result, signs only the host router's certificate for `https://<service>.<experiment>.localhost:<port>`; containers never see it.
 - Connections use TLS unless an app's `uses` entry turns it off with `tls: {mode: off, reason: ...}` (only toward services with a plaintext listener).
 
 ## How apps connect

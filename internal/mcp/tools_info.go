@@ -121,6 +121,19 @@ type caOut struct {
 	CertPath    string `json:"cert_path"`
 	CertPEM     string `json:"cert_pem" jsonschema:"the public CA certificate"`
 	Created     bool   `json:"created"`
+	Host        hostCA `json:"host" jsonschema:"the host CA: signs only the host router's certificate for https://<service>.<experiment>.localhost:<port>"`
+}
+
+type hostCA struct {
+	Name        string `json:"name"`
+	Domain      string `json:"domain" jsonschema:"the only DNS domain it may sign for: localhost"`
+	Subject     string `json:"subject"`
+	NotBefore   string `json:"not_before"`
+	NotAfter    string `json:"not_after"`
+	Fingerprint string `json:"fingerprint" jsonschema:"SHA-256, hex"`
+	CertPath    string `json:"cert_path"`
+	CertPEM     string `json:"cert_pem" jsonschema:"the public host CA certificate"`
+	Created     bool   `json:"created"`
 }
 
 type configGetIn struct {
@@ -232,13 +245,15 @@ func (s *Server) addInfoTools() {
 
 	add(s, stateTool, true, &sdk.Tool{
 		Name:        "ca",
-		Description: "The Breadboard CA that signs every service certificate: subject, validity, fingerprint, the path of its certificate and the certificate itself. Creates the CA on first use; never touches the host trust store.",
+		Description: "The Breadboard CAs: the lab CA that signs every service certificate, and under host the host CA that signs only the host router's *.localhost certificate. For each: subject, validity, fingerprint, the path of its certificate and the certificate itself. Creates either CA on first use; never touches the host trust store.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, _ noInput) (caOut, error) {
 		res, err := s.eng.CA(ctx)
 		if err != nil {
 			return caOut{}, err
 		}
-		return caOut{Name: res.Name, Domain: res.Domain, Subject: res.Subject, NotBefore: timeView(res.NotBefore), NotAfter: timeView(res.NotAfter), Fingerprint: res.Fingerprint, CertPath: res.CertPath, CertPEM: string(res.CertPEM), Created: res.Created}, nil
+		h := res.Host
+		return caOut{Name: res.Name, Domain: res.Domain, Subject: res.Subject, NotBefore: timeView(res.NotBefore), NotAfter: timeView(res.NotAfter), Fingerprint: res.Fingerprint, CertPath: res.CertPath, CertPEM: string(res.CertPEM), Created: res.Created,
+			Host: hostCA{Name: h.Name, Domain: h.Domain, Subject: h.Subject, NotBefore: timeView(h.NotBefore), NotAfter: timeView(h.NotAfter), Fingerprint: h.Fingerprint, CertPath: h.CertPath, CertPEM: string(h.CertPEM), Created: h.Created}}, nil
 	})
 
 	add(s, readTool, true, &sdk.Tool{

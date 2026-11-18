@@ -37,13 +37,13 @@ type starterConfig struct {
 }
 
 func (s *Server) startersList(w http.ResponseWriter, r *http.Request) {
-	render(w, r, startersPage(s.docsData(r), false))
+	render(w, r, startersPage(s.docsData(r)))
 }
 
-// home is the landing page when the directory has no experiment yet: what to
-// build, or skip to the (empty) dashboard.
+// home is the landing page, at / and /home: what to build, or skip to the
+// dashboard.
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
-	render(w, r, startersPage(s.docsData(r), true))
+	render(w, r, landingPage(s.docsData(r)))
 }
 
 func (s *Server) starter(w http.ResponseWriter, r *http.Request) {

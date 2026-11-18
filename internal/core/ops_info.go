@@ -282,7 +282,7 @@ func (e *Engine) ExportCompose(ctx context.Context, req ExportComposeRequest) (*
 	if err := checkExportDir(out, p.Dir); err != nil {
 		return nil, err
 	}
-	pr, err := e.prepare(ctx, p, req.Events, false)
+	pr, err := e.prepare(ctx, p, req.Events, false, nil)
 	if err != nil {
 		return nil, err
 	}

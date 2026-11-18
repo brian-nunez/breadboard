@@ -49,7 +49,7 @@ TLS is decided per **edge**, because proxies and relays make per-hop decisions.
 - **Plaintext is intentional:** `tls.mode: off` on an edge requires a `reason` (enforced by validation). The engine then:
   1. enables a plaintext listener on the target, used only by edges that asked for it;
   2. places that listener on a private **segment** (compose network) shared only with those clients, so nothing else can reach the unencrypted port:
-     - the segment is an `internal` compose network named `plain-<target>`, with a `/24` subnet allocated from `10.213.0.0/16` (skipping subnets other Docker networks use) and recorded in `.bb/state.json` so it stays stable;
+     - the segment is an `internal` compose network named `plain-<target>`, with a `/24` subnet allocated from `10.213.0.0/16` (skipping subnets other Docker networks use; each lab starts its search at a block hashed from its name, D-202) and recorded in `.bb/state.json` so it stays stable;
      - the target gets the static address `.10` on the segment and the alias `<target>.plain.<domain>`; clients on a plaintext edge connect to that alias;
      - the entry binds its plaintext listener to that address (Kafka, Consul) or accepts unencrypted connections only from that subnet (Postgres `hostnossl`). Entries that cannot do either (Redis) offer no plaintext listener;
   3. reports the edge as a warning in `bb status`, draws it dashed red in the UI, and writes the reason as a comment in exported compose files.

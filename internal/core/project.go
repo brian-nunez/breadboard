@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"maps"
 	"net/netip"
@@ -242,7 +243,12 @@ type prepared struct {
 // caller holds the lock. probe lets it test the host router's port on the
 // host and record it (up); without, the recorded or start port is used
 // as is (export).
-func (e *Engine) prepare(ctx context.Context, p *project, events EventSink, probe bool) (*prepared, error) {
+//
+// avoid lists the subnets a failed compose up in this bb up chose. Docker
+// refused one of them, and the network that took it may not be listed
+// yet, so allocation treats them as taken unless this experiment's own
+// network holds them (D-202).
+func (e *Engine) prepare(ctx context.Context, p *project, events EventSink, probe bool, avoid []netip.Prefix) (*prepared, error) {
 	st, err := e.settings(ctx)
 	if err != nil {
 		return nil, err
@@ -294,7 +300,7 @@ func (e *Engine) prepare(ctx context.Context, p *project, events EventSink, prob
 	if err != nil {
 		return nil, err
 	}
-	subnets, addrs, err := e.allocateSubnets(ctx, m, ps)
+	subnets, addrs, err := e.allocateSubnets(ctx, m, ps, avoid)
 	if err != nil {
 		return nil, err
 	}
@@ -362,7 +368,17 @@ func (e *Engine) reconcileCerts(p *project, m *model.Model, ca *pki.CA, ps *stat
 // 10.213.0.0/16, skipping any block another docker network already uses.
 var segmentPool = netip.MustParsePrefix("10.213.0.0/16")
 
-func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.ProjectState) (map[string]netip.Prefix, map[string]netip.Addr, error) {
+// subnetStart is the /24 block of segmentPool where an experiment's search
+// for a free subnet begins; the search wraps past the last block. Hashing
+// the name spreads labs that start at once over the pool, so they rarely
+// race for the same block (D-202).
+func subnetStart(experiment string) int {
+	h := fnv.New32a()
+	h.Write([]byte(experiment))
+	return int(h.Sum32() % 256)
+}
+
+func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.ProjectState, avoid []netip.Prefix) (map[string]netip.Prefix, map[string]netip.Addr, error) {
 	out := map[string]netip.Prefix{}
 	keep := map[string]bool{}
 	for _, seg := range m.Segments {
@@ -389,10 +405,19 @@ func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.
 	}
 	// Networks owned by this experiment do not count: they are the ones
 	// being reconciled. Every other network's subnet is off limits.
-	var used []netip.Prefix
+	var used, own []netip.Prefix
 	for _, n := range networks {
 		if n.ExperimentID != ps.ExperimentID {
 			used = append(used, n.Subnet)
+		} else {
+			own = append(own, n.Subnet)
+		}
+	}
+	// A subnet a failed attempt chose counts as used, unless this
+	// experiment's own network holds it: compose created that one.
+	for _, p := range avoid {
+		if !slices.ContainsFunc(own, p.Overlaps) {
+			used = append(used, p)
 		}
 	}
 	overlapsUsed := func(p netip.Prefix) bool {
@@ -424,8 +449,9 @@ func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.
 	}
 	free := func(what string) (netip.Prefix, error) {
 		base := segmentPool.Addr().As4()
+		start := subnetStart(m.Name)
 		for i := range 256 {
-			cand := netip.PrefixFrom(netip.AddrFrom4([4]byte{base[0], base[1], byte(i), 0}), 24)
+			cand := netip.PrefixFrom(netip.AddrFrom4([4]byte{base[0], base[1], byte((start + i) % 256), 0}), 24)
 			if !taken(cand) {
 				return cand, nil
 			}

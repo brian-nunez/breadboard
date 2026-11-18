@@ -16,14 +16,19 @@ import (
 // every service is UP. Traefik loading the routers is its config check.
 func traefikRoutesLoaded(t *testing.T, eng *Engine, dir, service string, routers ...string) *TraefikRoutes {
 	t.Helper()
+
 	var routes *TraefikRoutes
+
 	eventually(t, time.Minute, service+"'s routers and servers", func() bool {
 		var err error
+
 		routes, err = eng.TraefikRoutes(context.Background(), ExploreRequest{Dir: dir, Service: service})
 		if err != nil {
 			t.Logf("traefik routes: %v", err)
+
 			return false
 		}
+
 		for _, s := range routes.Services {
 			for _, srv := range s.Servers {
 				if srv.Status != "UP" {
@@ -31,8 +36,10 @@ func traefikRoutesLoaded(t *testing.T, eng *Engine, dir, service string, routers
 				}
 			}
 		}
+
 		return true
 	})
+
 	loaded := map[string]TraefikRouter{}
 	for _, r := range routes.Routers {
 		loaded[strings.TrimSuffix(r.Name, "@file")] = r
@@ -40,11 +47,13 @@ func traefikRoutesLoaded(t *testing.T, eng *Engine, dir, service string, routers
 			t.Errorf("%s: router %s is %s: %v", service, r.Name, r.Status, r.Errors)
 		}
 	}
+
 	for _, name := range routers {
 		if _, ok := loaded[name]; !ok {
 			t.Errorf("%s: router %s not loaded; have %v", service, name, routes.Routers)
 		}
 	}
+
 	return routes
 }
 
@@ -56,6 +65,7 @@ func lastRound(lines []string, end *regexp.Regexp, n int) (round []string, summa
 			return lines[i-n : i], lines[i]
 		}
 	}
+
 	return nil, ""
 }
 
@@ -66,6 +76,7 @@ func lastRound(lines []string, end *regexp.Regexp, n int) (round []string, summa
 func TestIntegrationStarterPathHostRouting(t *testing.T) {
 	eng, dir, _ := sidecarStarterLab(t, "gw-route", "gw/path-host-routing")
 	lastLines(t, eng, dir, "route-client", "route-edge")
+
 	routes := traefikRoutesLoaded(t, eng, dir, "route-edge", "users", "orders", "admin", "default")
 	for _, s := range routes.Services {
 		if name := strings.TrimSuffix(s.Name, "@file"); s.Upstream.Target != name {
@@ -74,12 +85,18 @@ func TestIntegrationStarterPathHostRouting(t *testing.T) {
 	}
 
 	end := regexp.MustCompile(`round \d+: 7 requests, misrouted 0$`)
-	var round []string
-	var summary string
+
+	var (
+		round   []string
+		summary string
+	)
+
 	eventually(t, 2*time.Minute, "a round with every request on its route", func() bool {
 		round, summary = lastRound(logsOf(t, eng, dir, "route-client"), end, 7)
+
 		return round != nil
 	})
+
 	want := []*regexp.Regexp{
 		regexp.MustCompile(`GET /users/42 \(host route-edge\) -> route-users 200: path=/42 prefix=/users host=route-edge\.\S+ \| user 42$`),
 		regexp.MustCompile(`GET /users \(host route-edge\) -> route-users 200: path=/ prefix=/users .*\| users: `),
@@ -94,11 +111,13 @@ func TestIntegrationStarterPathHostRouting(t *testing.T) {
 			t.Errorf("request %d: %q does not match %s", i+1, round[i], re)
 		}
 	}
+
 	t.Logf("%s:\n%s", summary, strings.Join(round, "\n"))
 
 	if lines := logsOf(t, eng, dir, "route-default"); !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "no route: GET /nope") }) {
 		t.Error("route-default did not log the unknown path")
 	}
+
 	if lines := logsOf(t, eng, dir, "route-users"); slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "GET /users/") }) {
 		t.Error("route-users received an unstripped /users/ path")
 	}
@@ -115,12 +134,18 @@ func TestIntegrationStarterRequestTransformation(t *testing.T) {
 	traefikRoutesLoaded(t, eng, dir, "xform-edge", "api", "legacy", "v0")
 
 	end := regexp.MustCompile(`round \d+: 3 requests, unexpected 0$`)
-	var round []string
-	var summary string
+
+	var (
+		round   []string
+		summary string
+	)
+
 	eventually(t, 2*time.Minute, "a round with every transformation as expected", func() bool {
 		round, summary = lastRound(logsOf(t, eng, dir, "xform-client"), end, 3)
+
 		return round != nil
 	})
+
 	want := []*regexp.Regexp{
 		regexp.MustCompile(`GET /api/orders/7 \(sent X-User-Id: admin, .*X-Request-Id: ([0-9a-f]{16})\) -> 200 \| backend saw path=/orders/7 gateway=xform-edge user-id=- request-id=([0-9a-f]{16}) prefix=/api replaced=- forwarded-for=\S+ .*\| response gateway=xform-edge powered-by=-$`),
 		regexp.MustCompile(`GET /legacy/orders/7 -> 200 \| backend saw path=/orders/7 gateway=xform-edge user-id=- .*replaced=/legacy/orders/7 .*\| response gateway=xform-edge powered-by=-$`),
@@ -131,27 +156,34 @@ func TestIntegrationStarterRequestTransformation(t *testing.T) {
 			t.Errorf("request %d: %q does not match %s", i+1, round[i], re)
 		}
 	}
+
 	if m := want[0].FindStringSubmatch(round[0]); m != nil && m[1] != m[2] {
 		t.Errorf("request ID sent %s, seen %s", m[1], m[2])
 	}
+
 	t.Logf("%s:\n%s", summary, strings.Join(round, "\n"))
 
 	// The backend's own log: what it received, request by request.
 	lines := logsOf(t, eng, dir, "xform-backend")
+
 	saw := slices.DeleteFunc(slices.Clone(lines), func(l string) bool { return !strings.Contains(l, "saw GET") })
 	if len(saw) == 0 {
 		t.Fatal("xform-backend logged no request")
 	}
+
 	for _, l := range saw {
 		if !strings.Contains(l, "user-id=-") || strings.Contains(l, "admin") {
 			t.Errorf("the removed X-User-Id reached the backend: %s", l)
 		}
+
 		if strings.Contains(l, "203.0.113.7") {
 			t.Errorf("the forged X-Forwarded-For reached the backend: %s", l)
 		}
+
 		if strings.Contains(l, "path=/api/") || strings.Contains(l, "path=/legacy/") || strings.Contains(l, "path=/v0/") {
 			t.Errorf("the backend saw an untransformed path: %s", l)
 		}
 	}
+
 	t.Logf("xform-backend: %s", saw[len(saw)-1])
 }

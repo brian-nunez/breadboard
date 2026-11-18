@@ -31,19 +31,25 @@ type ycomment string
 // key comments it.
 func ym(kv ...any) ymap {
 	out := make(ymap, 0, len(kv)/2)
+
 	var pending ycomment
+
 	for i := 0; i < len(kv); i++ {
 		if c, ok := kv[i].(ycomment); ok {
 			pending = c
+
 			continue
 		}
+
 		if i+1 >= len(kv) {
 			panic("catalog: ym: a key without a value")
 		}
+
 		out = append(out, yfield{key: kv[i].(string), value: kv[i+1], comment: string(pending)})
 		pending = ""
 		i++
 	}
+
 	return out
 }
 
@@ -55,11 +61,13 @@ func yamlNode(value any) (*yaml.Node, error) {
 	switch v := value.(type) {
 	case ymap:
 		n := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+
 		for _, f := range v {
 			val, err := yamlNode(f.value)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", f.key, err)
 			}
+
 			k := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: f.key}
 			if f.comment != "" {
 				c := yamlComment(f.comment)
@@ -71,24 +79,31 @@ func yamlNode(value any) (*yaml.Node, error) {
 					k.HeadComment = c
 				}
 			}
+
 			n.Content = append(n.Content, k, val)
 		}
+
 		return n, nil
 	case yseq:
 		n := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+
 		for _, item := range v {
 			c, err := yamlNode(item)
 			if err != nil {
 				return nil, err
 			}
+
 			n.Content = append(n.Content, c)
 		}
+
 		return n, nil
 	}
+
 	n := &yaml.Node{}
 	if err := n.Encode(value); err != nil {
 		return nil, err
 	}
+
 	return n, nil
 }
 
@@ -100,15 +115,19 @@ func encodeYAMLDoc(header []string, doc any) []byte {
 	for _, line := range header {
 		buf.WriteString(yamlComment(line) + "\n")
 	}
+
 	buf.WriteString("\n")
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
+
 	if err := enc.Encode(doc); err != nil {
 		panic(fmt.Sprintf("catalog: encode generated YAML: %v", err))
 	}
+
 	if err := enc.Close(); err != nil {
 		panic(fmt.Sprintf("catalog: encode generated YAML: %v", err))
 	}
+
 	return buf.Bytes()
 }
 
@@ -119,5 +138,6 @@ func encodeYAMLDoc(header []string, doc any) []byte {
 // nothing in the text can end the comment.
 func yamlComment(text string) string {
 	text = strings.NewReplacer("\u0085", "\n", "\u2028", "\n", "\u2029", "\n", "\ufeff", " ").Replace(text)
+
 	return Comment("# ", text)
 }

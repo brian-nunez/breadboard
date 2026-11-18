@@ -20,8 +20,10 @@ import (
 type Kind string
 
 const (
+	// Infra is a service from the infrastructure catalog.
 	Infra Kind = "infra"
-	App   Kind = "app"
+	// App is the user's own program.
+	App Kind = "app"
 	// Sidecar runs in an app instance's network namespace and uses its
 	// certificate: a type from the sidecar catalog, or the agent that
 	// registers the app with a service registry (consul-agent).
@@ -124,6 +126,7 @@ func (s *Service) Group() string {
 	if s.AppName != "" {
 		return s.AppName
 	}
+
 	return s.Name
 }
 
@@ -176,6 +179,7 @@ func (m *Model) HostRouter() (*Service, bool) {
 	if i < 0 {
 		return nil, false
 	}
+
 	return m.Services[i], true
 }
 
@@ -185,28 +189,33 @@ func (m *Model) Service(name string) (*Service, bool) {
 	if i < 0 {
 		return nil, false
 	}
+
 	return m.Services[i], true
 }
 
 // Instances lists an app's instances in order.
 func (m *Model) Instances(app string) []*Service {
 	var out []*Service
+
 	for _, s := range m.Services {
 		if s.Kind == App && s.AppName == app {
 			out = append(out, s)
 		}
 	}
+
 	return out
 }
 
 // EdgesFrom lists an app's edges: uses order, then Envoy outbound targets.
 func (m *Model) EdgesFrom(name string) []Edge {
 	var out []Edge
+
 	for _, e := range m.Edges {
 		if e.From == name {
 			out = append(out, e)
 		}
 	}
+
 	return out
 }
 
@@ -216,28 +225,33 @@ func (m *Model) Segment(target string) (Segment, bool) {
 	if i < 0 {
 		return Segment{}, false
 	}
+
 	return m.Segments[i], true
 }
 
 // SegmentsOf lists the segments a service belongs to, as target or client.
 func (m *Model) SegmentsOf(name string) []Segment {
 	var out []Segment
+
 	for _, s := range m.Segments {
 		if s.Target == name || slices.Contains(s.Clients, name) {
 			out = append(out, s)
 		}
 	}
+
 	return out
 }
 
 // PlaintextEdges lists edges that deliberately skip TLS.
 func (m *Model) PlaintextEdges() []Edge {
 	var out []Edge
+
 	for _, e := range m.Edges {
 		if !e.TLS {
 			out = append(out, e)
 		}
 	}
+
 	return out
 }
 
@@ -249,6 +263,7 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 		if !ok {
 			return nil, fmt.Errorf("resolve %s: unknown type %q", svc.Name, svc.Type)
 		}
+
 		fqdn := svc.Name + "." + domain
 		m.Services = append(m.Services, &Service{
 			Name:       svc.Name,
@@ -274,16 +289,21 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 			if !ok || target.Kind != Infra {
 				return nil, fmt.Errorf("resolve %s: uses %q, which is not an infra service", app.Name, u.Service)
 			}
+
 			l := target.Entry.Listeners[0]
+
 			e := Edge{From: app.Name, To: target.Name, Listener: l.Name, Port: l.Port, TLS: true}
 			if u.TLS.Plaintext() {
 				if l.PlaintextPort == 0 {
 					return nil, fmt.Errorf("resolve %s: %s has no plaintext listener", app.Name, target.Name)
 				}
+
 				e.TLS, e.Port, e.Reason = false, l.PlaintextPort, u.TLS.Reason
 			}
+
 			m.Edges = append(m.Edges, e)
 		}
+
 		if err := instances(m, s, app, guarded[app.Name]); err != nil {
 			return nil, err
 		}
@@ -301,11 +321,14 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 			return nil, err
 		}
 	}
+
 	logBuckets(m)
+
 	m.Segments = segments(m)
 	if err := hostRouter(m, s); err != nil {
 		return nil, err
 	}
+
 	return m, nil
 }
 
@@ -315,15 +338,19 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 // then apps, each in spec order.
 func hostRouter(m *Model, s *spec.Spec) error {
 	var targets []catalog.HostTarget
+
 	for _, declared := range s.Services {
 		if declared.Host == nil {
 			continue
 		}
+
 		svc, _ := m.Service(declared.Name)
+
 		i := slices.IndexFunc(svc.Entry.Listeners, func(l catalog.Listener) bool { return l.Protocol == "https" })
 		if i < 0 {
 			return fmt.Errorf("resolve %s: host needs an HTTPS listener, and type %s has none", svc.Name, svc.Entry.ID)
 		}
+
 		targets = append(targets, catalog.HostTarget{
 			Target:     svc.Name,
 			Name:       HostName(svc.Name, m.Name),
@@ -332,25 +359,32 @@ func hostRouter(m *Model, s *spec.Spec) error {
 			Instances:  []catalog.HostInstance{{Service: svc.Name, FQDN: svc.FQDN}},
 		})
 	}
+
 	for _, app := range s.Apps {
 		if app.Host == nil {
 			continue
 		}
+
 		port, ok := app.HostPort()
 		if !ok {
 			return fmt.Errorf("resolve %s: host needs a TLS port", app.Name)
 		}
+
 		t := catalog.HostTarget{Target: app.Name, App: true, Name: HostName(app.Name, m.Name), ServerName: app.Name + "." + m.Domain, Port: port}
+
 		insts := m.Instances(app.Name)
 		for _, inst := range insts {
 			hi := catalog.HostInstance{Service: inst.Name, FQDN: inst.FQDN}
 			if len(insts) > 1 {
 				hi.Name = HostName(inst.Name, m.Name)
 			}
+
 			t.Instances = append(t.Instances, hi)
 		}
+
 		targets = append(targets, t)
 	}
+
 	if len(targets) == 0 {
 		return nil
 	}
@@ -360,10 +394,12 @@ func hostRouter(m *Model, s *spec.Spec) error {
 	if m.Domain == own || strings.HasSuffix(m.Domain, "."+own) {
 		return fmt.Errorf("%w: host access needs a lab domain outside %s, and the domain is %s: change it with bb config set domain", errs.ErrValidation, own, m.Domain)
 	}
+
 	entry, ok := catalog.Lookup("traefik")
 	if !ok {
 		return fmt.Errorf("resolve %s: the catalog has no traefik", spec.HostRouterName)
 	}
+
 	name := spec.HostRouterName
 	fqdn := name + "." + m.Domain
 	m.Services = append(m.Services, &Service{
@@ -379,6 +415,7 @@ func hostRouter(m *Model, s *spec.Spec) error {
 		HostRouter:  true,
 		HostTargets: targets,
 	})
+
 	return nil
 }
 
@@ -390,22 +427,27 @@ func upstreams(m *Model, s *spec.Spec, declared spec.Service) error {
 	if len(declared.Upstreams) > 0 && proxy.Entry.Proxy == nil {
 		return fmt.Errorf("resolve %s: type %s takes no upstreams", proxy.Name, proxy.Entry.ID)
 	}
+
 	for _, u := range declared.Upstreams {
 		mode := u.Mode()
 		up := catalog.Upstream{Name: u.Route(), Service: u.Service, Mode: mode}
+
 		e := Edge{From: proxy.Name, To: u.Service, TLS: mode != spec.TLSOff, Mode: mode}
 		if mode == spec.TLSOff {
 			up.Reason, e.Reason = u.TLS.Reason, u.TLS.Reason
 		}
+
 		if app, ok := s.App(u.Service); ok {
 			up.App, e.ToApp = true, true
 			up.ServerName = app.Name + "." + m.Domain
 			port := u.Port
-			switch {
-			case mode == spec.TLSOff:
+
+			switch mode {
+			case spec.TLSOff:
 				if port == 0 {
 					port = spec.DefaultPlainPort
 				}
+
 				up.Host = SegmentFQDN(app.Name, m.Domain)
 				e.Listener = "plain"
 			default:
@@ -414,12 +456,16 @@ func upstreams(m *Model, s *spec.Spec, declared spec.Service) error {
 					if !ok {
 						return fmt.Errorf("resolve %s: upstream %s serves no TLS port", proxy.Name, u.Service)
 					}
+
 					port = p
 				}
+
 				up.Host = up.ServerName
 				e.Listener = "tls"
 			}
+
 			up.Port, e.Port = port, port
+
 			for _, inst := range m.Instances(app.Name) {
 				if mode == spec.TLSOff {
 					up.Servers = append(up.Servers, SegmentFQDN(inst.Name, m.Domain))
@@ -431,20 +477,25 @@ func upstreams(m *Model, s *spec.Spec, declared spec.Service) error {
 			l := target.Entry.Listeners[0]
 			up.ServerName, up.Host, up.Port = target.FQDN, target.FQDN, l.Port
 			up.Config = target.Config
+
 			e.Listener, e.Port = l.Name, l.Port
 			if mode == spec.TLSOff {
 				if l.PlaintextPort == 0 {
 					return fmt.Errorf("resolve %s: upstream %s has no plaintext listener", proxy.Name, u.Service)
 				}
+
 				up.Host, up.Port, e.Port = SegmentFQDN(target.Name, m.Domain), l.PlaintextPort, l.PlaintextPort
 			}
+
 			up.Servers = []string{up.Host}
 		} else {
 			return fmt.Errorf("resolve %s: upstream %q is not a service or app", proxy.Name, u.Service)
 		}
+
 		proxy.Upstreams = append(proxy.Upstreams, up)
 		m.Edges = append(m.Edges, e)
 	}
+
 	return nil
 }
 
@@ -455,15 +506,19 @@ func logBuckets(m *Model) {
 		if svc.Sidecar == nil || svc.Sidecar.FluentBit == nil {
 			continue
 		}
+
 		fb := svc.Sidecar.FluentBit
+
 		target, ok := m.Service(fb.To)
 		if !ok || target.Kind != Infra {
 			continue
 		}
+
 		var buckets []string
 		if b := target.Config["buckets"]; b != "" {
 			buckets = strings.Split(b, ",")
 		}
+
 		if !slices.Contains(buckets, fb.Bucket) {
 			target.Config["buckets"] = strings.Join(append(buckets, fb.Bucket), ",")
 		}
@@ -478,10 +533,12 @@ func instances(m *Model, s *spec.Spec, app *spec.App, guarded bool) error {
 		if app.Health.Path != "" {
 			health.Path = app.Health.Path
 		}
+
 		if app.Health.Port != 0 {
 			health.Port = app.Health.Port
 		}
 	}
+
 	shared := app.Name + "." + m.Domain
 	for n, name := range app.Instances() {
 		inst := &Service{
@@ -500,39 +557,50 @@ func instances(m *Model, s *spec.Spec, app *spec.App, guarded bool) error {
 			inst.Instance = n + 1
 			inst.Aliases = append(inst.Aliases, shared)
 		}
+
 		if app.IsPod() || guarded {
 			inst.Pod = spec.PodName(name)
 		}
+
 		if guarded {
 			inst.PlainGuard, inst.Netinit = true, spec.NetinitName(name)
 		}
+
 		m.Services = append(m.Services, inst)
+
 		for _, declared := range app.Sidecars {
 			sc := declared.WithDefaults()
+
 			typ, ok := sidecar.Lookup(sc.Type)
 			if !ok || typ.Internal {
 				return fmt.Errorf("resolve %s: unknown sidecar type %q", app.Name, sc.Type)
 			}
+
 			if sc.Transparent() {
 				inst.Netinit, inst.Transparent = spec.NetinitName(name), true
 			}
+
 			svc := sidecarService(inst, spec.SidecarServiceName(name, sc.ID()), typ, typ.Image)
 			svc.Sidecar = &sc
 			m.Services = append(m.Services, svc)
 		}
+
 		if app.Register != nil {
 			agent, err := registrationAgent(m, app, inst)
 			if err != nil {
 				return err
 			}
+
 			m.Services = append(m.Services, agent)
 		}
 	}
+
 	return nil
 }
 
 func sidecarService(inst *Service, name string, typ *sidecar.Type, image string) *Service {
 	inst.Sidecars = append(inst.Sidecars, name)
+
 	return &Service{
 		Name:        name,
 		Kind:        Sidecar,
@@ -549,19 +617,24 @@ func sidecarService(inst *Service, name string, typ *sidecar.Type, image string)
 // with the first registry the app uses.
 func registrationAgent(m *Model, app *spec.App, inst *Service) (*Service, error) {
 	typ, _ := sidecar.Lookup(spec.SidecarConsulAgent)
+
 	for _, u := range app.Uses {
 		target, ok := m.Service(u.Service)
 		if !ok || target.Kind != Infra || target.Entry.Sidecar == nil {
 			continue
 		}
+
 		reg := *app.Register
 		if reg.Name == "" {
 			reg.Name = app.Name
 		}
+
 		svc := sidecarService(inst, spec.SidecarName(inst.Name), typ, target.Entry.Image)
 		svc.Entry, svc.Registry, svc.Register = target.Entry, target.Name, &reg
+
 		return svc, nil
 	}
+
 	return nil, fmt.Errorf("resolve %s: register needs a service registry in uses", app.Name)
 }
 
@@ -574,14 +647,17 @@ func outbound(m *Model, s *spec.Spec, app *spec.App) error {
 			if sc.Sidecar == nil || sc.Sidecar.Envoy == nil {
 				continue
 			}
+
 			for _, o := range sc.Sidecar.Envoy.Outbound {
 				t := sidecar.Target{Service: o.Service, Outbound: o}
+
 				e := Edge{From: app.Name, To: o.Service, TLS: true, Via: sc.Sidecar.ID()}
 				if target, ok := s.App(o.Service); ok {
 					port, ok := target.TLSPort()
 					if !ok {
 						return fmt.Errorf("resolve %s: outbound target %s serves no TLS port", app.Name, o.Service)
 					}
+
 					t.App, t.FQDN, t.Port = true, target.Name+"."+m.Domain, port
 					e.ToApp, e.Listener, e.Port = true, "tls", port
 				} else if svc, ok := m.Service(o.Service); ok && svc.Kind == Infra {
@@ -591,6 +667,7 @@ func outbound(m *Model, s *spec.Spec, app *spec.App) error {
 				} else {
 					return fmt.Errorf("resolve %s: outbound target %q is not a service or app", app.Name, o.Service)
 				}
+
 				sc.Targets = append(sc.Targets, t)
 				if inst.Instance <= 1 {
 					m.Edges = append(m.Edges, e) // one edge per app, not per replica
@@ -598,6 +675,7 @@ func outbound(m *Model, s *spec.Spec, app *spec.App) error {
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -606,31 +684,40 @@ func outbound(m *Model, s *spec.Spec, app *spec.App) error {
 // that asked for plaintext.
 func segments(m *Model) []Segment {
 	var out []Segment
+
 	seen := map[string]bool{}
 	for _, svc := range m.Services {
 		if svc.Kind == Sidecar || seen[svc.Group()] {
 			continue
 		}
+
 		target := svc.Group()
 		seen[target] = true
+
 		var seg *Segment
+
 		for _, e := range m.Edges {
 			if e.TLS || e.To != target {
 				continue
 			}
+
 			if seg == nil {
 				seg = &Segment{Name: "plain-" + target, Target: target}
 			}
+
 			if svc.Kind == App {
 				seg.Port = e.Port
 			}
+
 			seg.Clients = append(seg.Clients, e.From)
 			seg.Reasons = append(seg.Reasons, fmt.Sprintf("%s: %s", e.From, e.Reason))
 		}
+
 		if seg != nil {
 			out = append(out, *seg)
 		}
 	}
+
 	return out
 }
 
@@ -639,8 +726,10 @@ func resources(override spec.Resources, def catalog.Resources) catalog.Resources
 	if override.Memory != "" {
 		r.Memory = override.Memory
 	}
+
 	if override.CPUs != "" {
 		r.CPUs = override.CPUs
 	}
+
 	return r
 }

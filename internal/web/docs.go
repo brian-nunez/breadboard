@@ -68,6 +68,7 @@ func findTech(id string) (tech, bool) {
 	if i < 0 {
 		return tech{}, false
 	}
+
 	return techs[i], true
 }
 
@@ -76,6 +77,7 @@ func (t tech) guide(slug string) (guide, bool) {
 	if i < 0 {
 		return guide{}, false
 	}
+
 	return t.Guides[i], true
 }
 
@@ -93,11 +95,13 @@ func (s *Server) docsData(r *http.Request) docsData {
 			d.Catalog[e.Type] = e
 		}
 	}
+
 	if st, err := s.eng.Starters(r.Context()); err == nil {
 		for _, x := range st.Starters {
 			d.Starters[x.ID] = x
 		}
 	}
+
 	return d
 }
 
@@ -109,8 +113,10 @@ func (s *Server) docsTech(w http.ResponseWriter, r *http.Request) {
 	t, ok := findTech(r.PathValue("tech"))
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
+
 	render(w, r, techPage(s.docsData(r), t))
 }
 
@@ -118,13 +124,17 @@ func (s *Server) docsGuide(w http.ResponseWriter, r *http.Request) {
 	t, ok := findTech(r.PathValue("tech"))
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
+
 	g, ok := t.guide(r.PathValue("guide"))
 	if !ok {
 		http.NotFound(w, r)
+
 		return
 	}
+
 	render(w, r, guidePage(s.docsData(r), t, g))
 }
 
@@ -142,13 +152,16 @@ func (s *Server) liveFragment(w http.ResponseWriter, r *http.Request) {
 			if row.Type != "kafka" || row.State != "running" {
 				continue
 			}
+
 			k, err := s.eng.KafkaTopics(r.Context(), core.ExploreRequest{Dir: s.dir, Service: row.Name})
 			if err != nil {
 				return
 			}
+
 			if sentence := groupSentence(k); sentence != "" {
 				render(w, r, kafkaGroupsLive(d.Experiment, row.Name, &kafkaLive{Sentence: sentence}))
 			}
+
 			return
 		}
 	default:
@@ -161,14 +174,18 @@ func groupSentence(k *core.KafkaOverview) string {
 	if len(k.Groups) == 0 || len(k.Groups[0].Topics) == 0 {
 		return ""
 	}
+
 	g := k.Groups[0]
 	partitions := 0
+
 	for _, t := range k.Topics {
 		if t.Name == g.Topics[0] {
 			partitions = t.Partitions
 		}
 	}
+
 	var owns string
+
 	switch {
 	case g.Members == 0:
 		owns = "it has no active members, so nothing is reading"
@@ -181,5 +198,6 @@ func groupSentence(k *core.KafkaOverview) string {
 	default:
 		owns = fmt.Sprintf("it has %d members, so %d of them sit idle", g.Members, g.Members-partitions)
 	}
+
 	return fmt.Sprintf("%s has %d partitions and the group %s reads it: %s. Its lag is %s messages.", g.Topics[0], partitions, g.Name, owns, commas(g.Lag))
 }

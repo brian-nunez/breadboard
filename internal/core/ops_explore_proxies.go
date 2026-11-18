@@ -28,25 +28,31 @@ func (e *Engine) exploreInfra(ctx context.Context, req ExploreRequest, typ strin
 	if err := e.rt.Available(ctx); err != nil {
 		return nil, nil, nil, err
 	}
+
 	p, err := e.open(req.Dir)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
 	st, err := e.settings(ctx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
 	m, err := model.Resolve(p.spec, st.Domain)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
 	svc, ok := m.Service(req.Service)
 	if !ok || svc.Kind != model.Infra || svc.Entry.ID != typ {
 		return nil, nil, nil, fmt.Errorf("no %s service named %q: %w", typ, req.Service, ErrNotFound)
 	}
+
 	run := func(cmd ...string) ([]byte, error) {
 		return e.rt.Exec(ctx, m.Name, svc.Name, cmd)
 	}
+
 	return m, svc, run, nil
 }
 
@@ -66,9 +72,11 @@ func proxyUnits(svc *model.Service) map[string]ProxyUpstream {
 	if svc.Entry.Proxy == nil || svc.Entry.Proxy.Unit == nil {
 		return out
 	}
+
 	for _, u := range svc.Upstreams {
 		out[svc.Entry.Proxy.Unit(u)] = ProxyUpstream{Route: u.Name, Target: u.Service, Mode: u.Mode}
 	}
+
 	return out
 }
 
@@ -77,6 +85,7 @@ func proxyUnits(svc *model.Service) map[string]ProxyUpstream {
 // for resolving inside the proxy.
 func upstreamHosts(svc *model.Service) []string {
 	var names []string
+
 	for _, u := range svc.Upstreams {
 		for _, s := range upstreamServers(u) {
 			if !slices.Contains(names, s) {
@@ -84,6 +93,7 @@ func upstreamHosts(svc *model.Service) []string {
 			}
 		}
 	}
+
 	return names
 }
 
@@ -93,6 +103,7 @@ func upstreamServers(u catalog.Upstream) []string {
 	if len(u.Servers) > 0 {
 		return u.Servers
 	}
+
 	return []string{u.Host}
 }
 
@@ -103,17 +114,20 @@ func instanceName(name, domain string) string {
 	if n, ok := strings.CutSuffix(name, ".plain."+domain); ok {
 		return n
 	}
+
 	return strings.TrimSuffix(name, "."+domain)
 }
 
 // parseHosts reads getent hosts output into address -> instance.
 func parseHosts(out, domain string) map[string]string {
 	hosts := map[string]string{}
+
 	for _, line := range strings.Split(out, "\n") {
 		if f := strings.Fields(line); len(f) >= 2 {
 			hosts[f[0]] = instanceName(f[1], domain)
 		}
 	}
+
 	return hosts
 }
 
@@ -204,15 +218,19 @@ func (e *Engine) HAProxyStats(ctx context.Context, req ExploreRequest) (*HAProxy
 	if err != nil {
 		return nil, err
 	}
+
 	out, err := run(append([]string{"bash", "-c", haproxyScript, "bb-haproxy"}, upstreamHosts(svc)...)...)
 	if err != nil {
 		return nil, err
 	}
+
 	res, err := parseHAProxy(string(out), m.Domain, proxyUnits(svc))
 	if err != nil {
 		return nil, err
 	}
+
 	res.Service = svc.Name
+
 	return res, nil
 }
 
@@ -220,26 +238,33 @@ func (e *Engine) HAProxyStats(ctx context.Context, req ExploreRequest) (*HAProxy
 // from the CSV header, so columns added by later versions do not matter.
 func parseHAProxy(out, domain string, units map[string]ProxyUpstream) (*HAProxyStats, error) {
 	sections := splitSections(out)
+
 	body, err := httpBody(sections["stats"])
 	if err != nil {
 		return nil, fmt.Errorf("haproxy %s;csv: %w", catalog.HAProxyStatsURI, err)
 	}
+
 	r := csv.NewReader(strings.NewReader(strings.TrimPrefix(string(body), "# ")))
 	r.FieldsPerRecord, r.LazyQuotes = -1, true
+
 	records, err := r.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("haproxy stats CSV: %w", err)
 	}
+
 	if len(records) == 0 || !slices.Contains(records[0], "pxname") || !slices.Contains(records[0], "svname") {
 		return nil, fmt.Errorf("haproxy stats CSV: no header")
 	}
+
 	col := map[string]int{}
 	for i, h := range records[0] {
 		col[h] = i
 	}
+
 	hosts := parseHosts(sections["hosts"], domain)
 	res := &HAProxyStats{}
 	backends := map[string]int{}
+
 	backend := func(name string) *HAProxyBackend {
 		i, ok := backends[name]
 		if !ok {
@@ -247,6 +272,7 @@ func parseHAProxy(out, domain string, units map[string]ProxyUpstream) (*HAProxyS
 			backends[name] = i
 			res.Backends = append(res.Backends, HAProxyBackend{Name: name, Upstream: units[name]})
 		}
+
 		return &res.Backends[i]
 	}
 	for _, rec := range records[1:] {
@@ -254,12 +280,15 @@ func parseHAProxy(out, domain string, units map[string]ProxyUpstream) (*HAProxyS
 			if i, ok := col[name]; ok && i < len(rec) {
 				return rec[i]
 			}
+
 			return ""
 		}
 		num := func(name string) int64 {
 			n, _ := strconv.ParseInt(get(name), 10, 64)
+
 			return n
 		}
+
 		px, sv := get("pxname"), get("svname")
 		switch sv {
 		case "":
@@ -290,14 +319,17 @@ func parseHAProxy(out, domain string, units map[string]ProxyUpstream) (*HAProxyS
 			} else {
 				s.Instance = hosts[host]
 			}
+
 			s.Up = strings.HasPrefix(s.Status, "UP") || s.Status == "no check" || s.Status == "NOLB"
 			b := backend(px)
 			b.Servers = append(b.Servers, s)
 		}
 	}
+
 	if len(res.Frontends) == 0 && len(res.Backends) == 0 {
 		return nil, fmt.Errorf("haproxy stats CSV: no rows")
 	}
+
 	return res, nil
 }
 
@@ -365,15 +397,19 @@ func (e *Engine) TraefikRoutes(ctx context.Context, req ExploreRequest) (*Traefi
 	if err != nil {
 		return nil, err
 	}
+
 	out, err := run("sh", "-c", traefikScript)
 	if err != nil {
 		return nil, err
 	}
+
 	res, err := parseTraefik(string(out), m.Domain, proxyUnits(svc))
 	if err != nil {
 		return nil, err
 	}
+
 	res.Service = svc.Name
+
 	return res, nil
 }
 
@@ -418,15 +454,18 @@ type traefikServiceJSON struct {
 func parseTraefik(out, domain string, units map[string]ProxyUpstream) (*TraefikRoutes, error) {
 	sections := splitSections(out)
 	res := &TraefikRoutes{}
+
 	for _, proto := range []string{"http", "tcp"} {
 		var routers []traefikRouterJSON
 		if err := traefikJSON(sections, proto+"/routers", &routers); err != nil {
 			return nil, err
 		}
+
 		for _, r := range routers {
 			if r.Provider == "internal" {
 				continue
 			}
+
 			tr := TraefikRouter{
 				Name: r.Name, Protocol: proto, EntryPoints: r.EntryPoints, Rule: r.Rule, Priority: r.Priority,
 				Middlewares: r.Middlewares, Service: r.Service, Status: r.Status, Errors: r.Error,
@@ -437,16 +476,20 @@ func parseTraefik(out, domain string, units map[string]ProxyUpstream) (*TraefikR
 			case r.TLS != nil:
 				tr.TLS = "terminate"
 			}
+
 			res.Routers = append(res.Routers, tr)
 		}
+
 		var services []traefikServiceJSON
 		if err := traefikJSON(sections, proto+"/services", &services); err != nil {
 			return nil, err
 		}
+
 		for _, s := range services {
 			if s.Provider == "internal" {
 				continue
 			}
+
 			ts := TraefikService{
 				Name: s.Name, Upstream: units[strings.TrimSuffix(s.Name, "@"+s.Provider)], Protocol: proto,
 				Type: s.Type, Status: s.Status, UsedBy: s.UsedBy, Errors: s.Error,
@@ -456,14 +499,17 @@ func parseTraefik(out, domain string, units map[string]ProxyUpstream) (*TraefikR
 				if hc := lb.HealthCheck; hc != nil {
 					ts.HealthCheck = strings.TrimSpace(fmt.Sprintf("every %s %s", hc.Interval, cmp.Or(hc.Path, "(TCP connect)")))
 				}
+
 				for _, sv := range lb.Servers {
 					addr := cmp.Or(sv.URL, sv.Address)
 					ts.Servers = append(ts.Servers, TraefikServer{Address: addr, Instance: instanceName(serverHost(addr), domain), Status: s.ServerStatus[addr]})
 				}
 			}
+
 			res.Services = append(res.Services, ts)
 		}
 	}
+
 	return res, nil
 }
 
@@ -473,9 +519,11 @@ func traefikJSON(sections map[string]string, name string, v any) error {
 	if body == "" {
 		return fmt.Errorf("traefik /api/%s: no response", name)
 	}
+
 	if err := json.Unmarshal([]byte(body), v); err != nil {
 		return fmt.Errorf("traefik /api/%s: %w", name, err)
 	}
+
 	return nil
 }
 
@@ -484,8 +532,10 @@ func serverHost(addr string) string {
 	if _, rest, ok := strings.Cut(addr, "://"); ok {
 		addr = rest
 	}
+
 	addr, _, _ = strings.Cut(addr, "/")
 	host, _, _ := strings.Cut(addr, ":")
+
 	return host
 }
 
@@ -541,29 +591,37 @@ func (e *Engine) NginxStatus(ctx context.Context, req ExploreRequest) (*NginxSta
 	if err != nil {
 		return nil, err
 	}
+
 	names := upstreamHosts(svc)
+
 	out, err := run(append([]string{"sh", "-c", nginxScript, "bb-nginx"}, names...)...)
 	if err != nil {
 		return nil, err
 	}
+
 	res, err := parseNginx(string(out))
 	if err != nil {
 		return nil, err
 	}
+
 	res.Service = svc.Name
 	byName := map[string]string{}
+
 	for _, line := range strings.Split(splitSections(string(out))["hosts"], "\n") {
 		if f := strings.Fields(line); len(f) >= 2 {
 			byName[strings.TrimSuffix(f[1], ".")] = f[0]
 		}
 	}
+
 	for _, u := range svc.Upstreams {
 		nu := NginxUpstream{ProxyUpstream: ProxyUpstream{Route: u.Name, Target: u.Service, Mode: u.Mode}, Port: u.Port}
 		for _, s := range upstreamServers(u) {
 			nu.Backends = append(nu.Backends, NginxBackend{Instance: instanceName(s, m.Domain), Name: s, Address: byName[s]})
 		}
+
 		res.Upstreams = append(res.Upstreams, nu)
 	}
+
 	return res, nil
 }
 
@@ -577,7 +635,9 @@ func parseNginx(out string) (*NginxStatus, error) {
 	text := splitSections(out)["stub_status"]
 	lines := strings.Split(strings.ReplaceAll(text, "\r", ""), "\n")
 	res := &NginxStatus{}
+
 	var found int
+
 	for i, line := range lines {
 		f := strings.Fields(line)
 		switch {
@@ -599,9 +659,11 @@ func parseNginx(out string) (*NginxStatus, error) {
 			found++
 		}
 	}
+
 	if found != 3 {
 		return nil, fmt.Errorf("nginx %s: unexpected output %q", catalog.NginxStatusURI, strings.TrimSpace(text))
 	}
+
 	return res, nil
 }
 
@@ -614,22 +676,27 @@ func (e *Engine) envoyInfra(m *model.Model, svc *model.Service, run func(...stri
 	if err != nil {
 		return nil, err
 	}
+
 	res, err := parseEnvoy(string(out), "."+m.Domain)
 	if err != nil {
 		return nil, err
 	}
+
 	res.Proxy = svc.Name
 	units := proxyUnits(svc)
+
 	for i := range res.Clusters {
 		c := &res.Clusters[i]
 		if u, ok := units[c.Name]; ok {
 			c.Role, c.Target, c.Mode = "upstream", u.Target, u.Mode
 		}
+
 		for j := range c.Hosts {
 			// Terminate hops resolve as <instance>.plain.<domain>.
 			c.Hosts[j].Instance = strings.TrimSuffix(c.Hosts[j].Instance, ".plain")
 		}
 	}
+
 	return res, nil
 }
 
@@ -640,15 +707,19 @@ func (e *Engine) pgbouncerInfra(svc *model.Service, run func(...string) ([]byte,
 	if err != nil {
 		return nil, err
 	}
+
 	pools, err := parsePgBouncer(string(out))
 	if err != nil {
 		return nil, err
 	}
+
 	res := &PgBouncerPools{Proxy: svc.Name, PoolMode: svc.Config["pool_mode"], Port: catalog.PgBouncerPort, Pools: pools}
+
 	res.PoolSize, _ = strconv.Atoi(svc.Config["pool_size"])
 	if len(svc.Upstreams) > 0 {
 		res.Service = svc.Upstreams[0].Service
 	}
+
 	return res, nil
 }
 
@@ -663,5 +734,6 @@ func (e *Engine) infraProxy(ctx context.Context, req ExploreRequest, typ string)
 	case errors.Is(err, ErrNotFound):
 		return nil, nil, nil, false, nil
 	}
+
 	return nil, nil, nil, false, err
 }

@@ -27,28 +27,35 @@ var lbWindowRe = regexp.MustCompile(`last 5s: (\d+) requests \| ([^|]*)\| status
 // lbWindows parses the windows of lines that contain label, from line skip on.
 func lbWindows(lines []string, label string, skip int) []lbWindow {
 	var out []lbWindow
+
 	for _, l := range lines[min(skip, len(lines)):] {
 		if !strings.Contains(l, label) {
 			continue
 		}
+
 		m := lbWindowRe.FindStringSubmatch(l)
 		if m == nil {
 			continue
 		}
+
 		w := lbWindow{line: l, replicas: map[string]int{}, statuses: map[string]int{}}
+
 		w.total, _ = strconv.Atoi(m[1])
 		for _, f := range strings.Fields(m[2]) {
 			if k, v, ok := strings.Cut(f, "="); ok {
 				w.replicas[k], _ = strconv.Atoi(v)
 			}
 		}
+
 		for _, f := range strings.Fields(m[3]) {
 			if k, v, ok := strings.Cut(f, "="); ok {
 				w.statuses[k], _ = strconv.Atoi(v)
 			}
 		}
+
 		out = append(out, w)
 	}
+
 	return out
 }
 
@@ -57,6 +64,7 @@ func (w lbWindow) share(replica string) float64 {
 	if w.total == 0 {
 		return 0
 	}
+
 	return float64(w.replicas[replica]) / float64(w.total)
 }
 
@@ -69,12 +77,14 @@ func (w lbWindow) balanced(prefix string, n int, lo, hi float64) bool {
 	if !w.allOK() || len(w.replicas) != n {
 		return false
 	}
+
 	for i := 1; i <= n; i++ {
 		s := w.share(prefix + "-" + strconv.Itoa(i))
 		if s < lo || s > hi {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -86,54 +96,68 @@ func TestIntegrationStarterLBRoundRobin(t *testing.T) {
 	lastLines(t, eng, dir, "rr-client", "rr-edge")
 
 	var first int
+
 	eventually(t, 2*time.Minute, "a window answered by all three replicas", func() bool {
 		ws := lbWindows(logsOf(t, eng, dir, "rr-client"), "", 0)
 		for i, w := range ws {
 			if w.allOK() && len(w.replicas) == 3 && w.total >= 30 {
 				first = i
+
 				return true
 			}
 		}
+
 		return false
 	})
 	// The three windows after the first full one: each replica gets a third.
 	var ws []lbWindow
+
 	eventually(t, time.Minute, "three more windows", func() bool {
 		ws = lbWindows(logsOf(t, eng, dir, "rr-client"), "", 0)[first:]
+
 		return len(ws) >= 4
 	})
+
 	for _, w := range ws[1:4] {
 		if !w.balanced("rr-backend", 3, 0.25, 0.42) {
 			t.Errorf("not a third each: %s", w.line)
 		}
 	}
+
 	t.Logf("round robin: %s", ws[3].line)
 
 	// Scaling: NGINX re-resolves rr-backend.<domain> and adds the fourth
 	// replica as a peer, with no restart.
 	edge := containerOf(t, name, "rr-edge")
 	specPath := filepath.Join(dir, "experiment.yaml")
+
 	src := readFile(t, specPath)
 	if !strings.Contains(src, "replicas: 3") {
 		t.Fatalf("experiment.yaml has no replicas: 3:\n%s", src)
 	}
+
 	if err := os.WriteFile(specPath, []byte(strings.Replace(src, "replicas: 3", "replicas: 4", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	upHealthy(t, eng, dir)
+
 	if got := containerOf(t, name, "rr-edge"); got != edge {
 		t.Errorf("bb up recreated rr-edge after scaling the backend")
 	}
 	// Windows before the scale-up never list four replicas, so all are read
 	// (the client may have been recreated, which restarts its log).
 	var w4 lbWindow
+
 	eventually(t, time.Minute, "a window answered by four replicas, a quarter each", func() bool {
 		for _, w := range lbWindows(logsOf(t, eng, dir, "rr-client"), "", 0) {
 			if w.balanced("rr-backend", 4, 0.18, 0.32) {
 				w4 = w
+
 				return true
 			}
 		}
+
 		return false
 	})
 	t.Logf("after scaling to 4: %s", w4.line)
@@ -145,29 +169,37 @@ func TestIntegrationStarterLBRoundRobin(t *testing.T) {
 // up are skipped.
 func lbCompare(t *testing.T, eng *Engine, dir, client string, replicas, n int, labels ...string) map[string][]lbWindow {
 	t.Helper()
+
 	out := map[string][]lbWindow{}
+
 	eventually(t, 3*time.Minute, "full windows from every strategy", func() bool {
 		lines := logsOf(t, eng, dir, client)
 		for _, label := range labels {
 			ws := lbWindows(lines, label, 0)
 			run := 0
+
 			for i, w := range ws {
 				if w.allOK() && len(w.replicas) == replicas {
 					run++
 				} else {
 					run = 0
 				}
+
 				if run == n {
 					out[label] = ws[i-n+1 : i+1]
+
 					break
 				}
 			}
+
 			if run < n {
 				return false
 			}
 		}
+
 		return true
 	})
+
 	return out
 }
 
@@ -177,17 +209,20 @@ func lbCompare(t *testing.T, eng *Engine, dir, client string, replicas, n int, l
 func TestIntegrationStarterLBLeastConnections(t *testing.T) {
 	eng, dir, _ := sidecarStarterLab(t, "lb-lc", "lb/least-connections")
 	lastLines(t, eng, dir, "lc-client", "lc-edge")
+
 	ws := lbCompare(t, eng, dir, "lc-client", 3, 3, "leastconn ", "roundrobin")
 	for _, w := range ws["leastconn "] {
 		if s := w.share("lc-backend-3"); s >= 0.15 {
 			t.Errorf("leastconn gave the slow replica %.0f%%: %s", s*100, w.line)
 		}
 	}
+
 	for _, w := range ws["roundrobin"] {
 		if !w.balanced("lc-backend", 3, 0.25, 0.42) {
 			t.Errorf("roundrobin did not give each replica a third: %s", w.line)
 		}
 	}
+
 	t.Logf("%s", ws["leastconn "][2].line)
 	t.Logf("%s", ws["roundrobin"][2].line)
 
@@ -197,23 +232,30 @@ func TestIntegrationStarterLBLeastConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, b := range stats.Backends {
 		if b.Name != "be_leastconn" {
 			continue
 		}
+
 		if b.Upstream.Route != "leastconn" || b.Upstream.Target != "lc-backend" || b.Balance != "leastconn" {
 			t.Errorf("be_leastconn: upstream %+v, balance %q", b.Upstream, b.Balance)
 		}
+
 		picks := map[string]int64{}
 		for _, s := range b.Servers {
 			picks[s.Instance] = s.Selected
 		}
+
 		if picks["lc-backend-3"]*3 >= picks["lc-backend-1"] || picks["lc-backend-3"]*3 >= picks["lc-backend-2"] {
 			t.Errorf("HAProxy's picks under leastconn: %v", picks)
 		}
+
 		t.Logf("HAProxy picks under leastconn: %v", picks)
+
 		return
 	}
+
 	t.Fatalf("no be_leastconn in %+v", stats.Backends)
 }
 
@@ -230,11 +272,13 @@ func TestIntegrationStarterLBPowerOfTwoChoices(t *testing.T) {
 			t.Errorf("p2c gave the slow replica %.0f%% (want more than none, less than 20%%): %s", s*100, w.line)
 		}
 	}
+
 	for _, w := range ws["wrr last 5s"] {
 		if !w.balanced("p2c-backend", 3, 0.25, 0.42) {
 			t.Errorf("wrr did not give each replica a third: %s", w.line)
 		}
 	}
+
 	t.Logf("%s", ws["p2c last 5s"][2].line)
 	t.Logf("%s", ws["wrr last 5s"][2].line)
 
@@ -242,19 +286,24 @@ func TestIntegrationStarterLBPowerOfTwoChoices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	strategies := map[string]string{}
+
 	for _, s := range routes.Services {
 		name := strings.TrimSuffix(s.Name, "@file")
+
 		strategies[name] = s.Strategy
 		if name == "p2c" && (s.Upstream.Route != "p2c" || s.Upstream.Target != "p2c-backend") {
 			t.Errorf("service p2c is not tagged with the upstream: %+v", s.Upstream)
 		}
+
 		for _, srv := range s.Servers {
 			if srv.Status != "UP" {
 				t.Errorf("service %s: %s is %s", s.Name, srv.Address, srv.Status)
 			}
 		}
 	}
+
 	if strategies["p2c"] != "p2c" || strategies["wrr"] != "wrr" {
 		t.Errorf("strategies in the explorer: %v", strategies)
 	}
@@ -275,22 +324,27 @@ var (
 // chRounds parses the rounds one policy logged from line skip on.
 func chRounds(lines []string, policy string, skip int) []chRound {
 	var out []chRound
+
 	for _, l := range lines[min(skip, len(lines)):] {
 		m := chRoundRe.FindStringSubmatch(l)
 		if m == nil || m[1] != policy {
 			continue
 		}
+
 		r := chRound{line: l, replicas: map[string]int{}}
 		r.failed, _ = strconv.Atoi(m[2])
 		r.moved, _ = strconv.Atoi(m[3])
+
 		r.differ, _ = strconv.Atoi(m[4])
 		for _, f := range strings.Fields(m[5]) {
 			if k, v, ok := strings.Cut(f, "="); ok {
 				r.replicas[k], _ = strconv.Atoi(v)
 			}
 		}
+
 		out = append(out, r)
 	}
+
 	return out
 }
 
@@ -302,16 +356,19 @@ func (r chRound) still(n int) bool { return r.failed == 0 && r.moved == 0 && len
 // still over replicas, or -1.
 func stillRun(rs []chRound, replicas, n int) int {
 	run := 0
+
 	for i, r := range rs {
 		if r.still(replicas) {
 			run++
 		} else {
 			run = 0
 		}
+
 		if run == n {
 			return i + 1
 		}
 	}
+
 	return -1
 }
 
@@ -322,23 +379,30 @@ func TestIntegrationStarterLBConsistentHashing(t *testing.T) {
 	eng, dir, name := sidecarStarterLab(t, "lb-ch", "lb/consistent-hashing")
 	lastLines(t, eng, dir, "ch-client", "ch-edge")
 	envoyConfigValid(t, name, "ch-edge")
+
 	policies := []string{"ring_hash", "maglev"}
 
 	// Once all four replicas are in, six rounds in a row (30s) move no key.
 	var before map[string]chRound
+
 	eventually(t, 3*time.Minute, "six rounds in a row with every key in place", func() bool {
 		lines := logsOf(t, eng, dir, "ch-client")
 		before = map[string]chRound{}
+
 		for _, p := range policies {
 			rs := chRounds(lines, p, 0)
+
 			end := stillRun(rs, 4, 6)
 			if end < 0 {
 				return false
 			}
+
 			before[p] = rs[end-1]
 		}
+
 		return true
 	})
+
 	for _, p := range policies {
 		t.Logf("before: %s", before[p].line)
 	}
@@ -353,11 +417,14 @@ func TestIntegrationStarterLBConsistentHashing(t *testing.T) {
 				return false
 			}
 		}
+
 		return true
 	})
 	lines := logsOf(t, eng, dir, "ch-client")
+
 	for _, p := range policies {
 		moved := map[string]string{} // key -> the replica it left
+
 		for _, l := range lines[skip:] {
 			if m := chMoveRe.FindStringSubmatch(l); m != nil && m[1] == p {
 				if _, seen := moved[m[2]]; !seen {
@@ -365,12 +432,16 @@ func TestIntegrationStarterLBConsistentHashing(t *testing.T) {
 				}
 			}
 		}
+
 		held := before[p].replicas["ch-backend-4"]
+
 		from := map[string]int{}
 		for _, r := range moved {
 			from[r]++
 		}
+
 		t.Logf("%s: ch-backend-4 held %d keys; %d keys moved, from %v", p, held, len(moved), from)
+
 		if len(moved) == 0 || len(moved) >= 100 {
 			t.Errorf("%s: %d of 200 keys moved, want a minority", p, len(moved))
 		}
@@ -380,6 +451,7 @@ func TestIntegrationStarterLBConsistentHashing(t *testing.T) {
 		if from["ch-backend-4"] != held {
 			t.Errorf("%s: ch-backend-4 held %d keys but %d of them moved", p, held, from["ch-backend-4"])
 		}
+
 		rs := chRounds(lines, p, skip)
 		t.Logf("after: %s", rs[len(rs)-1].line)
 	}
@@ -388,13 +460,16 @@ func TestIntegrationStarterLBConsistentHashing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, c := range cl.Clusters {
 		if c.Name == "ring-hash" {
 			if c.Role != "upstream" || c.Target != "ch-backend" {
 				t.Errorf("cluster ring-hash: role %q target %q", c.Role, c.Target)
 			}
+
 			return
 		}
 	}
+
 	t.Errorf("no ring-hash cluster in %+v", cl.Clusters)
 }

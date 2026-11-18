@@ -45,15 +45,19 @@ func New(eng *core.Engine, opts Options) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		root = wd
 	}
+
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
+
 	if root, err = filepath.EvalSymlinks(root); err != nil {
 		return nil, err
 	}
+
 	s := &Server{eng: eng, root: root, readOnly: opts.ReadOnly}
 	s.srv = sdk.NewServer(&sdk.Implementation{
 		Name:    "breadboard",
@@ -68,6 +72,7 @@ func New(eng *core.Engine, opts Options) (*Server, error) {
 	s.addExperimentTools()
 	s.addSpecTools()
 	s.addRunTools()
+
 	return s, nil
 }
 
@@ -106,6 +111,7 @@ const (
 func annotations(k kind, idempotent bool) *sdk.ToolAnnotations {
 	no := false
 	a := &sdk.ToolAnnotations{OpenWorldHint: &no, IdempotentHint: idempotent}
+
 	switch k {
 	case readTool:
 		a.ReadOnlyHint = true
@@ -115,6 +121,7 @@ func annotations(k kind, idempotent bool) *sdk.ToolAnnotations {
 		yes := true
 		a.DestructiveHint = &yes
 	}
+
 	return a
 }
 
@@ -125,13 +132,16 @@ func add[In, Out any](s *Server, k kind, idempotent bool, t *sdk.Tool, h func(co
 	if s.readOnly && k >= writeTool {
 		return
 	}
+
 	t.Annotations = annotations(k, idempotent)
 	sdk.AddTool(s.srv, t, func(ctx context.Context, req *sdk.CallToolRequest, in In) (*sdk.CallToolResult, Out, error) {
 		out, err := h(ctx, req, in)
 		if err != nil {
 			var zero Out
+
 			return nil, zero, describe(err)
 		}
+
 		return nil, out, nil
 	})
 }
@@ -148,18 +158,22 @@ func (s *Server) dir(arg string) (string, error) {
 	if p == "" {
 		return s.root, nil
 	}
+
 	if !filepath.IsAbs(p) {
 		p = filepath.Join(s.root, p)
 	}
+
 	p = filepath.Clean(p)
 	if !s.inside(resolveExisting(p)) {
 		return "", fmt.Errorf("%q is outside %s, the directory bb mcp was started in; start bb mcp in (or with -C) a directory that contains it", arg, s.root)
 	}
+
 	return p, nil
 }
 
 func (s *Server) inside(p string) bool {
 	rel, err := filepath.Rel(s.root, p)
+
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
@@ -167,14 +181,17 @@ func (s *Server) inside(p string) bool {
 // link inside the root cannot lead outside it.
 func resolveExisting(p string) string {
 	rest := ""
+
 	for {
 		if r, err := filepath.EvalSymlinks(p); err == nil {
 			return filepath.Join(r, rest)
 		}
+
 		parent := filepath.Dir(p)
 		if parent == p {
 			return filepath.Join(p, rest)
 		}
+
 		rest = filepath.Join(filepath.Base(p), rest)
 		p = parent
 	}
@@ -187,14 +204,17 @@ func describe(err error) error {
 	if errors.As(err, &ee) {
 		return err // already described
 	}
+
 	var ve *core.ValidationError
 	if errors.As(err, &ve) {
 		lines := make([]string, len(ve.Violations))
 		for i, v := range ve.Violations {
 			lines[i] = "  " + v.String()
 		}
+
 		return fmt.Errorf("experiment.yaml is invalid:\n%s", strings.Join(lines, "\n"))
 	}
+
 	switch {
 	case errors.Is(err, core.ErrNotInitialized):
 		return fmt.Errorf("%w (with MCP: call init, or pass dir to point at an experiment)", err)
@@ -207,6 +227,7 @@ func describe(err error) error {
 	case errors.Is(err, core.ErrUnhealthy):
 		return fmt.Errorf("%w; call logs for the failing service to see why", err)
 	}
+
 	return err
 }
 
@@ -229,23 +250,28 @@ func (p *progress) sink(ev core.Event) {
 	p.events = append(p.events, eventView(ev))
 	n := len(p.events)
 	p.mu.Unlock()
+
 	if p.req == nil || p.req.Params == nil || p.req.Session == nil {
 		return
 	}
+
 	token := p.req.Params.GetProgressToken()
 	if token == nil {
 		return
 	}
+
 	msg := ev.Message
 	if ev.Kind == core.EventHealth {
 		msg = ev.Service + ": " + ev.Health
 	}
+
 	_ = p.req.Session.NotifyProgress(p.ctx, &sdk.ProgressNotificationParams{ProgressToken: token, Progress: float64(n), Message: msg})
 }
 
 func (p *progress) list() []event {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
 	return append([]event{}, p.events...)
 }
 
@@ -261,6 +287,7 @@ func withEvents(err error, events []event) error {
 	if len(events) == 0 {
 		return err
 	}
+
 	return &eventsError{err: err, events: events}
 }
 
@@ -276,5 +303,6 @@ func (e *eventsError) Error() string {
 			msg += "\n  " + ev.Kind + ": " + ev.Message
 		}
 	}
+
 	return msg
 }

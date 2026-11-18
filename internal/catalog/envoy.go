@@ -61,6 +61,7 @@ func envoy() *Entry {
 				fmt.Sprintf(`openssl s_client -connect %s:%d -servername %s -verify_hostname %s -verify_return_error -CAfile %s -brief < /dev/null > /dev/null 2>&1`,
 					s.FQDN, ProxyHTTPSPort, s.FQDN, s.FQDN, CAFile),
 			}, " && ")
+
 			return Container{
 				// The image's entrypoint runs Envoy as its envoy user. One
 				// worker thread is plenty for a lab and keeps round robin
@@ -86,6 +87,7 @@ func envoyClusterName(u Upstream) string {
 	if u.Passthrough() {
 		return envoyPassthroughPrefix + u.Name
 	}
+
 	return u.Name
 }
 
@@ -126,6 +128,7 @@ func envoyConfig(s Server) []byte {
 			),
 		)},
 	)}
+
 	if len(pass) > 0 {
 		var chains yseq
 		for _, u := range pass {
@@ -143,6 +146,7 @@ func envoyConfig(s Server) []byte {
 				)},
 			))
 		}
+
 		listeners = append(listeners, ym(
 			ycomment(fmt.Sprintf("TLS on :%d routed by SNI without decrypting (passthrough).\n"+
 				"The TLS inspector reads the server name from the client's hello;\n"+
@@ -161,9 +165,11 @@ func envoyConfig(s Server) []byte {
 	for _, u := range l7 {
 		clusters = append(clusters, envoyCluster(u, envoyClusterName(u)))
 	}
+
 	for _, u := range pass {
 		clusters = append(clusters, envoyCluster(u, envoyClusterName(u)))
 	}
+
 	resources := ym("listeners", listeners)
 	if len(clusters) > 0 {
 		resources = append(resources, yfield{key: "clusters", value: clusters})
@@ -175,6 +181,7 @@ func envoyConfig(s Server) []byte {
 		"admin", ym("address", envoySocket("127.0.0.1", spec.EnvoyAdminPort)),
 		"static_resources", resources,
 	)
+
 	return encodeYAMLDoc(header, doc)
 }
 
@@ -183,6 +190,7 @@ func envoyConfig(s Server) []byte {
 // with the prefix rewritten to /, the first also taking every other path.
 func envoyHCM(service string, l7 []Upstream) ymap {
 	var routes yseq
+
 	switch {
 	case len(l7) == 0:
 		routes = yseq{ym(
@@ -204,12 +212,14 @@ func envoyHCM(service string, l7 []Upstream) ymap {
 				"route", ym("cluster", u.Name, "prefix_rewrite", "/"),
 			))
 		}
+
 		routes = append(routes, ym(
 			ycomment("Routes match in order: every other path goes to the first upstream."),
 			"match", ym("prefix", "/"),
 			"route", ym("cluster", l7[0].Name),
 		))
 	}
+
 	return ym(
 		"name", "envoy.filters.network.http_connection_manager",
 		"typed_config", ym(
@@ -257,6 +267,7 @@ func envoyCluster(u Upstream, name string) ymap {
 			"expected_statuses", yseq{ym("start", 200, "end", 500)},
 		)})
 	}
+
 	c := ym(
 		ycomment(proxyModeComment(u)),
 		"name", name,
@@ -291,6 +302,7 @@ func envoyCluster(u Upstream, name string) ymap {
 			),
 		)})
 	}
+
 	return c
 }
 
@@ -299,12 +311,14 @@ func proxyModeComment(u Upstream) string {
 	if !u.App {
 		what = u.Service
 	}
+
 	switch u.Mode {
 	case spec.TLSOff:
 		return fmt.Sprintf("Terminate: plaintext HTTP to %s on its private segment.\nReason: %s", what, u.Reason)
 	case spec.TLSPassthrough:
 		return fmt.Sprintf("Passthrough: the client's TLS session goes to %s untouched.", what)
 	}
+
 	return fmt.Sprintf("Re-encrypt: TLS to %s, verified as %s.", what, u.ServerName)
 }
 
@@ -320,27 +334,33 @@ func envoySocket(addr string, port int) ymap {
 // header comment.
 func proxyRouteSummary(ups []Upstream) []string {
 	l7, pass := L7(ups), Passthroughs(ups)
+
 	var out []string
 	if len(l7) == 0 {
 		out = append(out, fmt.Sprintf("HTTPS on :%d has no upstream yet: every request gets 503.", ProxyHTTPSPort))
 	} else {
 		out = append(out, fmt.Sprintf("HTTPS on :%d with this service's certificate, then:", ProxyHTTPSPort))
+
 		for i, u := range l7 {
 			route := u.Prefix() + " (prefix stripped)"
+
 			switch {
 			case len(l7) == 1:
 				route = "every request"
 			case i == 0:
 				route += ", and every other request"
 			}
+
 			out = append(out, fmt.Sprintf("  %s -> %s (%s)", route, u.Service, haproxyModeText(u)))
 		}
 	}
+
 	if len(pass) > 0 {
 		out = append(out, fmt.Sprintf("TLS on :%d is routed by SNI without decrypting (passthrough):", ProxyPassthroughPort))
 		for _, u := range pass {
 			out = append(out, fmt.Sprintf("  SNI %s -> %s, which presents its own certificate", u.ServerName, u.Service))
 		}
 	}
+
 	return out
 }

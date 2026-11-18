@@ -25,6 +25,7 @@ func timeView(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
+
 	return t.UTC().Format(time.RFC3339)
 }
 
@@ -32,6 +33,7 @@ func orEmpty[T any](s []T) []T {
 	if s == nil {
 		return []T{}
 	}
+
 	return s
 }
 
@@ -40,6 +42,7 @@ func mapSlice[T, U any](in []T, f func(T) U) []U {
 	for i, v := range in {
 		out[i] = f(v)
 	}
+
 	return out
 }
 
@@ -125,7 +128,9 @@ func sidecarPtr(s *core.SidecarInfo) *sidecar {
 	if s == nil {
 		return nil
 	}
+
 	v := sidecarView(*s)
+
 	return &v
 }
 

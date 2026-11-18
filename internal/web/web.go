@@ -63,24 +63,31 @@ func New(eng *core.Engine, opts Options) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		opts.Dir = wd
 	}
+
 	addr := opts.Addr
 	if addr == "" {
 		addr = "127.0.0.1:0"
 	}
+
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, fmt.Errorf("listen address %q: %w", addr, err)
 	}
+
 	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
 		return nil, fmt.Errorf("listen address %q: bb serve only listens on a loopback address such as 127.0.0.1", addr)
 	}
+
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
+
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
+
 	s := &Server{
 		eng:      eng,
 		dir:      opts.Dir,
@@ -93,7 +100,9 @@ func New(eng *core.Engine, opts Options) (*Server, error) {
 	if s.refresh == 0 {
 		s.refresh = 2 * time.Second
 	}
+
 	s.http = &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+
 	return s, nil
 }
 
@@ -107,13 +116,17 @@ func (s *Server) URL() string {
 func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
+
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
 		_ = s.http.Shutdown(shutdown)
 	}()
+
 	if err := s.http.Serve(s.ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+
 	return nil
 }
 
@@ -138,6 +151,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /docs", s.docsHome)
 	mux.HandleFunc("GET /docs/{tech}", s.docsTech)
 	mux.HandleFunc("GET /docs/{tech}/{guide}", s.docsGuide)
+
 	return s.guard(mux)
 }
 
@@ -164,6 +178,7 @@ func (s *Server) architectureLive(w http.ResponseWriter, r *http.Request) {
 	want := r.URL.Query().Get("node")
 	s.stream(w, r, func(ctx context.Context) templComponent {
 		d := s.dashboard(ctx)
+
 		return architectureBody(d, selectedNode(d, want))
 	})
 }
@@ -173,8 +188,10 @@ func (s *Server) service(w http.ResponseWriter, r *http.Request) {
 	p := s.servicePage(r.Context(), r.PathValue("name"), r.URL.Query().Get("tab"))
 	if p.Row.Name == "" && p.Problem == "" {
 		http.NotFound(w, r)
+
 		return
 	}
+
 	render(w, r, serviceView(p))
 }
 
@@ -182,18 +199,24 @@ func (s *Server) servicePage(ctx context.Context, name, tab string) servicePage 
 	p := servicePage{Dash: s.dashboard(ctx), Tab: tab}
 	if p.Dash.Problem != "" || p.Dash.NoExperiment {
 		p.Problem = cmp.Or(p.Dash.Problem, "There is no experiment in this directory.")
+
 		return p
 	}
+
 	r, ok := find(p.Dash.Services, name)
 	if !ok {
 		return p
 	}
+
 	p.Row = r
+
 	d, err := s.eng.ServiceDetails(ctx, core.ServiceDetailsRequest{Dir: s.dir, Name: name})
 	if err != nil {
 		p.Problem = err.Error()
+
 		return p
 	}
+
 	p.Details = d
 	// Learning notes belong to infra catalog entries. A sidecar type may
 	// share an infra type's id (envoy), but those notes are not its own.
@@ -203,9 +226,11 @@ func (s *Server) servicePage(ctx context.Context, name, tab string) servicePage 
 			p.Notes = parseNotes(strings.ReplaceAll(l.Notes, "<experiment>", p.Dash.Experiment))
 		}
 	}
+
 	if !slices.ContainsFunc(p.tabs(), func(t [2]string) bool { return t[0] == p.Tab }) {
 		p.Tab = "overview"
 	}
+
 	return p
 }
 
@@ -216,16 +241,21 @@ func (s *Server) servicePage(ctx context.Context, name, tab string) servicePage 
 // pgbouncer (an app's sidecar, or the sidecar itself).
 func (s *Server) exploreFragment(w http.ResponseWriter, r *http.Request) {
 	tab := cmp.Or(r.URL.Query().Get("tab"), "explore")
+
 	p := s.servicePage(r.Context(), r.PathValue("name"), tab)
 	if p.Details == nil || p.Tab != tab || !slices.Contains([]string{"explore", "envoy", "pgbouncer"}, tab) {
 		http.NotFound(w, r)
+
 		return
 	}
+
 	var err error
+
 	p.Explore, err = s.explore(r.Context(), tab, p.Details.Type, p.Row.Name)
 	if err != nil {
 		p.ExploreErr = err.Error()
 	}
+
 	render(w, r, exploreResult(p))
 }
 
@@ -233,12 +263,14 @@ func (s *Server) exploreFragment(w http.ResponseWriter, r *http.Request) {
 // service's catalog type.
 func (s *Server) explore(ctx context.Context, tab, typ, name string) (any, error) {
 	req := core.ExploreRequest{Dir: s.dir, Service: name}
+
 	switch tab {
 	case "envoy":
 		return s.eng.EnvoyClusters(ctx, req)
 	case "pgbouncer":
 		return s.eng.PgBouncerPools(ctx, req)
 	}
+
 	switch typ {
 	case "postgres":
 		return s.eng.PostgresTables(ctx, req)
@@ -261,6 +293,7 @@ func (s *Server) explore(ctx context.Context, tab, typ, name string) (any, error
 	case "pgbouncer":
 		return s.eng.PgBouncerPools(ctx, req)
 	}
+
 	return nil, fmt.Errorf("no explorer for %s", typ)
 }
 
@@ -270,24 +303,31 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+
 		return
 	}
+
 	lines, err := s.eng.Logs(r.Context(), core.LogsRequest{Dir: s.dir, Service: r.PathValue("name"), Follow: true, Tail: 200})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
+
 		return
 	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	flusher.Flush()
+
 	for l, err := range lines {
 		text := l.Text
 		if err != nil {
 			text = "bb: " + err.Error()
 		}
+
 		if _, err := fmt.Fprintf(w, "event: line\ndata: %s\n\n", strings.ReplaceAll(text, "\n", " ")); err != nil {
 			return
 		}
+
 		flusher.Flush()
 	}
 }
@@ -301,14 +341,17 @@ func selectedNode(d dashboardData, want string) string {
 			return r.Name
 		}
 	}
+
 	for _, r := range d.Services {
 		if r.Kind == "app" {
 			return r.Name
 		}
 	}
+
 	if len(d.Services) > 0 {
 		return d.Services[0].Name
 	}
+
 	return ""
 }
 
@@ -316,16 +359,21 @@ func selectedNode(d dashboardData, want string) string {
 // message on the page, never a broken page.
 func (s *Server) dashboard(ctx context.Context) dashboardData {
 	d := dashboardData{Dir: homeRelative(s.dir), Version: s.eng.Version().Version}
+
 	st, err := s.eng.Status(ctx, core.StatusRequest{Dir: s.dir})
 	switch {
 	case errors.Is(err, core.ErrNotInitialized):
 		d.NoExperiment = true
+
 		return d
 	case err != nil:
 		d.Problem = err.Error()
+
 		return d
 	}
+
 	d.Experiment, d.Domain, d.Warnings = st.Experiment, st.Domain, st.Warnings
+
 	d.HostURLs, d.HostPort = st.HostURLs, st.HostPort
 	for _, svc := range st.Services {
 		d.Services = append(d.Services, newRow(svc))
@@ -336,6 +384,7 @@ func (s *Server) dashboard(ctx context.Context) dashboardData {
 			if e.TLS {
 				continue
 			}
+
 			for i := range d.Services {
 				// The target by name, or every instance of an app target.
 				if d.Services[i].Name == e.To || (d.Services[i].Kind == "app" && d.Services[i].App == e.To) {
@@ -344,11 +393,13 @@ func (s *Server) dashboard(ctx context.Context) dashboardData {
 			}
 		}
 	}
+
 	return d
 }
 
 func render(w http.ResponseWriter, r *http.Request, c templComponent) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
 	if err := c.Render(r.Context(), w); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

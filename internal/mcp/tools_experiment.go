@@ -286,12 +286,16 @@ func (s *Server) addExperimentTools() {
 		if err != nil {
 			return statusOut{}, err
 		}
+
 		res, err := s.eng.Status(ctx, core.StatusRequest{Dir: dir})
 		if err != nil {
 			return statusOut{}, err
 		}
-		return statusOut{Experiment: res.Experiment, Domain: res.Domain, Services: mapSlice(res.Services, statusView), Warnings: orEmpty(res.Warnings),
-			HostURLs: mapSlice(res.HostURLs, hostURLView), HostPort: res.HostPort}, nil
+
+		return statusOut{
+			Experiment: res.Experiment, Domain: res.Domain, Services: mapSlice(res.Services, statusView), Warnings: orEmpty(res.Warnings),
+			HostURLs: mapSlice(res.HostURLs, hostURLView), HostPort: res.HostPort,
+		}, nil
 	})
 
 	add(s, readTool, true, &sdk.Tool{
@@ -302,22 +306,29 @@ func (s *Server) addExperimentTools() {
 		if err != nil {
 			return logsOut{}, err
 		}
+
 		tail := in.Tail
 		if tail <= 0 {
 			tail = defaultLogTail
 		}
+
 		tail = min(tail, maxLogTail)
+
 		lines, err := s.eng.Logs(ctx, core.LogsRequest{Dir: dir, Service: in.Service, Tail: tail})
 		if err != nil {
 			return logsOut{}, err
 		}
+
 		out := logsOut{Lines: []logLine{}, Tail: tail}
+
 		for l, err := range lines {
 			if err != nil {
 				return logsOut{}, err
 			}
+
 			out.Lines = append(out.Lines, logLine{Service: l.Service, Text: l.Text})
 		}
+
 		return out, nil
 	})
 
@@ -329,10 +340,12 @@ func (s *Server) addExperimentTools() {
 		if err != nil {
 			return credsOut{}, err
 		}
+
 		res, err := s.eng.Creds(ctx, core.CredsRequest{Dir: dir, Service: in.Service})
 		if err != nil {
 			return credsOut{}, err
 		}
+
 		return credsOut{Services: mapSlice(res.Services, func(c core.ServiceCreds) serviceCreds {
 			return serviceCreds{
 				Name: c.Name, Type: c.Type, Address: c.Address,
@@ -350,10 +363,12 @@ func (s *Server) addExperimentTools() {
 		if err != nil {
 			return serviceDetailsOut{}, err
 		}
+
 		d, err := s.eng.ServiceDetails(ctx, core.ServiceDetailsRequest{Dir: dir, Name: in.Service})
 		if err != nil {
 			return serviceDetailsOut{}, err
 		}
+
 		out := serviceDetailsOut{
 			Name: d.Name, Kind: d.Kind, Type: d.Type, Title: d.Title, Summary: d.Summary, Image: d.Image,
 			FQDN: d.FQDN, Address: d.Address,
@@ -374,6 +389,7 @@ func (s *Server) addExperimentTools() {
 		if c := d.Certificate; c != nil {
 			out.Certificate = &certificate{Issuer: c.Issuer, DNSNames: orEmpty(c.DNSNames), Identity: c.Identity, NotAfter: timeView(c.NotAfter)}
 		}
+
 		return out, nil
 	})
 
@@ -383,6 +399,7 @@ func (s *Server) addExperimentTools() {
 func (s *Server) addExplorers() {
 	explore := func(in exploreIn) (core.ExploreRequest, error) {
 		dir, err := s.dir(in.Dir)
+
 		return core.ExploreRequest{Dir: dir, Service: in.Service}, err
 	}
 
@@ -394,10 +411,12 @@ func (s *Server) addExplorers() {
 		if err != nil {
 			return postgresOut{}, err
 		}
+
 		res, err := s.eng.PostgresTables(ctx, req)
 		if err != nil {
 			return postgresOut{}, err
 		}
+
 		return postgresOut{Database: res.Database, Tables: mapSlice(res.Tables, func(t core.PostgresTable) postgresTable {
 			return postgresTable{Schema: t.Schema, Name: t.Name, Rows: t.Rows, Bytes: t.Bytes}
 		})}, nil
@@ -411,10 +430,12 @@ func (s *Server) addExplorers() {
 		if err != nil {
 			return redisOut{}, err
 		}
+
 		res, err := s.eng.RedisKeys(ctx, req)
 		if err != nil {
 			return redisOut{}, err
 		}
+
 		return redisOut{Total: res.Total, Truncated: res.Truncated, Keys: mapSlice(res.Keys, func(k core.RedisKey) redisKey {
 			return redisKey{Key: k.Key, Type: k.Type, TTL: k.TTL}
 		})}, nil
@@ -428,10 +449,12 @@ func (s *Server) addExplorers() {
 		if err != nil {
 			return consulOut{}, err
 		}
+
 		res, err := s.eng.ConsulCatalog(ctx, req)
 		if err != nil {
 			return consulOut{}, err
 		}
+
 		return consulOut{
 			Services: mapSlice(res.Services, func(c core.ConsulService) consulService {
 				return consulService{Name: c.Name, Tags: orEmpty(c.Tags), Instances: c.Instances, Passing: c.Passing, Warning: c.Warning, Critical: c.Critical}
@@ -448,10 +471,12 @@ func (s *Server) addExplorers() {
 		if err != nil {
 			return kafkaOut{}, err
 		}
+
 		res, err := s.eng.KafkaTopics(ctx, req)
 		if err != nil {
 			return kafkaOut{}, err
 		}
+
 		return kafkaOut{
 			Topics: mapSlice(res.Topics, func(t core.KafkaTopic) kafkaTopic {
 				return kafkaTopic{Name: t.Name, Partitions: t.Partitions, ReplicationFactor: t.ReplicationFactor, Messages: t.Messages, Internal: t.Internal}
@@ -464,6 +489,7 @@ func (s *Server) addExplorers() {
 
 	sidecarReq := func(in sidecarIn) (core.ExploreRequest, error) {
 		dir, err := s.dir(in.Dir)
+
 		return core.ExploreRequest{Dir: dir, Service: in.Service}, err
 	}
 
@@ -475,10 +501,12 @@ func (s *Server) addExplorers() {
 		if err != nil {
 			return envoyOut{}, err
 		}
+
 		res, err := s.eng.EnvoyClusters(ctx, req)
 		if err != nil {
 			return envoyOut{}, err
 		}
+
 		return envoyOut{
 			Sidecar: res.Sidecar, App: res.App, Proxy: res.Proxy,
 			Listeners: mapSlice(res.Listeners, func(l core.EnvoyListener) envoyListener { return envoyListener{Name: l.Name, Address: l.Address} }),
@@ -506,10 +534,12 @@ func (s *Server) addExplorers() {
 		if err != nil {
 			return pgbouncerOut{}, err
 		}
+
 		res, err := s.eng.PgBouncerPools(ctx, req)
 		if err != nil {
 			return pgbouncerOut{}, err
 		}
+
 		return pgbouncerOut{
 			Sidecar: res.Sidecar, App: res.App, Proxy: res.Proxy, Service: res.Service, PoolMode: res.PoolMode, PoolSize: res.PoolSize, Port: res.Port,
 			Pools: mapSlice(res.Pools, func(p core.PgBouncerPool) pgbouncerPool {
@@ -532,10 +562,12 @@ func (s *Server) addExplorers() {
 		if err != nil {
 			return s3Out{}, err
 		}
+
 		res, err := s.eng.S3Buckets(ctx, req)
 		if err != nil {
 			return s3Out{}, err
 		}
+
 		return s3Out{Buckets: mapSlice(res.Buckets, func(b core.S3Bucket) s3Bucket {
 			return s3Bucket{Name: b.Name, Objects: b.Objects, Bytes: b.Bytes, Truncated: b.Truncated}
 		})}, nil

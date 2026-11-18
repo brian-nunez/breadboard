@@ -188,6 +188,7 @@ func (f File) MountPath() string {
 	if f.Mount != "" {
 		return f.Mount
 	}
+
 	return ConfigDir + "/" + f.Name
 }
 
@@ -218,6 +219,7 @@ func notes(id string) string {
 	if err != nil {
 		panic(fmt.Sprintf("catalog: missing notes for %s", id))
 	}
+
 	return string(data)
 }
 
@@ -232,6 +234,7 @@ func Lookup(id string) (*Entry, bool) {
 	if i < 0 {
 		return nil, false
 	}
+
 	return entries[i], true
 }
 
@@ -249,6 +252,7 @@ func (e *Entry) ResolveConfig(cfg map[string]string) map[string]string {
 			out[o.Key] = v
 		}
 	}
+
 	return out
 }
 
@@ -260,11 +264,14 @@ func (e *Entry) CheckConfig(key, value string) error {
 		for j, o := range e.Config {
 			known[j] = o.Key
 		}
+
 		return fmt.Errorf("unknown option for %s (known: %v)", e.ID, known)
 	}
+
 	if v := e.Config[i].Validate; v != nil {
 		return v(value)
 	}
+
 	return nil
 }
 
@@ -274,6 +281,7 @@ func Types(id string) (spec.TypeInfo, bool) {
 	if !ok {
 		return spec.TypeInfo{}, false
 	}
+
 	info := spec.TypeInfo{
 		Plaintext: e.SupportsPlaintext(),
 		Registry:  e.Sidecar != nil,
@@ -284,9 +292,11 @@ func Types(id string) (spec.TypeInfo, bool) {
 	if len(e.Config) > 0 {
 		info.Config = e.CheckConfig
 	}
+
 	if p := e.Proxy; p != nil {
 		info.Proxy = &spec.ProxyInfo{Modes: slices.Clone(p.Modes), HTTP: p.HTTP, Targets: slices.Clone(p.Targets), MinUpstreams: p.MinUpstreams, MaxUpstreams: p.MaxUpstreams, StaticFile: p.StaticFile != "" && p.MergeStatic != nil}
 	}
+
 	info.Env = func(service string, plain bool) []string {
 		// Every upstream mode, so a proxy reports each variable it may set.
 		cl := Client{Service: service, FQDN: service, Config: e.ResolveConfig(nil), Secret: func(string) string { return "" }}
@@ -295,14 +305,18 @@ func Types(id string) (spec.TypeInfo, bool) {
 				cl.Upstreams = append(cl.Upstreams, Upstream{Mode: m})
 			}
 		}
+
 		if plain {
 			cl.Plain = &Plain{FQDN: id}
 		}
+
 		var names []string
 		for _, v := range e.Client(cl) {
 			names = append(names, v.Name)
 		}
+
 		return names
 	}
+
 	return info, true
 }

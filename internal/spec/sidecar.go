@@ -48,7 +48,7 @@ const (
 	DefaultOutlierInterval           = "10s"
 )
 
-// Replica bounds for apps.<name>.replicas.
+// MaxReplicas bounds apps.<name>.replicas.
 const MaxReplicas = 10
 
 // Egress policies for an Envoy sidecar in transparent mode.
@@ -86,6 +86,7 @@ func (s Sidecar) ID() string {
 	if s.Name != "" {
 		return s.Name
 	}
+
 	return s.Type
 }
 
@@ -154,58 +155,75 @@ func (s Sidecar) WithDefaults() Sidecar {
 	if out.Name == "" {
 		out.Name = out.Type
 	}
+
 	if e := s.Envoy; e != nil {
 		c := *e
+
 		c.Outbound = make([]EnvoyOutbound, len(e.Outbound))
 		for i, o := range e.Outbound {
 			if o.LB == "" {
 				o.LB = DefaultEnvoyLB
 			}
+
 			if o.Timeout == "" {
 				o.Timeout = DefaultEnvoyTimeout
 			}
+
 			if o.Retries == nil {
 				r := DefaultEnvoyRetries
 				o.Retries = &r
 			}
+
 			if o.Outlier != nil {
 				l := *o.Outlier
 				if l.MaxEjectionPercent == 0 {
 					l.MaxEjectionPercent = DefaultOutlierMaxEjectionPercent
 				}
+
 				if l.Interval == "" {
 					l.Interval = DefaultOutlierInterval
 				}
+
 				o.Outlier = &l
 			}
+
 			c.Outbound[i] = o
 		}
+
 		if e.Transparent != nil {
 			t := *e.Transparent
 			if t.Egress == "" {
 				t.Egress = DefaultEgress
 			}
+
 			c.Transparent = &t
 		}
+
 		out.Envoy = &c
 	}
+
 	if p := s.PgBouncer; p != nil {
 		c := *p
 		if c.PoolMode == "" {
 			c.PoolMode = DefaultPgBouncerPoolMode
 		}
+
 		if c.Port == 0 {
 			c.Port = DefaultPgBouncerPort
 		}
+
 		if c.PoolSize == 0 {
 			c.PoolSize = DefaultPgBouncerPoolSize
 		}
+
 		out.PgBouncer = &c
 	}
+
 	if f := s.FluentBit; f != nil {
 		c := *f
 		out.FluentBit = &c
 	}
+
 	return out
 }
 
@@ -217,6 +235,7 @@ func (a App) ReplicaCount() int {
 	if a.Replicas < 1 {
 		return 1
 	}
+
 	return a.Replicas
 }
 
@@ -231,10 +250,12 @@ func (a App) Instances() []string {
 	if n == 1 {
 		return []string{a.Name}
 	}
+
 	out := make([]string, n)
 	for i := range n {
 		out[i] = a.Name + "-" + strconv.Itoa(i+1)
 	}
+
 	return out
 }
 
@@ -247,9 +268,11 @@ func (a App) TLSPort() (int, bool) {
 			return sc.Envoy.Inbound.Port, true
 		}
 	}
+
 	if a.Register != nil && a.Register.Port != 0 {
 		return a.Register.Port, true
 	}
+
 	return 0, false
 }
 
@@ -272,5 +295,6 @@ func NetinitName(instance string) string { return instance + "-netinit" }
 // positiveDuration reports whether s is a Go duration above zero.
 func positiveDuration(s string) bool {
 	d, err := time.ParseDuration(s)
+
 	return err == nil && d > 0
 }

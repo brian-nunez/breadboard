@@ -68,6 +68,7 @@ func HostNames(targets []HostTarget) []string {
 			}
 		}
 	}
+
 	return out
 }
 
@@ -84,6 +85,7 @@ func hostRouterStaticConfig(s Server) []byte {
 		"of the lab's host router. The routes in " + traefikDynamicDir + "/" + traefikConfigFile + " are",
 		"generated from every host target in experiment.yaml; the router has no file.",
 	}
+
 	return encodeYAMLDoc(header, traefikStaticDoc(Server{Name: s.Name}, "the host certificate from the host CA"))
 }
 
@@ -99,6 +101,7 @@ func hostRouterTLSConfig(s Server) []byte {
 		ycomment("TLS 1.2 or newer towards host clients."),
 		"options", ym("default", ym("minVersion", "VersionTLS12")),
 	))
+
 	return encodeYAMLDoc(header, doc)
 }
 
@@ -119,6 +122,7 @@ func hostRouterDynamicConfig(s Server) []byte {
 			}
 		}
 	}
+
 	header = append(header, "",
 		"A name no router claims gets Traefik's 404. Each request reaches its",
 		"target over TLS, verified against the lab CA ("+CAFile+"), with the",
@@ -132,10 +136,12 @@ func hostRouterDynamicConfig(s Server) []byte {
 			"rule", "Host(`"+name+"`)",
 			"service", key,
 		)})
+
 		var servers yseq
 		for _, inst := range insts {
 			servers = append(servers, ym("url", fmt.Sprintf("https://%s:%d", inst.FQDN, port)))
 		}
+
 		lb := ym("strategy", "wrr", "servers", servers, "passHostHeader", true, "serversTransport", key)
 		services = append(services, yfield{key: key, value: ym("loadBalancer", lb)})
 		transports = append(transports, yfield{key: key, comment: fmt.Sprintf("Re-encrypt: TLS with SNI %s, verified against the lab CA.", serverName), value: ym(
@@ -143,23 +149,29 @@ func hostRouterDynamicConfig(s Server) []byte {
 			"rootCAs", yseq{CAFile},
 		)})
 	}
+
 	for _, t := range s.HostTargets {
 		what := t.Target
 		if len(t.Instances) > 1 {
 			what = fmt.Sprintf("every instance of %s (weighted round robin)", t.Target)
 		}
+
 		route(hostTargetPrefix+t.Target, t.Name, t.ServerName, fmt.Sprintf("https://%s reaches %s.", t.Name, what), t.Port, t.Instances)
+
 		for _, inst := range t.Instances {
 			if inst.Name == "" {
 				continue
 			}
+
 			route(hostInstancePrefix+inst.Service, inst.Name, inst.FQDN, fmt.Sprintf("https://%s reaches %s alone.", inst.Name, inst.Service), t.Port, []HostInstance{inst})
 		}
 	}
+
 	http := ym("routers", routers, "services", services)
 	if len(transports) > 0 {
 		http = append(http, yfield{key: "serversTransports", value: transports})
 	}
+
 	return traefikLiteral(encodeYAMLDoc(header, ym("http", http)))
 }
 
@@ -168,5 +180,6 @@ func instances(n int) string {
 	if n == 1 {
 		return "1 instance"
 	}
+
 	return fmt.Sprintf("%d instances", n)
 }

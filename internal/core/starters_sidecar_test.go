@@ -18,20 +18,25 @@ func TestSidecarStartersApplyAndRender(t *testing.T) {
 	// An existing Postgres under another name: the PgBouncer sidecar must
 	// point at it, not add a second one.
 	h.writeSpec("version: 1\nname: lab\nservices:\n  db:\n    type: postgres\n")
+
 	var ids []string
+
 	for _, s := range starters.All() {
 		if strings.HasPrefix(s.ID, "sidecar/") {
 			ids = append(ids, s.ID)
 		}
 	}
+
 	if len(ids) != 6 {
 		t.Fatalf("sidecar starters = %v", ids)
 	}
+
 	for _, id := range ids {
 		if _, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: id}); err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
 	}
+
 	spec := h.read("experiment.yaml")
 	for _, want := range []string{
 		"replicas: 3",
@@ -46,6 +51,7 @@ func TestSidecarStartersApplyAndRender(t *testing.T) {
 			t.Errorf("experiment.yaml lacks %q:\n%s", want, spec)
 		}
 	}
+
 	if strings.Contains(spec, "  postgres:\n    type: postgres") {
 		t.Errorf("a second Postgres was added:\n%s", spec)
 	}
@@ -54,10 +60,12 @@ func TestSidecarStartersApplyAndRender(t *testing.T) {
 	if _, err := h.eng.ExportCompose(h.ctx(), ExportComposeRequest{Dir: h.dir, Out: out}); err != nil {
 		t.Fatal(err)
 	}
+
 	compose, err := os.ReadFile(filepath.Join(out, "docker-compose.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, svc := range []string{
 		"ambassador-backend-3-envoy:", "ambassador-caller-envoy:", "plain-web-envoy:",
 		"transparent-caller-netinit:", "breaker-backend-1-envoy:", "pool-client-pgbouncer:", "log-writer-fluent-bit:",

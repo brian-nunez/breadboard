@@ -28,16 +28,23 @@ func TestHBACommentStaysAComment(t *testing.T) {
 // The Postgres entry renders every segment reason through hbaComment.
 func TestPostgresHBAReasons(t *testing.T) {
 	e, _ := Lookup("postgres")
-	s := Server{Name: "postgres", FQDN: "postgres.bb.internal", Domain: "bb.internal", Config: e.ResolveConfig(nil),
+	s := Server{
+		Name: "postgres", FQDN: "postgres.bb.internal", Domain: "bb.internal", Config: e.ResolveConfig(nil),
 		Secret: func(string) string { return "x" },
-		Plain: &Plain{Subnet: "10.213.0.0/24", Clients: []string{"pool"},
-			Reasons: []string{"pool: practice\nhostnossl all all all trust \\", "app: second"}}}
+		Plain: &Plain{
+			Subnet: "10.213.0.0/24", Clients: []string{"pool"},
+			Reasons: []string{"pool: practice\nhostnossl all all all trust \\", "app: second"},
+		},
+	}
+
 	var hba string
+
 	for _, f := range e.Server(s).Files {
 		if f.Name == "pg_hba.conf" {
 			hba = string(f.Data)
 		}
 	}
+
 	want := "# Reason: pool: practice\n# hostnossl all all all trust \\#\n# Reason: app: second\nhostnossl all      all  10.213.0.0/24 scram-sha-256\n"
 	if !strings.HasSuffix(hba, want) {
 		t.Errorf("pg_hba.conf ends\n%s\nwant\n%s", hba, want)

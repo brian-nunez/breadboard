@@ -33,12 +33,14 @@ func (c *usageCache) set(id string, u runtime.Usage) {
 func (c *usageCache) get(ids []string) map[string]runtime.Usage {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	out := make(map[string]runtime.Usage, len(ids))
 	for _, id := range ids {
 		if u, ok := c.usage[id]; ok {
 			out[id] = u
 		}
 	}
+
 	return out
 }
 
@@ -60,32 +62,43 @@ func (e *Engine) StartStatsSampler(ctx context.Context) (stop func()) {
 	if !e.sampler.CompareAndSwap(nil, c) {
 		return func() {}
 	}
+
 	ctx, cancel := context.WithCancel(ctx)
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		defer e.sampler.CompareAndSwap(c, nil)
+
 		delay := samplerRetryFirst
+
 		for ctx.Err() == nil {
 			got := false
+
 			for s, err := range e.rt.StatsStream(ctx) {
 				if err != nil {
 					break
 				}
+
 				got = true
+
 				c.set(s.ID, s.Usage)
 			}
+
 			if got {
 				delay = samplerRetryFirst
 			}
+
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(delay):
 			}
+
 			delay = min(2*delay, samplerRetryMax)
 		}
 	}()
+
 	return func() {
 		cancel()
 		<-done
@@ -98,5 +111,6 @@ func (e *Engine) usage(ctx context.Context, ids []string) (map[string]runtime.Us
 	if c := e.sampler.Load(); c != nil {
 		return c.get(ids), nil
 	}
+
 	return e.rt.Stats(ctx, ids)
 }

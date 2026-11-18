@@ -24,13 +24,16 @@ func (s *Server) searchIndex(w http.ResponseWriter, r *http.Request) {
 			out = append(out, searchEntry{g.Title, "Docs · " + t.Name, "/docs/" + t.ID + "/" + g.Slug, ""})
 		}
 	}
+
 	d := s.docsData(r)
 	for _, id := range starterOrder(d) {
 		out = append(out, searchEntry{cardTitle(d.Starters[id].Title), "Starter · " + id, "/starters/" + id, ""})
 	}
+
 	for _, row := range s.dashboard(r.Context()).Services {
 		out = append(out, searchEntry{row.Name, "Service", "/services/" + row.Name, logoSrc(row.Type)})
 	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }

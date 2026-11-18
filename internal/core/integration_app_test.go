@@ -23,24 +23,31 @@ func TestIntegrationAddApp(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), name)
 	t.Cleanup(func() {
 		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+
 		assertGone(t, name)
 	})
+
 	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
 		t.Fatal(err)
 	}
+
 	for _, typ := range []string{"postgres", "redis"} {
 		if _, err := eng.AddService(ctx, AddServiceRequest{Dir: dir, Type: typ}); err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	if _, err := eng.AddApp(ctx, AddAppRequest{Dir: dir, Name: "shop"}); err != nil {
 		t.Fatal(err)
 	}
+
 	_, err := eng.Up(ctx, UpRequest{Dir: dir})
 	if !errors.Is(err, ErrUnhealthy) || !strings.Contains(err.Error(), "shop ") {
 		t.Fatalf("up = %v, want ErrUnhealthy naming shop, which exits", err)
 	}
+
 	t.Logf("up reported: %v", err)
+
 	logs := strings.Join(logsOf(t, eng, dir, "shop"), "\n")
 	if strings.Contains(logs, "cannot start") || strings.Contains(logs, "missing environment variables") {
 		t.Fatalf("shop's init check failed:\n%s", logs)

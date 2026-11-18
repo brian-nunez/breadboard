@@ -47,12 +47,14 @@ func newRow(s core.ServiceStatus) row {
 	r.CPUUsed = s.CPUPercent / 100
 	r.CPULimit, _ = strconv.ParseFloat(s.CPULimit, 64)
 	r.MemUsed = float64(s.MemoryBytes) / (1 << 20)
+
 	r.MemLimit = float64(dockerBytes(s.MemoryLimit)) / (1 << 20)
 	for _, e := range s.Uses {
 		if !e.TLS {
 			r.TLS = false
 		}
 	}
+
 	return r
 }
 
@@ -60,6 +62,7 @@ func newRow(s core.ServiceStatus) row {
 func dockerBytes(s string) uint64 {
 	s = strings.ToLower(strings.TrimSpace(s))
 	mult := uint64(1)
+
 	switch {
 	case strings.HasSuffix(s, "g"):
 		mult, s = 1<<30, strings.TrimSuffix(s, "g")
@@ -70,10 +73,12 @@ func dockerBytes(s string) uint64 {
 	case strings.HasSuffix(s, "b"):
 		s = strings.TrimSuffix(s, "b")
 	}
+
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		return 0
 	}
+
 	return uint64(v * float64(mult))
 }
 
@@ -108,20 +113,26 @@ func (r row) Subtitle() string {
 		if len(r.Command) > 0 {
 			s += " · " + strings.Join(r.Command, " ")
 		}
+
 		if r.Replicas > 1 {
 			s = fmt.Sprintf("replica %d of %d · %s", r.Instance, r.Replicas, s)
 		}
+
 		return s
 	}
+
 	if r.Kind == "sidecar" && r.Registry != "" {
 		return "registers " + r.Parent + " · " + r.Image
 	}
+
 	if r.Kind == "sidecar" {
 		return cmp.Or(r.Type, "sidecar") + " sidecar of " + r.Parent + " · " + r.Image
 	}
+
 	if r.HostRouter {
 		return "host router · " + r.Image
 	}
+
 	return r.Image
 }
 
@@ -131,6 +142,7 @@ func hostTarget(u core.HostURL) string {
 	if u.Instance != "" {
 		return u.Instance
 	}
+
 	return u.Target
 }
 
@@ -141,6 +153,7 @@ func hostRouterName(d dashboardData) string {
 			return r.Name
 		}
 	}
+
 	return "bb-host"
 }
 
@@ -153,6 +166,7 @@ func hostRoute(rows []row, u core.HostURL) string {
 	case len(instancesOf(rows, u.Target)) > 1:
 		return "every replica of " + u.Target
 	}
+
 	return u.Target
 }
 
@@ -162,28 +176,33 @@ func (r row) Label() string {
 	if r.Replicas > 1 && r.App != "" {
 		return r.App
 	}
+
 	return r.Name
 }
 
 // instancesOf lists an app's instances.
 func instancesOf(rows []row, app string) []row {
 	var out []row
+
 	for _, r := range rows {
 		if r.Kind == "app" && r.App == app {
 			out = append(out, r)
 		}
 	}
+
 	return out
 }
 
 // sidecarsOf lists the sidecars in an app instance's pod.
 func sidecarsOf(rows []row, instance string) []row {
 	var out []row
+
 	for _, r := range rows {
 		if r.Kind == "sidecar" && r.Parent == instance {
 			out = append(out, r)
 		}
 	}
+
 	return out
 }
 
@@ -192,6 +211,7 @@ func sidecarMode(r row) string {
 	if r.Sidecar != nil && r.Sidecar.Transparent {
 		return r.Type + " · transparent, egress " + r.Sidecar.Egress
 	}
+
 	return r.Type
 }
 
@@ -200,6 +220,7 @@ func portAddr(p core.SidecarPort) string {
 	if p.Loopback {
 		return fmt.Sprintf("127.0.0.1:%d", p.Port)
 	}
+
 	return fmt.Sprintf(":%d", p.Port)
 }
 
@@ -209,6 +230,7 @@ func firstInstanceUses(r row) []core.Edge {
 	if r.Instance > 1 {
 		return nil
 	}
+
 	return r.Uses
 }
 
@@ -218,12 +240,15 @@ func homeRelative(p string) string {
 	if err != nil || home == "" {
 		return p
 	}
+
 	if p == home {
 		return "~"
 	}
+
 	if rest, ok := strings.CutPrefix(p, home+string(filepath.Separator)); ok {
 		return "~/" + rest
 	}
+
 	return p
 }
 
@@ -232,11 +257,13 @@ func (r row) Initial() string { return strings.ToUpper(r.Name[:1]) }
 
 func (d dashboardData) Healthy() int {
 	n := 0
+
 	for _, s := range d.Services {
 		if s.Health == core.HealthHealthy {
 			n++
 		}
 	}
+
 	return n
 }
 
@@ -245,11 +272,13 @@ func (d dashboardData) Edges() (tls, total int) {
 	for _, s := range d.Services {
 		for _, e := range firstInstanceUses(s) {
 			total++
+
 			if e.TLS {
 				tls++
 			}
 		}
 	}
+
 	return tls, total
 }
 
@@ -258,6 +287,7 @@ func (d dashboardData) Memory() (used, limit float64) {
 		used += s.MemUsed
 		limit += s.MemLimit
 	}
+
 	return used, limit
 }
 
@@ -269,9 +299,11 @@ func (d dashboardData) Uptime() string {
 			first = s.StartedAt
 		}
 	}
+
 	if first.IsZero() {
 		return ""
 	}
+
 	return "up " + humanDuration(time.Since(first))
 }
 
@@ -295,10 +327,12 @@ func pct(used, limit float64) string {
 	if limit <= 0 {
 		return "0"
 	}
+
 	p := used / limit * 100
 	if p > 100 {
 		p = 100
 	}
+
 	return fmt.Sprintf("%.0f", p)
 }
 
@@ -306,13 +340,16 @@ func pct(used, limit float64) string {
 func commas(n int64) string {
 	s := strconv.FormatInt(n, 10)
 	neg := strings.HasPrefix(s, "-")
+
 	s = strings.TrimPrefix(s, "-")
 	for i := len(s) - 3; i > 0; i -= 3 {
 		s = s[:i] + "," + s[i:]
 	}
+
 	if neg {
 		return "-" + s
 	}
+
 	return s
 }
 
@@ -326,6 +363,7 @@ func size(b int64) string {
 	case b >= 1<<10:
 		return fmt.Sprintf("%.0f KiB", float64(b)/(1<<10))
 	}
+
 	return fmt.Sprintf("%d B", b)
 }
 
@@ -337,6 +375,7 @@ func ttl(sec int64) string {
 	case sec < 0:
 		return "—"
 	}
+
 	return "in " + humanDuration(time.Duration(sec)*time.Second)
 }
 
@@ -344,6 +383,7 @@ func tableName(t core.PostgresTable) string {
 	if t.Schema == "public" {
 		return t.Name
 	}
+
 	return t.Schema + "." + t.Name
 }
 
@@ -355,6 +395,7 @@ func clusterTitle(c core.EnvoyCluster) string {
 	if c.Target != "" {
 		return c.Name + " → " + c.Target
 	}
+
 	return c.Name
 }
 
@@ -372,6 +413,7 @@ func clusterRole(c core.EnvoyCluster) string {
 	case "upstream":
 		return "Upstream " + c.Target + " (" + modeName(c.Mode) + "): " + modeHelp(c.Mode) + "."
 	}
+
 	return "Defined by your own Envoy configuration."
 }
 
@@ -380,9 +422,11 @@ func hostName(h core.EnvoyHost) string {
 	if h.Instance != "" {
 		return h.Instance
 	}
+
 	if h.Hostname != "" {
 		return h.Hostname
 	}
+
 	return h.Address
 }
 
@@ -395,6 +439,7 @@ func hostStatus(h core.EnvoyHost) status {
 	case h.ConnectFailures > 0 || h.Errors > 0:
 		return status{"Healthy, with errors", "amber"}
 	}
+
 	return status{"Healthy", "green"}
 }
 
@@ -404,6 +449,7 @@ func clusterRequests(c core.EnvoyCluster) int64 {
 	for _, h := range c.Hosts {
 		n += h.Requests
 	}
+
 	return n
 }
 
@@ -411,6 +457,7 @@ func emptyClusterText(c core.EnvoyCluster) string {
 	if c.Role == "egress" || c.Role == "inbound passthrough" {
 		return "No connections right now: Envoy forgets original destinations a few seconds after they go idle."
 	}
+
 	return "No hosts: Envoy has not resolved this cluster's name (yet)."
 }
 
@@ -422,6 +469,7 @@ func micros(us int64) string {
 	case us >= 1000:
 		return fmt.Sprintf("%.1f ms", float64(us)/1e3)
 	}
+
 	return fmt.Sprintf("%d µs", us)
 }
 

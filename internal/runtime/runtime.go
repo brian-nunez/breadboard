@@ -69,6 +69,7 @@ func (c *Compose) bin() string {
 	if c.Bin != "" {
 		return c.Bin
 	}
+
 	return "docker"
 }
 
@@ -83,9 +84,11 @@ func (e *cmdError) Error() string {
 	if lines := strings.Split(msg, "\n"); len(lines) > 30 {
 		msg = strings.Join(lines[len(lines)-30:], "\n")
 	}
+
 	if msg == "" {
 		return fmt.Sprintf("docker %s: %v", strings.Join(e.args, " "), e.err)
 	}
+
 	return fmt.Sprintf("docker %s: %v\n%s", strings.Join(e.args, " "), e.err, msg)
 }
 
@@ -93,12 +96,15 @@ func (e *cmdError) Unwrap() error { return e.err }
 
 func (c *Compose) run(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, c.bin(), args...)
+
 	var stdout, stderr bytes.Buffer
+
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return nil, fmt.Errorf("%w: the docker CLI is not on PATH", errs.ErrDockerUnavailable)
 		}
+
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -106,6 +112,7 @@ func (c *Compose) run(ctx context.Context, args ...string) ([]byte, error) {
 		// even when one object is missing, so the output goes back too.
 		return stdout.Bytes(), &cmdError{args: args, err: err, stderr: stderr.String()}
 	}
+
 	return stdout.Bytes(), nil
 }
 
@@ -114,6 +121,7 @@ func (p Project) args() []string {
 	for _, f := range p.Files {
 		a = append(a, "--file", f)
 	}
+
 	return a
 }
 
@@ -123,11 +131,14 @@ func (c *Compose) Available(ctx context.Context) error {
 		if errors.Is(err, errs.ErrDockerUnavailable) || ctx.Err() != nil {
 			return err
 		}
-		return fmt.Errorf("%w: %v", errs.ErrDockerUnavailable, err)
+
+		return fmt.Errorf("%w: %w", errs.ErrDockerUnavailable, err)
 	}
+
 	if _, err := c.run(ctx, "compose", "version"); err != nil {
-		return fmt.Errorf("%w: docker compose is not installed: %v", errs.ErrDockerUnavailable, err)
+		return fmt.Errorf("%w: docker compose is not installed: %w", errs.ErrDockerUnavailable, err)
 	}
+
 	return nil
 }
 
@@ -148,12 +159,14 @@ func (c *Compose) Up(ctx context.Context, p Project) error {
 	if ce := (*cmdError)(nil); errors.As(err, &ce) && subnetTaken.MatchString(ce.stderr) {
 		return fmt.Errorf("%w: %w", ErrSubnetTaken, err)
 	}
+
 	return err
 }
 
 // Build builds the images of the given services without starting anything.
 func (c *Compose) Build(ctx context.Context, p Project, services []string) error {
 	_, err := c.run(ctx, append(append(p.args(), "build"), services...)...)
+
 	return err
 }
 
@@ -182,28 +195,37 @@ func (c *Compose) ImageUser(ctx context.Context, p Project, service string) (Ima
 	if !slices.Contains(strings.Fields(string(out)), u.Image) {
 		return ImageUser{}, fmt.Errorf("runtime: compose builds no image %s for %s (it lists %s)", u.Image, service, strings.Join(strings.Fields(string(out)), ", "))
 	}
+
 	out, err = c.run(ctx, "image", "inspect", "--format", "{{.Config.User}}", u.Image)
 	if err != nil {
 		return ImageUser{}, err
 	}
+
 	u.User = strings.TrimSpace(string(out))
+
 	name, _, _ := strings.Cut(u.User, ":")
 	if name == "" {
 		return u, nil // root
 	}
+
 	if n, err := strconv.Atoi(name); err == nil {
 		u.UID = n
+
 		return u, nil
 	}
+
 	out, err = c.run(ctx, "run", "--rm", "--network", "none", "--entrypoint", "id", u.Image, "-u", name)
 	if err != nil {
-		return u, fmt.Errorf("%w: user %q of %s: %v", ErrUserUnresolved, name, u.Image, err)
+		return u, fmt.Errorf("%w: user %q of %s: %w", ErrUserUnresolved, name, u.Image, err)
 	}
+
 	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	if err != nil {
 		return u, fmt.Errorf("%w: user %q of %s: id printed %q", ErrUserUnresolved, name, u.Image, strings.TrimSpace(string(out)))
 	}
+
 	u.UID = n
+
 	return u, nil
 }
 
@@ -214,7 +236,9 @@ func (c *Compose) Down(ctx context.Context, p Project, volumes bool) error {
 	if volumes {
 		args = append(args, "--volumes")
 	}
+
 	_, err := c.run(ctx, args...)
+
 	return err
 }
 
@@ -227,22 +251,27 @@ func (c *Compose) RemoveOwned(ctx context.Context, experimentID string, volumes 
 	if experimentID == "" {
 		return errors.New("runtime: RemoveOwned needs an experiment id")
 	}
+
 	filter := "label=" + labelExperimentID + "=" + experimentID
+
 	kinds := []string{"network"}
 	if volumes {
 		kinds = append(kinds, "volume")
 	}
+
 	for _, kind := range kinds {
 		out, err := c.run(ctx, kind, "ls", "--quiet", "--filter", filter)
 		if err != nil {
 			return err
 		}
+
 		if names := strings.Fields(string(out)); len(names) > 0 {
 			if _, err := c.run(ctx, append([]string{kind, "rm"}, names...)...); err != nil {
 				return err
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -252,14 +281,17 @@ func (c *Compose) Containers(ctx context.Context, experiment string) ([]Containe
 	if err != nil {
 		return nil, err
 	}
+
 	ids := strings.Fields(string(out))
 	if len(ids) == 0 {
 		return nil, nil
 	}
+
 	out, err = c.run(ctx, append([]string{"inspect"}, ids...)...)
 	if err != nil {
 		return nil, err
 	}
+
 	var raw []struct {
 		ID           string `json:"Id"`
 		RestartCount int    `json:"RestartCount"`
@@ -280,6 +312,7 @@ func (c *Compose) Containers(ctx context.Context, experiment string) ([]Containe
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, fmt.Errorf("docker inspect: %w", err)
 	}
+
 	list := make([]Container, 0, len(raw))
 	for _, r := range raw {
 		ct := Container{
@@ -296,8 +329,10 @@ func (c *Compose) Containers(ctx context.Context, experiment string) ([]Containe
 		if r.State.Health != nil {
 			ct.Health = r.State.Health.Status
 		}
+
 		list = append(list, ct)
 	}
+
 	return list, nil
 }
 
@@ -320,19 +355,23 @@ func (c *Compose) PublishedPorts(ctx context.Context) ([]PublishedPort, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	ids := strings.Fields(string(out))
 	if len(ids) == 0 {
 		return nil, nil
 	}
+
 	out, err = c.run(ctx, append([]string{"inspect"}, ids...)...)
 	// A container removed between the list and the inspect publishes
 	// nothing any more: inspect still prints every other one.
 	if ce := (*cmdError)(nil); errors.As(err, &ce) && onlyMissingContainers(ce.stderr) {
 		err = nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	return parsePublishedPorts(out)
 }
 
@@ -354,27 +393,33 @@ func parsePublishedPorts(data []byte) ([]PublishedPort, error) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("docker inspect: %w", err)
 	}
+
 	var list []PublishedPort
+
 	for _, r := range raw {
 		for _, bindings := range r.HostConfig.PortBindings {
 			for _, b := range bindings {
 				lo, hi, _ := strings.Cut(b.HostPort, "-")
+
 				first, err := strconv.Atoi(lo)
 				if err != nil {
 					continue // empty: Docker picks an ephemeral port
 				}
+
 				last := first
 				if hi != "" {
 					if last, err = strconv.Atoi(hi); err != nil {
 						last = first
 					}
 				}
+
 				for port := first; port <= last; port++ {
 					list = append(list, PublishedPort{HostIP: b.HostIP, HostPort: port, ExperimentID: r.Config.Labels[labelExperimentID], Service: r.Config.Labels["breadboard.service"], Running: r.State.Running})
 				}
 			}
 		}
 	}
+
 	return list, nil
 }
 
@@ -386,6 +431,7 @@ var missingContainer = regexp.MustCompile(`^Error(: No such (object|container)| 
 // says a container does not exist.
 func onlyMissingContainers(stderr string) bool {
 	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+
 	return lines[0] != "" && !slices.ContainsFunc(lines, func(l string) bool { return !missingContainer.MatchString(strings.TrimSpace(l)) })
 }
 
@@ -400,13 +446,16 @@ func (c *Compose) Exec(ctx context.Context, experiment, service string, cmd []st
 	if err != nil {
 		return nil, err
 	}
+
 	ids := strings.Fields(string(out))
 	if len(ids) == 0 {
 		return nil, fmt.Errorf("%s is not running: %w", service, errs.ErrNotFound)
 	}
+
 	if out, err = c.run(ctx, append([]string{"exec", ids[0]}, cmd...)...); err != nil {
 		return nil, err
 	}
+
 	return out, nil
 }
 
@@ -415,17 +464,21 @@ func (c *Compose) Stats(ctx context.Context, ids []string) (map[string]Usage, er
 	if len(ids) == 0 {
 		return map[string]Usage{}, nil
 	}
+
 	out, err := c.run(ctx, append([]string{"stats", "--no-stream", "--no-trunc", "--format", "{{json .}}"}, ids...)...)
 	if err != nil {
 		return nil, err
 	}
+
 	usage := map[string]Usage{}
+
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
 		if id, u, ok := parseStatsLine(sc.Bytes()); ok {
 			usage[id] = u
 		}
 	}
+
 	return usage, nil
 }
 
@@ -436,17 +489,23 @@ func (c *Compose) Stats(ctx context.Context, ids []string) (map[string]Usage, er
 func (c *Compose) StatsStream(ctx context.Context) iter.Seq2[Sample, error] {
 	return func(yield func(Sample, error) bool) {
 		cmd := exec.CommandContext(ctx, c.bin(), "stats", "--no-trunc", "--format", "{{json .}}")
+
 		out, err := cmd.StdoutPipe()
 		if err != nil {
 			yield(Sample{}, err)
+
 			return
 		}
+
 		var stderr bytes.Buffer
+
 		cmd.Stderr = &stderr
 		if err := cmd.Start(); err != nil {
 			yield(Sample{}, err)
+
 			return
 		}
+
 		stopCmd := func() {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
@@ -454,23 +513,29 @@ func (c *Compose) StatsStream(ctx context.Context) iter.Seq2[Sample, error] {
 		sc := bufio.NewScanner(out)
 		// A row is a few hundred bytes; a container name can make it longer.
 		sc.Buffer(make([]byte, 0, 64<<10), statsRowMax)
+
 		for sc.Scan() {
 			if id, u, ok := parseStatsLine(sc.Bytes()); ok {
 				if !yield(Sample{ID: id, Usage: u}, nil) {
 					stopCmd()
+
 					return
 				}
 			}
 		}
+
 		if err := sc.Err(); err != nil {
 			// Reading stopped (a row over the limit, say) while docker
 			// stats may still be writing: end it so the caller can retry.
 			stopCmd()
+
 			if ctx.Err() == nil {
 				yield(Sample{}, fmt.Errorf("docker stats: read: %w", err))
 			}
+
 			return
 		}
+
 		if err := cmd.Wait(); err != nil && ctx.Err() == nil {
 			yield(Sample{}, fmt.Errorf("docker stats: %w: %s", err, strings.TrimSpace(stderr.String())))
 		}
@@ -494,7 +559,9 @@ func parseStatsLine(line []byte) (string, Usage, bool) {
 	if i < 0 || j < i {
 		return "", Usage{}, false
 	}
+
 	line = line[:j+1]
+
 	var row struct {
 		ID       string `json:"ID"`
 		CPUPerc  string `json:"CPUPerc"`
@@ -503,12 +570,15 @@ func parseStatsLine(line []byte) (string, Usage, bool) {
 	if json.Unmarshal(line[i:], &row) != nil || row.ID == "" {
 		return "", Usage{}, false
 	}
+
 	u := Usage{}
+
 	u.CPUPercent, _ = strconv.ParseFloat(strings.TrimSuffix(row.CPUPerc, "%"), 64)
 	if used, limit, ok := strings.Cut(row.MemUsage, "/"); ok {
 		u.MemoryBytes = parseSize(used)
 		u.MemoryLimit = parseSize(limit)
 	}
+
 	return row.ID, u, true
 }
 
@@ -519,15 +589,18 @@ func parseSize(s string) uint64 {
 	if m == nil {
 		return 0
 	}
+
 	v, err := strconv.ParseFloat(m[1], 64)
 	if err != nil {
 		return 0
 	}
+
 	mult := map[string]float64{
 		"": 1, "B": 1,
 		"KiB": 1 << 10, "MiB": 1 << 20, "GiB": 1 << 30, "TiB": 1 << 40,
 		"kB": 1e3, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12,
 	}[m[2]]
+
 	return uint64(v * mult)
 }
 
@@ -540,44 +613,63 @@ func (c *Compose) Logs(ctx context.Context, p Project, services []string, follow
 		if follow {
 			args = append(args, "--follow")
 		}
+
 		if tail > 0 {
 			args = append(args, "--tail", strconv.Itoa(tail))
 		}
+
 		args = append(args, services...)
+
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
+
 		cmd := exec.CommandContext(ctx, c.bin(), args...)
+
 		var stderr bytes.Buffer
+
 		cmd.Stderr = &stderr
+
 		out, err := cmd.StdoutPipe()
 		if err != nil {
 			yield(LogLine{}, err)
+
 			return
 		}
+
 		if err := cmd.Start(); err != nil {
 			if errors.Is(err, exec.ErrNotFound) {
 				err = fmt.Errorf("%w: the docker CLI is not on PATH", errs.ErrDockerUnavailable)
 			}
+
 			yield(LogLine{}, err)
+
 			return
 		}
+
 		sc := bufio.NewScanner(out)
 		sc.Buffer(make([]byte, 64*1024), 1024*1024)
+
 		for sc.Scan() {
 			line := LogLine{Text: sc.Text()}
 			if m := logPrefix.FindStringSubmatch(line.Text); m != nil {
 				line.Service, line.Text = m[1], m[3]
 			}
+
 			if !yield(line, nil) {
 				cancel()
+
 				_ = cmd.Wait()
+
 				return
 			}
 		}
+
 		err = cmd.Wait()
+
 		if ctx.Err() != nil {
 			return
 		}
+
 		if err != nil {
 			yield(LogLine{}, &cmdError{args: args, err: err, stderr: stderr.String()})
 		}
@@ -605,7 +697,9 @@ func (c *Compose) Owners(ctx context.Context, experiment string) ([]string, erro
 	// The id= prefix keeps unlabeled resources visible as an empty id.
 	format := `id={{.Label "` + labelExperimentID + `"}}`
 	seen := map[string]bool{}
+
 	var out []string
+
 	for _, args := range [][]string{
 		{"ps", "--all", "--filter", filter, "--format", format},
 		{"network", "ls", "--filter", filter, "--format", format},
@@ -615,20 +709,24 @@ func (c *Compose) Owners(ctx context.Context, experiment string) ([]string, erro
 		if err != nil {
 			return nil, err
 		}
+
 		for _, line := range strings.Split(string(data), "\n") {
 			id, ok := strings.CutPrefix(strings.TrimSpace(line), "id=")
 			if !ok {
 				continue
 			}
+
 			if id == "<no value>" {
 				id = ""
 			}
+
 			if !seen[id] {
 				seen[id] = true
 				out = append(out, id)
 			}
 		}
 	}
+
 	return out, nil
 }
 
@@ -638,19 +736,23 @@ func (c *Compose) Subnets(ctx context.Context) ([]Network, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	ids := strings.Fields(string(out))
 	if len(ids) == 0 {
 		return nil, nil
 	}
+
 	out, err = c.run(ctx, append([]string{"network", "inspect"}, ids...)...)
 	// A network removed between the list and the inspect (another lab's
 	// down) holds no subnet any more: inspect still prints every other one.
 	if ce := (*cmdError)(nil); errors.As(err, &ce) && onlyMissingNetworks(ce.stderr) {
 		err = nil
 	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	var raw []struct {
 		Name   string            `json:"Name"`
 		Labels map[string]string `json:"Labels"`
@@ -664,7 +766,9 @@ func (c *Compose) Subnets(ctx context.Context) ([]Network, error) {
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, fmt.Errorf("docker network inspect: %w", err)
 	}
+
 	var list []Network
+
 	for _, n := range raw {
 		for _, cfg := range n.IPAM.Config {
 			if p, err := netip.ParsePrefix(cfg.Subnet); err == nil {
@@ -673,6 +777,7 @@ func (c *Compose) Subnets(ctx context.Context) ([]Network, error) {
 			}
 		}
 	}
+
 	return list, nil
 }
 
@@ -684,5 +789,6 @@ var missingNetwork = regexp.MustCompile(`^(Error response from daemon: network \
 // says a network does not exist.
 func onlyMissingNetworks(stderr string) bool {
 	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+
 	return lines[0] != "" && !slices.ContainsFunc(lines, func(l string) bool { return !missingNetwork.MatchString(strings.TrimSpace(l)) })
 }

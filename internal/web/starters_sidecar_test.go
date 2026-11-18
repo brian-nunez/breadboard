@@ -10,6 +10,7 @@ import (
 // and draw the pods, replicas and app-to-app edges.
 func TestSidecarStarterPages(t *testing.T) {
 	s := newProject(t)
+
 	cookie := map[string]string{"Cookie": signIn(t, s)}
 	for id, wants := range map[string][]string{
 		"sidecar/envoy-ambassador": {

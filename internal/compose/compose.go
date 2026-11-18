@@ -115,6 +115,7 @@ func (b *Bundle) File(p string) (File, bool) {
 	if i < 0 {
 		return File{}, false
 	}
+
 	return b.Files[i], true
 }
 
@@ -125,6 +126,7 @@ func SegmentAddress(p netip.Prefix) netip.Addr {
 	for range 10 {
 		a = a.Next()
 	}
+
 	return a
 }
 
@@ -136,6 +138,7 @@ func InstanceSegmentAddress(p netip.Prefix, instance int) netip.Addr {
 	for i := 1; i < instance; i++ {
 		a = a.Next()
 	}
+
 	return a
 }
 
@@ -150,6 +153,7 @@ const DefaultNetwork = "default"
 func DynamicRange(p netip.Prefix) netip.Prefix {
 	a := p.Masked().Addr().As4()
 	a[3] = 128
+
 	return netip.PrefixFrom(netip.AddrFrom4(a), 25)
 }
 
@@ -183,10 +187,12 @@ func Render(in Input) (*Bundle, error) {
 		if svc.Kind == model.Sidecar {
 			owner = svc.Parent
 		}
+
 		cert, ok := in.Certs[owner]
 		if !ok {
 			return nil, fmt.Errorf("compose: no certificate for %s", owner)
 		}
+
 		tlsDir := "tls/" + owner
 		if owner == svc.Name {
 			add(tlsDir+"/tls.crt", cert.Cert, 0o644)
@@ -203,10 +209,12 @@ func Render(in Input) (*Bundle, error) {
 			"./ca.pem:" + catalog.CAFile + ":ro",
 			"./trust-bundle.pem:" + catalog.TrustBundleFile + ":ro",
 		}
+
 		hash := sha256.New()
 		for _, part := range [][]byte{cert.Cert, cert.Key, in.CA, in.TrustBundle} {
 			hash.Write(part)
 		}
+
 		if svc.HostRouter {
 			if in.HostCert == nil || in.HostPort == 0 {
 				return nil, fmt.Errorf("compose: %s needs the host certificate and a host port", svc.Name)
@@ -222,21 +230,26 @@ func Render(in Input) (*Bundle, error) {
 				"./"+HostKeyPath+":"+catalog.HostKeyFile+":ro",
 			)
 		}
+
 		addHashed := func(p string, data []byte, mode os.FileMode) {
 			hash.Write([]byte(p))
 			hash.Write(data)
 			add(p, data, mode)
 		}
 		// The namespace the service's network lives in: its own, or its pod's.
-		var namespace string
-		var def *yaml.Node
-		var err error
+		var (
+			namespace string
+			def       *yaml.Node
+			err       error
+		)
+
 		switch svc.Kind {
 		case model.Infra:
 			def, mounts, err = infraService(in, svc, mounts, addHashed)
 			if err != nil {
 				return nil, err
 			}
+
 			if svc.Entry.DataPath != "" { // proxies keep no data
 				vol := svc.Name + "-data"
 				volumes.Content = append(volumes.Content, str(vol), mapping(str("labels"), in.labels("", "")))
@@ -246,15 +259,18 @@ func Render(in Input) (*Bundle, error) {
 			if !ok {
 				return nil, fmt.Errorf("compose: sidecar %s has no app %s", svc.Name, svc.Parent)
 			}
+
 			out, ok := outputs[svc.Name]
 			if !ok {
 				return nil, fmt.Errorf("compose: sidecar %s was not rendered with its app", svc.Name)
 			}
+
 			namespace = parent.Name
 			if parent.Pod != "" {
 				namespace = parent.Pod
 				mounts = append(mounts, sharedVolume(parent)+":"+sidecar.SharedDir)
 			}
+
 			def, mounts, err = sidecarService(in, svc, parent, out, mounts, addHashed)
 			if err != nil {
 				return nil, err
@@ -264,28 +280,35 @@ func Render(in Input) (*Bundle, error) {
 			if err != nil {
 				return nil, err
 			}
+
 			for k, v := range outs {
 				if v.Init != nil && svc.Netinit == "" {
 					return nil, fmt.Errorf("compose: sidecar %s rendered an init container, but %s has no transparent sidecar", k, svc.Name)
 				}
+
 				outputs[k] = v
 			}
+
 			if svc.Pod != "" {
 				namespace = svc.Pod
 				services.Content = append(services.Content, str(svc.Pod), podHolder(in, svc))
 				vol := sharedVolume(svc)
 				volumes.Content = append(volumes.Content, str(vol), mapping(str("labels"), in.labels("", "")))
 				mounts = append(mounts, vol+":"+sidecar.SharedDir)
+
 				if svc.Netinit != "" {
 					init, err := netinit(in, svc, outs, add)
 					if err != nil {
 						return nil, err
 					}
+
 					services.Content = append(services.Content, str(svc.Netinit), init)
 				}
 			}
+
 			def = appService(in, svc, groups)
 		}
+
 		def.Content = append(def.Content, str("volumes"), seq(strs(mounts...)...))
 		if namespace != "" {
 			// Same network namespace: same address, same aliases, same localhost.
@@ -293,10 +316,12 @@ func Render(in Input) (*Bundle, error) {
 		} else {
 			def.Content = append(def.Content, str("networks"), networks(in, svc))
 		}
+
 		lbl := in.labels(svc.Name, string(svc.Kind))
 		if pod := podOf(m, svc); pod != nil {
 			lbl.Content = append(lbl.Content, str(LabelCapture), str(capture(pod)))
 		}
+
 		lbl.Content = append(lbl.Content, str(LabelConfigHash), str(hex.EncodeToString(hash.Sum(nil))[:16]))
 		def.Content = append(def.Content, str("labels"), lbl)
 		def.Content = append(def.Content, str("mem_limit"), str(svc.Resources.Memory))
@@ -312,22 +337,27 @@ func Render(in Input) (*Bundle, error) {
 			str("ip_range"), str(DynamicRange(subnet).String()),
 		))))
 	}
+
 	defNet.Content = append(defNet.Content, str("labels"), in.labels("", ""))
 	nets := mapping(str(DefaultNetwork), defNet)
+
 	for _, seg := range m.Segments {
 		subnet, ok := in.Subnets[seg.Name]
 		if !ok {
 			return nil, fmt.Errorf("compose: no subnet allocated for segment %s", seg.Name)
 		}
+
 		key := str(seg.Name)
 		key.HeadComment = fmt.Sprintf("Private segment for plaintext to %s; only %s can reach it.\n%s",
 			seg.Target, strings.Join(seg.Clients, ", "), reasonLines(seg.Reasons))
+
 		ipam := mapping(str("subnet"), str(subnet.String()))
 		if seg.Port != 0 {
 			// An app's segment: replicas hold fixed addresses from .10 up,
 			// so Docker hands out only the upper half (proxies, D-122).
 			ipam.Content = append(ipam.Content, str("ip_range"), str(DynamicRange(subnet).String()))
 		}
+
 		nets.Content = append(nets.Content, key, mapping(
 			str("internal"), boolean(true),
 			str("ipam"), mapping(str("config"), seq(ipam)),
@@ -339,16 +369,20 @@ func Render(in Input) (*Bundle, error) {
 	if len(volumes.Content) > 0 {
 		top.Content = append(top.Content, str("volumes"), volumes)
 	}
+
 	top.HeadComment = in.Header
+
 	data, err := encode(top)
 	if err != nil {
 		return nil, err
 	}
+
 	add(ComposeFile, data, 0o644)
 
 	if env := in.Secrets.Dotenv(); env != nil {
 		add(EnvFile, env, 0o600)
 	}
+
 	return b, nil
 }
 
@@ -376,6 +410,7 @@ func podHolder(in Input, inst *model.Service) *yaml.Node {
 	if ports := publish(inst.App.Ports); ports != nil {
 		def.Content = append(def.Content, str("ports"), ports)
 	}
+
 	def.Content = append(def.Content,
 		str("networks"), networks(in, inst),
 		str("labels"), podLabels(in, inst),
@@ -383,6 +418,7 @@ func podHolder(in Input, inst *model.Service) *yaml.Node {
 		str("cpus"), float(sidecar.PodResources.CPUs),
 		str("restart"), str("unless-stopped"),
 	)
+
 	return def
 }
 
@@ -392,9 +428,11 @@ func podOf(m *model.Model, svc *model.Service) *model.Service {
 	if svc.Kind == model.Sidecar {
 		inst, _ = m.Service(svc.Parent)
 	}
+
 	if inst == nil || inst.Pod == "" {
 		return nil
 	}
+
 	return inst
 }
 
@@ -408,12 +446,14 @@ func capture(inst *model.Service) string {
 	case inst.PlainGuard:
 		return "guard"
 	}
+
 	return "off"
 }
 
 func podLabels(in Input, inst *model.Service) *yaml.Node {
 	l := in.labels(inst.Pod, KindPod)
 	l.Content = append(l.Content, str(LabelCapture), str(capture(inst)))
+
 	return l
 }
 
@@ -421,19 +461,23 @@ func podLabels(in Input, inst *model.Service) *yaml.Node {
 // asked for it. It is the only container that may hold extra capabilities.
 func netinit(in Input, inst *model.Service, outs map[string]sidecar.Output, add func(string, []byte, os.FileMode)) (*yaml.Node, error) {
 	var init *sidecar.Init
+
 	for _, name := range inst.Sidecars {
 		if o, ok := outs[name]; ok && o.Init != nil {
 			if init != nil {
 				return nil, fmt.Errorf("compose: %s: more than one sidecar asks for an init container", inst.Name)
 			}
+
 			init = o.Init
 		}
 	}
+
 	if inst.PlainGuard {
 		guard, err := plainGuard(in, inst)
 		if err != nil {
 			return nil, err
 		}
+
 		if init == nil {
 			init = &sidecar.Init{Dockerfile: sidecar.NetinitDockerfile(), CapAdd: []string{"NET_ADMIN"}, Resources: sidecar.NetinitResources}
 		} else {
@@ -449,29 +493,37 @@ func netinit(in Input, inst *model.Service, outs map[string]sidecar.Output, add 
 		} else {
 			return nil, fmt.Errorf("compose: %s: cannot add the plaintext guard to the init container's command", inst.Name)
 		}
+
 		if !slices.Contains(init.CapAdd, "NET_ADMIN") {
 			init.CapAdd = append(slices.Clone(init.CapAdd), "NET_ADMIN")
 		}
 	}
+
 	if init == nil {
 		return nil, fmt.Errorf("compose: %s: transparent mode needs an init container, and no sidecar rendered one", inst.Name)
 	}
+
 	dir := "build/" + inst.Netinit
 	add(dir+"/Dockerfile", init.Dockerfile, 0o644)
 	hash := sha256.Sum256(append(append([]byte{}, init.Dockerfile...), strings.Join(init.Command, "\x00")...))
+
 	def := mapping(str("build"), mapping(str("context"), str("./"+dir)))
 	if len(init.Command) > 0 {
 		def.Content = append(def.Content, str("command"), command(init.Command))
 	}
+
 	if len(init.CapAdd) > 0 {
 		def.Content = append(def.Content, str("cap_add"), flow(strs(init.CapAdd...)...))
 	}
+
 	lbl := in.labels(inst.Netinit, KindInit)
 	lbl.Content = append(lbl.Content, str(LabelConfigHash), str(hex.EncodeToString(hash[:])[:16]))
+
 	res := init.Resources
 	if res.Memory == "" {
 		res = sidecar.PodResources
 	}
+
 	def.Content = append(def.Content,
 		str("depends_on"), mapping(str(inst.Pod), mapping(str("condition"), str("service_healthy"))),
 		str("network_mode"), str("service:"+inst.Pod),
@@ -482,6 +534,7 @@ func netinit(in Input, inst *model.Service, outs map[string]sidecar.Output, add 
 		// Quoted, so no YAML 1.1 reader takes it for false.
 		str("restart"), &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "no", Style: yaml.DoubleQuotedStyle},
 	)
+
 	return def, nil
 }
 
@@ -492,15 +545,18 @@ func plainGuard(in Input, inst *model.Service) (string, error) {
 	if !ok || seg.Port == 0 {
 		return "", fmt.Errorf("compose: %s: plaintext guard without a segment", inst.Name)
 	}
+
 	subnet, ok := in.Subnets[seg.Name]
 	if !ok {
 		return "", fmt.Errorf("compose: no subnet allocated for segment %s", seg.Name)
 	}
+
 	return sidecar.PlaintextGuardScript(seg.Port, InstanceSegmentAddress(subnet, inst.Instance).String()), nil
 }
 
 func infraService(in Input, svc *model.Service, mounts []string, add func(string, []byte, os.FileMode)) (*yaml.Node, []string, error) {
 	m := in.Model
+
 	srv := catalog.Server{
 		Name:   svc.Name,
 		FQDN:   svc.FQDN,
@@ -518,31 +574,40 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 			Reasons: seg.Reasons,
 		}
 	}
+
 	srv.Upstreams = catalog.WithSecrets(svc.Upstreams, in.Secrets.Ref)
+
 	srv.HostTargets = svc.HostTargets
 	if svc.File != "" {
 		if in.ReadFile == nil {
 			return nil, nil, fmt.Errorf("compose: %s: file %s cannot be read here", svc.Name, svc.File)
 		}
+
 		data, err := in.ReadFile(svc.File)
 		if err != nil {
 			return nil, nil, fmt.Errorf("compose: %s: file: %w", svc.Name, err)
 		}
+
 		if data == nil {
 			data = []byte{}
 		}
+
 		srv.UserConfig = data
 	}
+
 	if svc.StaticFile != "" {
 		if in.ReadFile == nil {
 			return nil, nil, fmt.Errorf("compose: %s: static_file %s cannot be read here", svc.Name, svc.StaticFile)
 		}
+
 		data, err := in.ReadFile(svc.StaticFile)
 		if err != nil {
 			return nil, nil, fmt.Errorf("compose: %s: static_file: %w", svc.Name, err)
 		}
+
 		srv.UserStatic = &catalog.UserFile{Path: svc.StaticFile, Data: data}
 	}
+
 	var c catalog.Container
 	if svc.HostRouter {
 		c = catalog.HostRouter(srv)
@@ -552,24 +617,30 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 			return nil, nil, fmt.Errorf("compose: %w", err)
 		}
 	}
+
 	def := mapping(str("image"), str(svc.Entry.Image))
 	if len(c.Entrypoint) > 0 {
 		def.Content = append(def.Content, str("entrypoint"), command(c.Entrypoint))
 	}
+
 	if len(c.Command) > 0 {
 		def.Content = append(def.Content, str("command"), command(c.Command))
 	}
+
 	env := append([]catalog.EnvVar{{Name: "SSL_CERT_FILE", Value: catalog.TrustBundleFile}}, c.Environment...)
 	def.Content = append(def.Content, str("environment"), environment(env))
+
 	mounts = configFiles(svc.Name, c.Files, mounts, add)
 	if svc.Entry.DataPath != "" {
 		mounts = append([]string{svc.Name + "-data:" + svc.Entry.DataPath}, mounts...)
 	}
+
 	def.Content = append(def.Content, str("healthcheck"), healthcheck(c.Health))
 	if svc.HostRouter {
 		// Loopback only, like every published port (D-190).
 		def.Content = append(def.Content, str("ports"), seq(str(fmt.Sprintf("127.0.0.1:%d:%d", in.HostPort, catalog.HostRouterPort))))
 	}
+
 	return def, mounts, nil
 }
 
@@ -578,13 +649,16 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 func configFiles(service string, files []catalog.File, mounts []string, add func(string, []byte, os.FileMode)) []string {
 	for _, f := range files {
 		p := "config/" + service + "/" + f.Name
+
 		mode := os.FileMode(f.Mode)
 		if mode == 0 {
 			mode = 0o644
 		}
+
 		add(p, f.Data, mode)
 		mounts = append(mounts, "./"+p+":"+f.MountPath()+":ro")
 	}
+
 	return mounts
 }
 
@@ -597,20 +671,25 @@ func sidecarService(in Input, svc, parent *model.Service, out sidecar.Output, mo
 	if len(c.Health.Test) == 0 {
 		return nil, nil, fmt.Errorf("compose: sidecar %s has no health check", svc.Name)
 	}
+
 	if svc.Image == "" {
 		return nil, nil, fmt.Errorf("compose: sidecar %s has no image", svc.Name)
 	}
+
 	def := mapping(str("image"), str(svc.Image))
 	if len(c.Entrypoint) > 0 {
 		def.Content = append(def.Content, str("entrypoint"), command(c.Entrypoint))
 	}
+
 	if len(c.Command) > 0 {
 		def.Content = append(def.Content, str("command"), command(c.Command))
 	}
+
 	env := append([]catalog.EnvVar{{Name: "SSL_CERT_FILE", Value: catalog.TrustBundleFile}}, c.Environment...)
 	def.Content = append(def.Content, str("environment"), environment(env))
 	mounts = configFiles(svc.Name, c.Files, mounts, add)
 	def.Content = append(def.Content, str("healthcheck"), healthcheck(c.Health))
+
 	depends := mapping()
 	if parent.Pod == "" {
 		depends.Content = append(depends.Content, str(parent.Name), condition("service_started"))
@@ -620,13 +699,17 @@ func sidecarService(in Input, svc, parent *model.Service, out sidecar.Output, mo
 			depends.Content = append(depends.Content, str(parent.Netinit), condition("service_completed_successfully"))
 		}
 	}
+
 	for _, need := range out.Needs {
 		if _, ok := in.Model.Service(need); !ok {
 			return nil, nil, fmt.Errorf("compose: sidecar %s needs %s, which is not a service", svc.Name, need)
 		}
+
 		depends.Content = append(depends.Content, str(need), condition("service_healthy"))
 	}
+
 	def.Content = append(def.Content, str("depends_on"), depends)
+
 	return def, mounts, nil
 }
 
@@ -657,6 +740,7 @@ type EnvGroup struct {
 // mode).
 func AppEnv(m *model.Model, svc *model.Service, ref func(service string) func(key string) string, subnets map[string]netip.Prefix) ([]EnvGroup, error) {
 	groups, _, err := appEnv(m, svc, ref, subnets, nil, nil)
+
 	return groups, err
 }
 
@@ -676,9 +760,11 @@ func appEnv(m *model.Model, svc *model.Service, ref func(service string) func(ke
 	if svc.Health != nil {
 		base = append(base, catalog.EnvVar{Name: "BB_HEALTH_PORT", Value: strconv.Itoa(svc.Health.Port)})
 	}
+
 	if svc.Pod != "" {
 		base = append(base, catalog.EnvVar{Name: "BB_SHARED_DIR", Value: sidecar.SharedDir})
 	}
+
 	if seg, ok := m.Segment(svc.Group()); ok && svc.Kind == model.App {
 		// A terminating proxy sends plaintext here: the app binds its
 		// segment address only, so no other container reaches the port.
@@ -686,19 +772,26 @@ func appEnv(m *model.Model, svc *model.Service, ref func(service string) func(ke
 		if p, ok := subnets[seg.Name]; ok {
 			addr = InstanceSegmentAddress(p, svc.Instance).String()
 		}
+
 		base = append(base, catalog.EnvVar{Name: "BB_PLAIN_LISTEN_ADDR", Value: fmt.Sprintf("%s:%d", addr, seg.Port)})
 	}
+
 	groups := []EnvGroup{{Vars: base}}
+
 	seen := map[string]bool{}
 	for _, e := range base {
 		seen[e.Name] = true
 	}
+
 	var uses []sidecar.Use
+
 	for _, edge := range m.EdgesFrom(svc.Group()) {
 		if edge.Via != "" {
 			continue // a sidecar's outbound target: the sidecar sets its variables
 		}
+
 		target, _ := m.Service(edge.To)
+
 		cl := catalog.Client{
 			Service:   target.Name,
 			FQDN:      target.FQDN,
@@ -710,16 +803,20 @@ func appEnv(m *model.Model, svc *model.Service, ref func(service string) func(ke
 			seg, _ := m.Segment(target.Name)
 			cl.Plain = &catalog.Plain{FQDN: model.SegmentFQDN(target.Name, m.Domain), Subnet: subnets[seg.Name].String()}
 		}
+
 		g := EnvGroup{Service: target.Name, Title: target.Entry.Title, Plaintext: !edge.TLS, Reason: edge.Reason}
 		for _, v := range target.Entry.Client(cl) {
 			if seen[v.Name] {
 				// A second service of the same type: prefix its variables.
 				v.Name = secrets.EnvPrefixed(target.Name, v.Name)
 			}
+
 			seen[v.Name] = true
 			g.Vars = append(g.Vars, v)
 		}
+
 		groups = append(groups, g)
+
 		use := sidecar.Use{
 			Service: target.Name, Type: target.Entry.ID, FQDN: target.FQDN, Port: edge.Port,
 			TLS: edge.TLS, Config: target.Config, Env: slices.Clone(g.Vars),
@@ -729,27 +826,35 @@ func appEnv(m *model.Model, svc *model.Service, ref func(service string) func(ke
 		} else if seg, ok := m.Segment(target.Name); ok && !edge.TLS && addrs != nil {
 			use.Addresses = []string{SegmentAddress(subnets[seg.Name]).String()}
 		}
+
 		uses = append(uses, use)
 	}
+
 	outs := map[string]sidecar.Output{}
+
 	for _, name := range svc.Sidecars {
 		sc, ok := m.Service(name)
 		if !ok {
 			return nil, nil, fmt.Errorf("compose: %s has no sidecar %s", svc.Name, name)
 		}
+
 		sin := sidecarInput(m, svc, sc, uses, ref, addrs)
 		if sc.Sidecar != nil && sc.Sidecar.Envoy != nil && sc.Sidecar.Envoy.File != "" && readFile != nil {
 			data, err := readFile(sc.Sidecar.Envoy.File)
 			if err != nil {
 				return nil, nil, fmt.Errorf("compose: %s: file: %w", name, err)
 			}
+
 			sin.UserFile = data
 		}
+
 		out, err := sc.SidecarType.RenderSidecar(sin)
 		if err != nil {
 			return nil, nil, fmt.Errorf("compose: %s: %w", name, err)
 		}
+
 		outs[name] = out
+
 		g := EnvGroup{Service: name, Title: sc.SidecarType.Title + " sidecar", Sidecar: true}
 		for _, v := range out.AppEnv {
 			owner, found := varOwner(append(groups, g), v.Name)
@@ -768,13 +873,16 @@ func appEnv(m *model.Model, svc *model.Service, ref func(service string) func(ke
 				if owner.Service != "" {
 					who = owner.Service
 				}
+
 				return nil, nil, fmt.Errorf("compose: %s sets %s, which %s already sets", name, v.Name, who)
 			}
 		}
+
 		if len(g.Vars) > 0 || len(g.Rewrites) > 0 {
 			groups = append(groups, g)
 		}
 	}
+
 	return groups, outs, nil
 }
 
@@ -785,6 +893,7 @@ func varOwner(groups []EnvGroup, name string) (EnvGroup, bool) {
 			return g, true
 		}
 	}
+
 	return EnvGroup{}, false
 }
 
@@ -794,10 +903,12 @@ func replaceVar(groups []EnvGroup, v catalog.EnvVar) bool {
 		for j := range groups[i].Vars {
 			if groups[i].Vars[j].Name == v.Name {
 				groups[i].Vars[j] = v
+
 				return true
 			}
 		}
 	}
+
 	return false
 }
 
@@ -825,12 +936,14 @@ func sidecarInput(m *model.Model, inst, sc *model.Service, uses []sidecar.Use, r
 		} else if svc, ok := m.Service(t.Service); ok {
 			owners = []*model.Service{svc}
 		}
+
 		for _, o := range owners {
 			if a, ok := addrs[networkOwner(o)]; ok {
 				in.Targets[i].Addresses = append(in.Targets[i].Addresses, a.String())
 			}
 		}
 	}
+
 	if r := inst.App.Register; r != nil {
 		// The app serves TLS on its register port, unless that port names
 		// its Envoy sidecar's inbound listener.
@@ -840,18 +953,22 @@ func sidecarInput(m *model.Model, inst, sc *model.Service, uses []sidecar.Use, r
 				tls = 0
 			}
 		}
+
 		if tls != 0 {
 			in.AppTLSPorts = []int{tls}
 		}
 	}
+
 	for _, name := range inst.Sidecars {
 		if other, ok := m.Service(name); ok && name != sc.Name {
 			in.Siblings = append(in.Siblings, other.SidecarType.ID)
 		}
 	}
+
 	if sc.Sidecar != nil {
 		in.Spec = *sc.Sidecar
 	}
+
 	if sc.Register != nil {
 		registry, _ := m.Service(sc.Registry)
 		in.Register = &sidecar.Register{
@@ -863,6 +980,7 @@ func sidecarInput(m *model.Model, inst, sc *model.Service, uses []sidecar.Use, r
 			Check:           sc.Register.Check,
 		}
 	}
+
 	return in
 }
 
@@ -872,14 +990,18 @@ func appService(in Input, svc *model.Service, groups []EnvGroup) *yaml.Node {
 		str("context"), str(escape(in.AppDir(svc.Group()))),
 		str("target"), str("dev"),
 	))
+
 	if len(app.Command) > 0 {
 		cmd := make([]string, len(app.Command))
 		for i, c := range app.Command {
 			cmd[i] = escape(c)
 		}
+
 		def.Content = append(def.Content, str("command"), command(cmd))
 	}
+
 	envNode := environment(groups[0].Vars)
+
 	depends := mapping()
 	if svc.Pod != "" {
 		depends.Content = append(depends.Content, str(svc.Pod), condition("service_healthy"))
@@ -887,6 +1009,7 @@ func appService(in Input, svc *model.Service, groups []EnvGroup) *yaml.Node {
 			depends.Content = append(depends.Content, str(svc.Netinit), condition("service_completed_successfully"))
 		}
 	}
+
 	for _, g := range groups[1:] {
 		for i, v := range g.Vars {
 			k := str(v.Name)
@@ -896,22 +1019,27 @@ func appService(in Input, svc *model.Service, groups []EnvGroup) *yaml.Node {
 					k.HeadComment = fmt.Sprintf("%s (%s): PLAINTEXT edge (tls.mode: off). Reason: %s", g.Service, g.Title, g.Reason)
 				}
 			}
+
 			envNode.Content = append(envNode.Content, k, str(v.Value))
 		}
+
 		if !g.Sidecar {
 			depends.Content = append(depends.Content, str(g.Service), condition("service_healthy"))
 		}
 	}
+
 	if svc.Pod != "" {
 		// The app starts last: its sidecars are ready before its first packet.
 		for _, name := range svc.Sidecars {
 			depends.Content = append(depends.Content, str(name), condition("service_healthy"))
 		}
 	}
+
 	def.Content = append(def.Content, str("environment"), envNode)
 	if ports := publish(app.Ports); ports != nil && svc.Pod == "" {
 		def.Content = append(def.Content, str("ports"), ports)
 	}
+
 	if svc.Transparent {
 		// Transparent mode exempts the sidecars' reserved users from its
 		// rules, so the app must never become one of them.
@@ -935,10 +1063,12 @@ func appService(in Input, svc *model.Service, groups []EnvGroup) *yaml.Node {
 		check.Test = []string{"CMD", "wget", "-q", "-O", "/dev/null", fmt.Sprintf("http://127.0.0.1:%d%s", h.Port, escape(h.Path))}
 		check.StartPeriod = 180 * time.Second
 	}
+
 	def.Content = append(def.Content, str("healthcheck"), healthcheck(check))
 	if len(depends.Content) > 0 {
 		def.Content = append(def.Content, str("depends_on"), depends)
 	}
+
 	return def
 }
 
@@ -947,10 +1077,12 @@ func publish(ports []int) *yaml.Node {
 	if len(ports) == 0 {
 		return nil
 	}
+
 	var out []*yaml.Node
 	for _, p := range ports {
 		out = append(out, str(fmt.Sprintf("127.0.0.1:%d:%d", p, p)))
 	}
+
 	return seq(out...)
 }
 
@@ -960,19 +1092,24 @@ func networkOwner(svc *model.Service) string {
 	if svc.Pod != "" {
 		return svc.Pod
 	}
+
 	return svc.Name
 }
 
 func networks(in Input, svc *model.Service) *yaml.Node {
 	m := in.Model
+
 	def := mapping()
 	if a, ok := in.Addresses[networkOwner(svc)]; ok {
 		def.Content = append(def.Content, str("ipv4_address"), str(a.String()))
 	}
+
 	def.Content = append(def.Content, str("aliases"), flow(strs(svc.Aliases...)...))
+
 	n := mapping(str(DefaultNetwork), def)
 	for _, seg := range m.SegmentsOf(svc.Group()) {
 		def := mapping()
+
 		switch {
 		case seg.Target == svc.Name && svc.Kind != model.App:
 			def.Content = append(def.Content,
@@ -985,6 +1122,7 @@ func networks(in Input, svc *model.Service) *yaml.Node {
 			if svc.Name != svc.Group() {
 				aliases = append(aliases, model.SegmentFQDN(svc.Group(), m.Domain))
 			}
+
 			def.Content = append(def.Content,
 				str("ipv4_address"), str(InstanceSegmentAddress(in.Subnets[seg.Name], svc.Instance).String()),
 				str("aliases"), flow(strs(aliases...)...),
@@ -992,8 +1130,10 @@ func networks(in Input, svc *model.Service) *yaml.Node {
 		default:
 			def = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: yaml.FlowStyle}
 		}
+
 		n.Content = append(n.Content, str(seg.Name), def)
 	}
+
 	return n
 }
 
@@ -1007,6 +1147,7 @@ func healthcheck(h catalog.Health) *yaml.Node {
 	if h.StartInterval > 0 {
 		n.Content = append(n.Content, str("start_interval"), str(dur(h.StartInterval)))
 	}
+
 	return n
 }
 
@@ -1015,6 +1156,7 @@ func environment(vars []catalog.EnvVar) *yaml.Node {
 	for _, v := range vars {
 		n.Content = append(n.Content, str(v.Name), str(v.Value))
 	}
+
 	return n
 }
 
@@ -1023,12 +1165,15 @@ func (in Input) labels(service, kind string) *yaml.Node {
 	if in.ExperimentID != "" {
 		n.Content = append(n.Content, str(LabelExperimentID), str(in.ExperimentID))
 	}
+
 	if service != "" {
 		n.Content = append(n.Content, str(LabelService), str(service))
 	}
+
 	if kind != "" {
 		n.Content = append(n.Content, str(LabelKind), str(kind))
 	}
+
 	return n
 }
 
@@ -1037,23 +1182,28 @@ func reasonLines(reasons []string) string {
 	for i, r := range reasons {
 		lines[i] = "Reason (" + r + ")"
 	}
+
 	return strings.Join(lines, "\n")
 }
 
 // command renders an argv list; multi-line arguments use literal block style.
 func command(argv []string) *yaml.Node {
 	multi := slices.ContainsFunc(argv, func(s string) bool { return strings.Contains(s, "\n") })
+
 	n := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	if !multi {
 		n.Style = yaml.FlowStyle
 	}
+
 	for _, a := range argv {
 		s := str(a)
 		if strings.Contains(a, "\n") {
 			s.Style = yaml.LiteralStyle
 		}
+
 		n.Content = append(n.Content, s)
 	}
+
 	return n
 }
 
@@ -1064,6 +1214,7 @@ func dur(d time.Duration) string {
 	if d%time.Minute == 0 && d >= time.Minute {
 		return strconv.Itoa(int(d/time.Minute)) + "m"
 	}
+
 	return strconv.Itoa(int(d/time.Second)) + "s"
 }
 
@@ -1078,6 +1229,7 @@ func seq(items ...*yaml.Node) *yaml.Node {
 func flow(items ...*yaml.Node) *yaml.Node {
 	n := seq(items...)
 	n.Style = yaml.FlowStyle
+
 	return n
 }
 
@@ -1086,17 +1238,20 @@ func strs(v ...string) []*yaml.Node {
 	for i, s := range v {
 		out[i] = str(s)
 	}
+
 	return out
 }
 
 func str(v string) *yaml.Node {
 	n := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v}
+
 	var probe any
 	if err := yaml.Unmarshal([]byte(v), &probe); err != nil {
 		n.Style = yaml.DoubleQuotedStyle
 	} else if s, ok := probe.(string); !ok || s != v {
 		n.Style = yaml.DoubleQuotedStyle
 	}
+
 	return n
 }
 
@@ -1114,14 +1269,18 @@ func boolean(v bool) *yaml.Node {
 
 func encode(n *yaml.Node) ([]byte, error) {
 	var buf bytes.Buffer
+
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
+
 	if err := enc.Encode(n); err != nil {
 		return nil, fmt.Errorf("compose: encode: %w", err)
 	}
+
 	if err := enc.Close(); err != nil {
 		return nil, fmt.Errorf("compose: encode: %w", err)
 	}
+
 	return buf.Bytes(), nil
 }
 
@@ -1133,9 +1292,11 @@ func RelPath(base, target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	rel = filepath.ToSlash(rel)
 	if rel != ".." && !strings.HasPrefix(rel, "../") {
 		rel = "./" + rel
 	}
+
 	return rel, nil
 }

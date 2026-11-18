@@ -19,6 +19,7 @@ func TestNginxAllModesGolden(t *testing.T) {
 	b := renderWith(t, s, secrets.Inline, nil)
 	checkCompose(t, b)
 	golden(t, "nginx", b)
+
 	f, ok := b.File("config/edge/nginx.conf")
 	if !ok || !strings.Contains(string(f.Data), "server web.bb.internal:8443 resolve") {
 		t.Errorf("nginx.conf = %s", f.Data)
@@ -34,7 +35,8 @@ const pgbouncerTerminateReason = "watch the server protocol in plaintext\nhostno
 // pgbouncerLab has one Postgres behind two pools, one in each mode, and
 // two apps sharing the TLS pool.
 func pgbouncerLab() *spec.Spec {
-	return &spec.Spec{Version: 1, Name: "lab",
+	return &spec.Spec{
+		Version: 1, Name: "lab",
 		Services: []spec.Service{
 			{Name: "postgres", Type: "postgres"},
 			{Name: "pool", Type: "pgbouncer", Config: map[string]string{"pool_size": "5"}, Upstreams: []spec.Upstream{{Service: "postgres"}}},
@@ -62,6 +64,7 @@ func TestPgBouncerGolden(t *testing.T) {
 func TestPgBouncerPoolWiring(t *testing.T) {
 	b := renderWith(t, pgbouncerLab(), secrets.Dotenv, nil)
 	f, _ := b.File(ComposeFile)
+
 	var doc struct {
 		Services map[string]struct {
 			Environment map[string]string         `yaml:"environment"`
@@ -73,7 +76,9 @@ func TestPgBouncerPoolWiring(t *testing.T) {
 	if err := yaml.Unmarshal(f.Data, &doc); err != nil {
 		t.Fatal(err)
 	}
+
 	pw := "${" + secrets.VarName("postgres", "password") + "}"
+
 	for _, app := range []string{"orders", "billing"} {
 		env := doc.Services[app].Environment
 		if env["DATABASE_URL"] != "postgres://app:"+pw+"@pool.bb.internal:6432/app?sslmode=verify-full" ||
@@ -81,31 +86,38 @@ func TestPgBouncerPoolWiring(t *testing.T) {
 			t.Errorf("%s env = %v", app, env)
 		}
 	}
+
 	pool := doc.Services["pool"]
 	if pool.Environment["BB_PG_USER"] != "app" || pool.Environment["BB_PG_PASSWORD"] != pw {
 		t.Errorf("pool env = %v", pool.Environment)
 	}
+
 	for _, file := range b.Files {
 		if strings.HasPrefix(file.Path, "config/pool") && strings.Contains(string(file.Data), "PASSWORD") && !strings.Contains(string(file.Data), "BB_PG_PASSWORD") {
 			t.Errorf("%s mentions a password:\n%s", file.Path, file.Data)
 		}
 	}
+
 	for name, s := range doc.Services {
 		_, onSeg := s.Networks["plain-postgres"]
 		if want := name == "postgres" || name == "pool-plain"; onSeg != want {
 			t.Errorf("%s on plain-postgres = %v, want %v", name, onSeg, want)
 		}
 	}
+
 	if _, ok := doc.Volumes["pool-data"]; ok {
 		t.Error("the pool has a data volume")
 	}
+
 	var hba string
 	if f, ok := b.File("config/postgres/pg_hba.conf"); ok {
 		hba = string(f.Data)
 	}
+
 	if !strings.Contains(hba, "hostnossl all      all  10.213.") || !strings.Contains(hba, "pool-plain") {
 		t.Errorf("pg_hba.conf does not admit the plaintext pool's segment:\n%s", hba)
 	}
+
 	if !slices.ContainsFunc(b.Files, func(f File) bool { return f.Path == "config/pool/pgbouncer_hba.conf" }) {
 		t.Error("no pgbouncer_hba.conf")
 	}
@@ -117,11 +129,14 @@ func TestPgBouncerPoolWiring(t *testing.T) {
 // generated records: the reason added none and swallowed none.
 func TestTerminateReasonInjectsNoHBARecord(t *testing.T) {
 	b := renderWith(t, pgbouncerLab(), secrets.Dotenv, nil)
+
 	f, ok := b.File("config/postgres/pg_hba.conf")
 	if !ok {
 		t.Fatal("no pg_hba.conf")
 	}
+
 	records := hbaRecords(string(f.Data))
+
 	want := []string{
 		"local all all trust",
 		"hostssl all all all scram-sha-256",
@@ -142,6 +157,7 @@ func TestTerminateReasonInjectsNoHBARecord(t *testing.T) {
 // them, fields joined by one space.
 func hbaRecords(conf string) []string {
 	var out []string
+
 	lines := strings.Split(conf, "\n")
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSuffix(lines[i], "\r")
@@ -149,19 +165,25 @@ func hbaRecords(conf string) []string {
 			i++
 			line = strings.TrimSuffix(line, `\`) + strings.TrimSuffix(lines[i], "\r")
 		}
+
 		inQuote := false
+
 		for j, r := range line {
 			if r == '"' {
 				inQuote = !inQuote
 			}
+
 			if r == '#' && !inQuote {
 				line = line[:j]
+
 				break
 			}
 		}
+
 		if fields := strings.Fields(line); len(fields) > 0 {
 			out = append(out, strings.Join(fields, " "))
 		}
 	}
+
 	return out
 }

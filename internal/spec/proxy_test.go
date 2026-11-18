@@ -15,19 +15,23 @@ func proxyLookup(id string) (TypeInfo, bool) {
 	case "pooler":
 		return TypeInfo{Proxy: &ProxyInfo{Modes: []string{TLSOn, TLSOff}, Targets: []string{"postgres"}, MinUpstreams: 1, MaxUpstreams: 1}}, true
 	}
+
 	return sidecarLookup(id)
 }
 
 func loadProxies(t *testing.T, src string) (*Spec, error) {
 	t.Helper()
+
 	doc, err := Parse([]byte(src))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s, err := doc.Decode()
 	if err != nil {
 		return nil, err
 	}
+
 	return s, Validate(s, proxyLookup)
 }
 
@@ -69,17 +73,21 @@ apps:
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	edge, _ := s.Service("edge")
 	if edge.File != "./edge/haproxy.cfg" || len(edge.Upstreams) != 4 {
 		t.Fatalf("edge = %+v", edge)
 	}
+
 	u := edge.Upstreams
 	if u[0].Service != "web" || u[0].Mode() != TLSOn || u[0].Route() != "web" {
 		t.Errorf("short form = %+v", u[0])
 	}
+
 	if u[1].Port != 9090 || u[1].Route() != "v1" || u[1].Mode() != TLSOff || u[1].TLS.Reason == "" {
 		t.Errorf("long form = %+v", u[1])
 	}
+
 	if u[2].Mode() != TLSPassthrough {
 		t.Errorf("passthrough = %+v", u[2])
 	}
@@ -174,11 +182,14 @@ apps:
 		"services.pool.upstreams[1].service",    // not postgres
 		"services.pool.upstreams[2].tls.mode",   // passthrough unsupported
 	}
+
 	slices.Sort(got)
 	slices.Sort(want)
+
 	if !slices.Equal(got, want) {
 		t.Errorf("paths:\n got %v\nwant %v\n%v", got, want, err)
 	}
+
 	for _, msg := range []string{"not a proxy", "must not be the proxy itself", "serves no TLS port", "does not speak HTTP", "transparent mode", "health port", "same port", "at most 1 upstream", "does not support passthrough"} {
 		if !strings.Contains(err.Error(), msg) {
 			t.Errorf("error lacks %q:\n%v", msg, err)
@@ -203,6 +214,7 @@ services:
   web:
     path: ./web
 `
+
 	for name, tc := range map[string]struct {
 		pool string
 		want []string // violation paths
@@ -221,11 +233,14 @@ services:
 				if err != nil {
 					t.Fatal(err)
 				}
+
 				return
 			}
+
 			if got := paths(t, err); !slices.Equal(got, tc.want) {
 				t.Errorf("paths = %v, want %v\n%v", got, tc.want, err)
 			}
+
 			if !strings.Contains(err.Error(), tc.msg) {
 				t.Errorf("error lacks %q:\n%v", tc.msg, err)
 			}
@@ -249,6 +264,7 @@ services:
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	_, err = doc.Decode()
 	got := paths(t, err)
 	want := []string{
@@ -259,11 +275,14 @@ services:
 		"services.edge.upstreams[1].service",
 		"services.edge.upstreams[1].port",
 	}
+
 	slices.Sort(got)
 	slices.Sort(want)
+
 	if !slices.Equal(got, want) {
 		t.Errorf("paths:\n got %v\nwant %v\n%v", got, want, err)
 	}
+
 	if !strings.Contains(err.Error(), "must be on, off or passthrough") {
 		t.Errorf("mode message: %v", err)
 	}
@@ -296,8 +315,10 @@ func TestProxyStaticFileValidation(t *testing.T) {
 		if id == "traefik" {
 			return TypeInfo{HTTPS: true, Proxy: &ProxyInfo{Modes: []string{TLSOn}, HTTP: true, StaticFile: true}}, true
 		}
+
 		return proxyLookup(id)
 	}
+
 	doc, err := Parse([]byte(`version: 1
 name: lab
 services:
@@ -323,14 +344,18 @@ services:
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s, err := doc.Decode()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if ok, _ := s.Service("ok"); ok.StaticFile != "./ok/static.yml" {
 		t.Errorf("static_file = %q", ok.StaticFile)
 	}
+
 	got := paths(t, Validate(s, lookup))
+
 	want := []string{
 		"services.abs.static_file",   // absolute
 		"services.comma.static_file", // a comma
@@ -341,6 +366,7 @@ services:
 	if !slices.Equal(got, want) {
 		t.Errorf("violations:\n got %v\nwant %v", got, want)
 	}
+
 	msg := Validate(s, lookup).Error()
 	for _, m := range []string{"services.edge.static_file: type haproxy has no static configuration a static_file can extend", "services.redis.static_file: type redis is not a proxy"} {
 		if !strings.Contains(msg, m) {

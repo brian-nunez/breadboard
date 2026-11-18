@@ -18,19 +18,24 @@ func (d *Document) upgrade() (from int, err error) {
 	if from > CurrentVersion {
 		return from, fmt.Errorf("experiment.yaml version %d: %w", from, errs.ErrNewerFormat)
 	}
+
 	if from < 1 {
 		return from, Invalid("version", "must be at least 1")
 	}
+
 	for v := from; v < CurrentVersion; v++ {
 		step, ok := upgrades[v]
 		if !ok {
 			return from, fmt.Errorf("no upgrade from experiment.yaml version %d", v)
 		}
+
 		if err := step(d); err != nil {
 			return from, fmt.Errorf("upgrade experiment.yaml from version %d: %w", v, err)
 		}
+
 		d.SetVersion(v + 1)
 	}
+
 	return from, nil
 }
 
@@ -41,5 +46,6 @@ func (d *Document) Migrate() (from int, changed bool, err error) {
 	if err != nil {
 		return from, false, err
 	}
+
 	return from, from != CurrentVersion, nil
 }

@@ -22,10 +22,12 @@ func o(kv ...any) obj {
 	if len(kv)%2 != 0 {
 		panic("sidecar: odd number of arguments to o")
 	}
+
 	out := make(obj, 0, len(kv)/2)
 	for i := 0; i < len(kv); i += 2 {
 		out = append(out, field{key: kv[i].(string), value: kv[i+1]})
 	}
+
 	return out
 }
 
@@ -34,13 +36,16 @@ type list = []any
 
 func (m obj) MarshalYAML() (any, error) {
 	n := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+
 	for _, f := range m {
 		var v yaml.Node
 		if err := v.Encode(f.value); err != nil {
 			return nil, fmt.Errorf("%s: %w", f.key, err)
 		}
+
 		n.Content = append(n.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: f.key}, &v)
 	}
+
 	return n, nil
 }
 
@@ -50,13 +55,17 @@ func encodeYAML(header string, doc any) ([]byte, error) {
 	for _, line := range strings.Split(header, "\n") {
 		buf.WriteString("# " + line + "\n")
 	}
+
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
+
 	if err := enc.Encode(doc); err != nil {
 		return nil, err
 	}
+
 	if err := enc.Close(); err != nil {
 		return nil, err
 	}
+
 	return buf.Bytes(), nil
 }

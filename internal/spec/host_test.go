@@ -15,19 +15,23 @@ func hostLookup(id string) (TypeInfo, bool) {
 	case "haproxy", "consul", "s3-compatible":
 		info.HTTPSListener = true
 	}
+
 	return info, ok
 }
 
 func loadHost(t *testing.T, src string) (*Spec, error) {
 	t.Helper()
+
 	doc, err := Parse([]byte(src))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s, err := doc.Decode()
 	if err != nil {
 		return nil, err
 	}
+
 	return s, Validate(s, hostLookup)
 }
 
@@ -63,12 +67,14 @@ apps:
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for name, want := range map[string]*Host{"edge": {}, "store": nil, "consul": {}} {
 		svc, _ := s.Service(name)
 		if !reflect.DeepEqual(svc.Host, want) {
 			t.Errorf("%s host = %+v, want %+v", name, svc.Host, want)
 		}
 	}
+
 	for name, want := range map[string]*Host{"api": {}, "web": {Port: 9443}, "plain": nil} {
 		app, _ := s.App(name)
 		if !reflect.DeepEqual(app.Host, want) {
@@ -98,7 +104,9 @@ apps:
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	_, err = doc.Decode()
+
 	want := []string{
 		"apps.api.host.path",
 		"apps.api.host.port",
@@ -109,6 +117,7 @@ apps:
 	if got := paths(t, err); !slices.Equal(got, want) {
 		t.Fatalf("paths:\n got %v\nwant %v\n%v", got, want, err)
 	}
+
 	for _, msg := range []string{
 		"services.edge.host: must be true, false, or a mapping with port",
 		"apps.api.host.path: unknown key",
@@ -222,22 +231,27 @@ services:
     host: true
 apps:
 `
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src := base + tc.src + "\n"
 			if tc.src == "" {
 				src = strings.TrimSuffix(base, "apps:\n")
 			}
+
 			_, err := loadHost(t, src)
 			if tc.path == "" {
 				if err != nil {
 					t.Fatal(err)
 				}
+
 				return
 			}
+
 			if got := paths(t, err); !slices.Equal(got, []string{tc.path}) {
 				t.Fatalf("paths = %v, want [%s]\n%v", got, tc.path, err)
 			}
+
 			if want := tc.path + ": " + tc.msg; !strings.Contains(err.Error(), want) {
 				t.Errorf("error lacks %q:\n%v", want, err)
 			}
@@ -266,6 +280,7 @@ services:
 		"services.edge.host.port": "must be omitted: an infra service is reached on its catalog HTTPS listener",
 	}
 	got := paths(t, err)
+
 	wantPaths := make([]string, 0, len(want))
 	for p, msg := range want {
 		wantPaths = append(wantPaths, p)
@@ -273,7 +288,9 @@ services:
 			t.Errorf("error lacks %q:\n%v", p+": "+msg, err)
 		}
 	}
+
 	slices.Sort(wantPaths)
+
 	if !slices.Equal(got, wantPaths) {
 		t.Errorf("paths:\n got %v\nwant %v\n%v", got, wantPaths, err)
 	}
@@ -295,10 +312,12 @@ apps:
         name: host
         inbound: {port: 8443, app_port: 8080}
 `)
+
 	want := []string{"apps.bb-host", "apps.bb.sidecars[0]", "services.bb-host"}
 	if got := paths(t, err); !slices.Equal(got, want) {
 		t.Fatalf("paths:\n got %v\nwant %v\n%v", got, want, err)
 	}
+
 	for _, msg := range []string{
 		"services.bb-host: name bb-host is reserved for the host router; choose another name",
 		"apps.bb-host: name bb-host is reserved for the host router; choose another name",
@@ -312,6 +331,7 @@ apps:
 
 func TestAppHostPort(t *testing.T) {
 	envoy := Sidecar{Type: SidecarEnvoy, Envoy: &EnvoySidecar{Inbound: &EnvoyInbound{Port: 8443, AppPort: 8080}}}
+
 	cases := []struct {
 		name string
 		app  App
@@ -334,6 +354,7 @@ func TestAppHostPort(t *testing.T) {
 
 func TestAddHostRoundTrip(t *testing.T) {
 	d := New("lab")
+
 	apps := []App{
 		{Name: "api", Path: "./api", Register: &Register{Port: 8443}, Host: &Host{}},
 		{Name: "web", Path: "./web", Host: &Host{Port: 9443}},
@@ -344,30 +365,36 @@ func TestAddHostRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
 	edge := Service{Name: "edge", Type: "haproxy", Upstreams: []Upstream{{Service: "api"}}, Host: &Host{}}
 	if err := d.AddProxy(edge); err != nil {
 		t.Fatal(err)
 	}
+
 	out, _ := d.Bytes()
 	for _, line := range []string{"    host: true\n", "    host: {port: 9443}\n"} {
 		if !strings.Contains(string(out), line) {
 			t.Errorf("experiment.yaml lacks %q:\n%s", line, out)
 		}
 	}
+
 	doc, err := Parse(out)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s, err := doc.Decode()
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
+
 	for _, want := range apps {
 		got, _ := s.App(want.Name)
 		if !reflect.DeepEqual(got.Host, want.Host) {
 			t.Errorf("%s host = %+v, want %+v\n%s", want.Name, got.Host, want.Host, out)
 		}
 	}
+
 	if got, _ := s.Service("edge"); !reflect.DeepEqual(got.Host, edge.Host) {
 		t.Errorf("edge host = %+v, want %+v\n%s", got.Host, edge.Host, out)
 	}

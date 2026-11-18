@@ -16,13 +16,16 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+
 	eng, err := core.New(core.Options{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bb: %v\n", err)
 		stop()
 		os.Exit(1)
 	}
+
 	code := cli.Run(ctx, eng, os.Args[1:], os.Stdout, os.Stderr)
+
 	stop()
 	os.Exit(code)
 }

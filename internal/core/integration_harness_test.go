@@ -43,6 +43,7 @@ var labSlots = sync.OnceValue(func() chan struct{} {
 			n = int(min(mem/labMemory, 2*cpus, maxLabs))
 		}
 	}
+
 	return make(chan struct{}, max(n, 1))
 })
 
@@ -52,9 +53,12 @@ var labSlots = sync.OnceValue(func() chan struct{} {
 func parallelLab(t *testing.T) {
 	t.Helper()
 	t.Parallel()
+
 	slots := labSlots()
 	start := time.Now()
+
 	slots <- struct{}{}
+
 	t.Cleanup(func() { <-slots })
 	t.Logf("waited %s for a lab slot (%d slots)", time.Since(start).Round(time.Second), cap(slots))
 }
@@ -70,12 +74,14 @@ func labName(t *testing.T, prefix string) string {
 		out, err := exec.Command("docker", "image", "ls", "-q", "--filter", "label=com.docker.compose.project=bb-"+name).Output()
 		ids := strings.Fields(string(out))
 		slices.Sort(ids)
+
 		if ids = slices.Compact(ids); err == nil && len(ids) > 0 {
 			if b, err := exec.Command("docker", append([]string{"image", "rm", "--force"}, ids...)...).CombinedOutput(); err != nil {
 				t.Logf("remove the lab's images: %v\n%s", err, b)
 			}
 		}
 	})
+
 	return name
 }
 
@@ -84,10 +90,12 @@ func labName(t *testing.T, prefix string) string {
 // and so distinct images and cleanup.
 func randomSuffix(t *testing.T) string {
 	t.Helper()
+
 	b := make([]byte, 3)
 	if _, err := rand.Read(b); err != nil {
 		t.Fatal(err)
 	}
+
 	return hex.EncodeToString(b)
 }
 

@@ -102,12 +102,14 @@ func WithSecrets(ups []Upstream, ref func(service string) func(key string) strin
 	if len(ups) == 0 {
 		return nil
 	}
+
 	out := slices.Clone(ups)
 	for i := range out {
 		if !out[i].App {
 			out[i].Secret = ref(out[i].Service)
 		}
 	}
+
 	return out
 }
 
@@ -143,35 +145,44 @@ func (e *Entry) Render(s Server) (Container, error) {
 	if s.UserConfig == nil && s.UserStatic == nil {
 		return c, nil
 	}
+
 	c.Files = slices.Clone(c.Files)
 	swap := func(name, what string, data []byte) error {
 		i := slices.IndexFunc(c.Files, func(f File) bool { return f.Name == name })
 		if i < 0 {
 			return fmt.Errorf("%s: type %s rendered no %s for its %s", s.Name, e.ID, name, what)
 		}
+
 		c.Files[i].Data = data
+
 		return nil
 	}
+
 	if s.UserConfig != nil {
 		if e.Proxy == nil || e.Proxy.ConfigFile == "" {
 			return Container{}, fmt.Errorf("%s: type %s takes no file", s.Name, e.ID)
 		}
+
 		if err := swap(e.Proxy.ConfigFile, "file", s.UserConfig); err != nil {
 			return Container{}, err
 		}
 	}
+
 	if s.UserStatic != nil {
 		if e.Proxy == nil || e.Proxy.StaticFile == "" || e.Proxy.MergeStatic == nil {
 			return Container{}, fmt.Errorf("%s: type %s takes no static_file", s.Name, e.ID)
 		}
+
 		data, err := e.Proxy.MergeStatic(s)
 		if err != nil {
 			return Container{}, fmt.Errorf("%s: static_file %s: %w", s.Name, s.UserStatic.Path, err)
 		}
+
 		if err := swap(e.Proxy.StaticFile, "static_file", data); err != nil {
 			return Container{}, err
 		}
 	}
+
 	return c, nil
 }
 
@@ -188,10 +199,12 @@ func EnvName(service string) string {
 // SSL_CERT_FILE, like any service.
 func ProxyClientEnv(c Client) []EnvVar {
 	name := EnvName(c.Service)
+
 	out := []EnvVar{{Name: name + "_URL", Value: fmt.Sprintf("https://%s:%d", c.FQDN, ProxyHTTPSPort)}}
 	if slices.ContainsFunc(c.Upstreams, Upstream.Passthrough) {
 		out = append(out, EnvVar{Name: name + "_PASSTHROUGH_ADDR", Value: fmt.Sprintf("%s:%d", c.FQDN, ProxyPassthroughPort)})
 	}
+
 	return out
 }
 
@@ -213,12 +226,15 @@ func Comment(prefix, text string) string {
 		case unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || r == '\ufeff':
 			return ' '
 		}
+
 		return r
 	}, text)
+
 	lines := strings.Split(text, "\n")
 	for i, l := range lines {
 		lines[i] = strings.TrimRight(prefix+l, " \t")
 	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -230,6 +246,7 @@ func (e *Entry) ListenersFor(ups []Upstream) []Listener {
 	if e.Proxy != nil && e.Proxy.HTTP && len(Passthroughs(ups)) > 0 {
 		out = append(out, Listener{Name: "passthrough", Protocol: "tls", Port: ProxyPassthroughPort})
 	}
+
 	return out
 }
 

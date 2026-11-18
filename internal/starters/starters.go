@@ -776,6 +776,7 @@ func Lookup(id string) (Starter, bool) {
 	if i < 0 {
 		return Starter{}, false
 	}
+
 	return all[i], true
 }
 
@@ -805,6 +806,7 @@ func (s Starter) DefaultLab(experiment, domain string) Lab {
 	for _, typ := range s.Requires {
 		lab.Infra[typ] = DefaultInfra(typ)
 	}
+
 	return lab
 }
 
@@ -815,6 +817,7 @@ func DefaultInfra(typ string) Infra {
 	if e, ok := catalog.Lookup(typ); ok {
 		in.Config = e.ResolveConfig(nil)
 	}
+
 	return in
 }
 
@@ -839,6 +842,7 @@ func (d Data) Service(typ string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("the template names a %s service, which the starter does not require", typ)
 	}
+
 	return in.Name, nil
 }
 
@@ -849,10 +853,12 @@ func (d Data) Config(typ, key string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("the template names a %s service, which the starter does not require", typ)
 	}
+
 	v, ok := in.Config[key]
 	if !ok {
 		return "", fmt.Errorf("the %s service has no config option %q", typ, key)
 	}
+
 	return v, nil
 }
 
@@ -875,34 +881,44 @@ func RenderFS(fsys fs.FS, s Starter, lab Lab) ([]File, error) {
 			return nil, fmt.Errorf("starter %s: the lab has no %s service", s.ID, typ)
 		}
 	}
+
 	data := Data{Experiment: lab.Experiment, Domain: lab.Domain, GoVersion: GoVersion, GoImage: GoImage, AlpineVersion: AlpineVersion, infra: lab.Infra}
+
 	var files []File
+
 	err := fs.WalkDir(fsys, s.Template, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
+
 		if !strings.HasSuffix(p, ".tmpl") {
 			return fmt.Errorf("starter %s: %s is missing the .tmpl suffix", s.ID, p)
 		}
+
 		src, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}
+
 		t, err := template.New(path.Base(p)).Option("missingkey=error").Parse(string(src))
 		if err != nil {
 			return fmt.Errorf("starter %s: %w", s.ID, err)
 		}
+
 		var buf bytes.Buffer
 		if err := t.Execute(&buf, data); err != nil {
 			return fmt.Errorf("starter %s: %w", s.ID, err)
 		}
+
 		rel := strings.TrimSuffix(strings.TrimPrefix(p, s.Template+"/"), ".tmpl")
 		files = append(files, File{Path: rel, Data: buf.Bytes()})
+
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	for _, svc := range s.Services {
 		for _, f := range []struct{ key, path string }{{"file", svc.File}, {"static_file", svc.StaticFile}} {
 			if f.path != "" && !slices.ContainsFunc(files, func(tf File) bool { return tf.Path == f.path }) {
@@ -910,5 +926,6 @@ func RenderFS(fsys fs.FS, s Starter, lab Lab) ([]File, error) {
 			}
 		}
 	}
+
 	return files, nil
 }

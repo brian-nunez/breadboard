@@ -17,12 +17,15 @@ import (
 func TestIntegrationStatsStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
 	rows := make(chan Sample)
+
 	go func() {
 		for s, err := range New().StatsStream(ctx) {
 			if err != nil {
 				return
 			}
+
 			select {
 			case rows <- s:
 			case <-ctx.Done():
@@ -30,12 +33,16 @@ func TestIntegrationStatsStream(t *testing.T) {
 			}
 		}
 	}()
+
 	out, err := exec.Command("docker", "run", "-d", "--rm", "--label", "bb-runtime-test=stats", "alpine:3.24.4", "sleep", "60").Output()
 	if err != nil {
 		t.Fatalf("docker run: %v", err)
 	}
+
 	id := strings.TrimSpace(string(out))
+
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
+
 	for {
 		select {
 		case s := <-rows:
@@ -43,6 +50,7 @@ func TestIntegrationStatsStream(t *testing.T) {
 				if s.Usage.MemoryBytes == 0 || s.Usage.MemoryLimit == 0 {
 					t.Errorf("row for the container has no memory figure: %+v", s.Usage)
 				}
+
 				return
 			}
 		case <-ctx.Done():

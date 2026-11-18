@@ -35,8 +35,11 @@ func traefikMergeStatic(s Server) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var errs []error
+
 	seen := map[string]string{}
+
 	for i := 0; i+1 < len(user.Content); i += 2 {
 		k := user.Content[i]
 		// Only a string key is compared by its text: a tagged key
@@ -45,13 +48,17 @@ func traefikMergeStatic(s Server) ([]byte, error) {
 		// text, and an anchor on a key could be referenced out of order.
 		if k.Kind != yaml.ScalarNode || k.Tag != "!!str" || k.Value == "<<" || k.Anchor != "" {
 			errs = append(errs, fmt.Errorf("line %d: top-level keys must be plain section names, without a non-string tag, anchor, alias or merge key (<<), which could set a section Breadboard owns", k.Line))
+
 			continue
 		}
+
 		low := strings.ToLower(k.Value)
 		if prev, dup := seen[low]; dup {
 			errs = append(errs, fmt.Errorf("line %d: %s repeats %s (Traefik ignores case in option names)", k.Line, k.Value, prev))
+
 			continue
 		}
+
 		seen[low] = k.Value
 		for _, o := range traefikOwnedStatic {
 			if strings.EqualFold(k.Value, o.key) {
@@ -59,6 +66,7 @@ func traefikMergeStatic(s Server) ([]byte, error) {
 			}
 		}
 	}
+
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
@@ -73,6 +81,7 @@ func traefikMergeStatic(s Server) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		user.Content[i] = v
 	}
 
@@ -80,7 +89,9 @@ func traefikMergeStatic(s Server) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	added := false
+
 	for i := 0; i+1 < len(user.Content); i += 2 {
 		k, v := user.Content[i], user.Content[i+1]
 		if j := mappingIndex(doc, k.Value); j >= 0 && isReplaced(k.Value) {
@@ -88,14 +99,18 @@ func traefikMergeStatic(s Server) ([]byte, error) {
 			own.HeadComment = joinComments(yamlComment(fmt.Sprintf("%s from %s, replacing Breadboard's.\nbb logs %s shows only what goes to stdout.", own.Value, s.UserStatic.Path, s.Name)), k.HeadComment)
 			own.LineComment, own.FootComment = k.LineComment, k.FootComment
 			doc.Content[j+1] = v
+
 			continue
 		}
+
 		if !added {
 			k.HeadComment = joinComments(yamlComment(fmt.Sprintf("Added from %s (services.%s.static_file), as given.", s.UserStatic.Path, s.Name)), k.HeadComment)
 			added = true
 		}
+
 		doc.Content = append(doc.Content, k, v)
 	}
+
 	return encodeYAMLDoc(traefikStaticHeader(s), doc), nil
 }
 
@@ -103,20 +118,25 @@ func traefikMergeStatic(s Server) ([]byte, error) {
 // mapping.
 func parseStaticFile(data []byte) (*yaml.Node, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
+
 	var doc yaml.Node
 	if err := dec.Decode(&doc); err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil, errors.New("is empty; it must be a YAML mapping of static configuration sections")
 		}
+
 		return nil, fmt.Errorf("is not valid YAML: %w", err)
 	}
+
 	var more yaml.Node
 	if err := dec.Decode(&more); !errors.Is(err, io.EOF) {
 		return nil, errors.New("must hold one YAML document")
 	}
+
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return nil, errors.New("must be a YAML mapping of static configuration sections (tracing, metrics, ...)")
 	}
+
 	return doc.Content[0], nil
 }
 
@@ -128,6 +148,7 @@ func mappingIndex(m *yaml.Node, key string) int {
 			return i
 		}
 	}
+
 	return -1
 }
 
@@ -137,6 +158,7 @@ func isReplaced(key string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -145,6 +167,7 @@ func joinComments(ours, theirs string) string {
 	if theirs == "" {
 		return ours
 	}
+
 	return ours + "\n" + theirs
 }
 
@@ -159,26 +182,34 @@ func expandAliases(n *yaml.Node, budget *int) (*yaml.Node, error) {
 		if n.Alias == nil {
 			return nil, fmt.Errorf("line %d: alias *%s names no anchor", n.Line, n.Value)
 		}
+
 		cp, err := expandAliases(n.Alias, budget)
 		if err != nil {
 			return nil, err
 		}
+
 		cp.HeadComment, cp.LineComment, cp.FootComment = n.HeadComment, n.LineComment, n.FootComment
+
 		return cp, nil
 	}
+
 	*budget--
 	if *budget < 0 {
 		return nil, fmt.Errorf("line %d: aliases expand to more than %d nodes", n.Line, staticNodeBudget)
 	}
+
 	cp := *n
 	cp.Anchor = ""
+
 	cp.Content = make([]*yaml.Node, len(n.Content))
 	for i, c := range n.Content {
 		e, err := expandAliases(c, budget)
 		if err != nil {
 			return nil, err
 		}
+
 		cp.Content[i] = e
 	}
+
 	return &cp, nil
 }

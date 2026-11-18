@@ -21,6 +21,7 @@ var docs = []string{"README.md", "AGENTS.md", "docs/design/*.md", "docs/adr/*.md
 func cells(row string) int {
 	row = regexp.MustCompile("`[^`]*`").ReplaceAllString(row, "")
 	row = strings.ReplaceAll(row, `\|`, "")
+
 	return strings.Count(strings.TrimSpace(row), "|") - 1
 }
 
@@ -30,40 +31,51 @@ var delimiter = regexp.MustCompile(`^\|(\s*:?-+:?\s*\|)+\s*$`)
 // then every following line that starts with "|".
 func tables(lines []string) [][]int {
 	var out [][]int
+
 	for i := 0; i+1 < len(lines); i++ {
 		if !strings.HasPrefix(lines[i], "|") || !delimiter.MatchString(strings.TrimSpace(lines[i+1])) {
 			continue
 		}
+
 		rows := []int{i, i + 1}
+
 		j := i + 2
 		for ; j < len(lines) && strings.HasPrefix(lines[j], "|"); j++ {
 			rows = append(rows, j)
 		}
+
 		out = append(out, rows)
 		i = j
 	}
+
 	return out
 }
 
 func readDocs(t *testing.T) map[string][]string {
 	t.Helper()
+
 	files := map[string][]string{}
+
 	for _, pattern := range docs {
 		matches, err := filepath.Glob(filepath.Join("..", "..", pattern))
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		for _, m := range matches {
 			data, err := os.ReadFile(m)
 			if err != nil {
 				t.Fatal(err)
 			}
+
 			files[m] = strings.Split(string(data), "\n")
 		}
 	}
+
 	if len(files) == 0 {
 		t.Fatal("no Markdown files found")
 	}
+
 	return files
 }
 
@@ -86,6 +98,7 @@ func TestTableRowsMatchTheirHeader(t *testing.T) {
 func TestNoRowsAfterABlankLine(t *testing.T) {
 	for name, lines := range readDocs(t) {
 		inTable := false
+
 		for i, l := range lines {
 			switch {
 			case i+1 < len(lines) && strings.HasPrefix(l, "|") && delimiter.MatchString(strings.TrimSpace(lines[i+1])):
@@ -107,31 +120,42 @@ var decisionRow = regexp.MustCompile(`^\| D-(\d{3}) \|`)
 // or gaps other than ids recorded as skipped.
 func TestDecisionLogIsOneOrderedTable(t *testing.T) {
 	lines := readDocs(t)[filepath.Join("..", "..", "docs", "design", "decisions.md")]
+
 	var tableRows []int
+
 	for _, rows := range tables(lines) {
 		if strings.HasPrefix(lines[rows[0]], "| Id | Date") {
 			tableRows = rows
+
 			break
 		}
 	}
+
 	if tableRows == nil {
 		t.Fatal("decisions.md has no decision table")
 	}
+
 	inTable := map[int]bool{}
 	prev := 0
+
 	for _, r := range tableRows[2:] {
 		inTable[r] = true
+
 		m := decisionRow.FindStringSubmatch(lines[r])
 		if m == nil {
 			t.Errorf("decisions.md:%d: not a decision row: %.80s", r+1, lines[r])
+
 			continue
 		}
+
 		id, _ := strconv.Atoi(m[1])
 		if id <= prev {
 			t.Errorf("decisions.md:%d: D-%03d after D-%03d", r+1, id, prev)
 		}
+
 		prev = id
 	}
+
 	for i, l := range lines {
 		if decisionRow.MatchString(l) && !inTable[i] {
 			t.Errorf("decisions.md:%d: decision row outside the decision table: %.80s", i+1, l)

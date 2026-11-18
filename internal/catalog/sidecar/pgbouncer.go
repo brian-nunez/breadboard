@@ -18,10 +18,12 @@ func renderPgBouncer(in Input) (Output, error) {
 	if pb == nil {
 		return Output{}, fmt.Errorf("sidecar %s: no pgbouncer settings", in.Name)
 	}
+
 	use, ok := in.use(pb.Service)
 	if !ok {
 		return Output{}, fmt.Errorf("sidecar %s: %s is not in the app's uses", in.Name, pb.Service)
 	}
+
 	db, user := use.Config["database"], use.Config["user"]
 	pw := in.Secret(pb.Service)("password")
 	ini := strings.Join([]string{
@@ -93,6 +95,7 @@ func renderPgBouncer(in Input) (Output, error) {
 			}
 		}
 	}
+
 	return out, nil
 }
 
@@ -111,5 +114,6 @@ func (in Input) use(service string) (Use, bool) {
 			return u, true
 		}
 	}
+
 	return Use{}, false
 }

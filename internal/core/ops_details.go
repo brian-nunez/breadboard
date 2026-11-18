@@ -100,18 +100,22 @@ type UpstreamInfo struct {
 // catalog.Passthroughs).
 func upstreamInfos(m *model.Model, svc *model.Service) []UpstreamInfo {
 	l7 := catalog.L7(svc.Upstreams)
+
 	var out []UpstreamInfo
+
 	for _, u := range svc.Upstreams {
 		ui := UpstreamInfo{Name: u.Name, Service: u.Service, App: u.App, Mode: u.Mode, Reason: u.Reason, Port: u.Port, Instances: 1}
 		if u.App {
 			ui.Instances = max(len(m.Instances(u.Service)), 1)
 		}
+
 		switch {
 		case svc.Entry.Proxy == nil || !svc.Entry.Proxy.HTTP:
 			// A pooler: every client connection on its one listener.
 			if ls := svc.Entry.Listeners; len(ls) > 0 {
 				ui.ListenPort = ls[0].Port
 			}
+
 			ui.Default = true
 			ui.Route = fmt.Sprintf("every connection on :%d", ui.ListenPort)
 		case u.Passthrough():
@@ -123,13 +127,16 @@ func upstreamInfos(m *model.Model, svc *model.Service) []UpstreamInfo {
 		default:
 			ui.ListenPort, ui.PathPrefix = catalog.ProxyHTTPSPort, u.Prefix()
 			ui.Default = l7[0].Name == u.Name
+
 			ui.Route = fmt.Sprintf("%s (prefix stripped) on :%d", u.Prefix(), ui.ListenPort)
 			if ui.Default {
 				ui.Route = fmt.Sprintf("%s (prefix stripped), and every other path, on :%d", u.Prefix(), ui.ListenPort)
 			}
 		}
+
 		out = append(out, ui)
 	}
+
 	return out
 }
 
@@ -167,14 +174,17 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 	if err != nil {
 		return nil, err
 	}
+
 	st, err := e.settings(ctx)
 	if err != nil {
 		return nil, err
 	}
+
 	m, err := model.Resolve(p.spec, st.Domain)
 	if err != nil {
 		return nil, err
 	}
+
 	svc, ok := m.Service(req.Name)
 	if !ok {
 		// An app with replicas: its first instance stands for it.
@@ -182,12 +192,14 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 			svc, ok = inst[0], true
 		}
 	}
+
 	if !ok {
 		return nil, fmt.Errorf("service %q: %w", req.Name, ErrNotFound)
 	}
 	// Secret values never leave the core here; only whether a value is one.
 	masked := func(string) func(string) string { return func(string) string { return "" } }
 	subnets := map[string]netip.Prefix{}
+
 	if ps, err := p.LoadState(); err == nil {
 		for name, cidr := range ps.Segments {
 			if prefix, err := netip.ParsePrefix(cidr); err == nil {
@@ -200,6 +212,7 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 	if _, ok := m.HostRouter(); ok {
 		d.HostURLs = serviceHostURLs(m, svc, recordedHostPort(p))
 	}
+
 	for _, other := range m.Services {
 		if other.Kind == model.App && other.Instance > 1 {
 			continue // an app is listed once, by its first instance's group
@@ -211,16 +224,19 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 		if uses {
 			d.UsedBy = append(d.UsedBy, other.Group())
 		}
+
 		if other.Kind == model.Sidecar && other.Registry == svc.Name {
 			d.UsedBy = append(d.UsedBy, other.Name)
 		}
 	}
+
 	switch {
 	case svc.Entry != nil: // infra, and the registration agent (its registry's entry)
 		d.Type, d.Title, d.Summary, d.Image = svc.Entry.ID, svc.Entry.Title, svc.Entry.Summary, svc.Entry.Image
 	case svc.SidecarType != nil:
 		d.Type, d.Title, d.Summary, d.Image = svc.SidecarType.ID, svc.SidecarType.Title, svc.SidecarType.Summary, svc.Image
 	}
+
 	switch svc.Kind {
 	case model.Infra:
 		for _, l := range svc.Entry.ListenersFor(svc.Upstreams) { // a proxy's live listeners
@@ -228,8 +244,11 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 		}
 		// What a TLS client of this service receives.
 		g := EnvGroup{Service: svc.Name, Title: svc.Entry.Title}
-		cl := catalog.Client{Service: svc.Name, FQDN: svc.FQDN, Config: svc.Config, Secret: masked(svc.Name),
-			Upstreams: catalog.WithSecrets(svc.Upstreams, masked)}
+
+		cl := catalog.Client{
+			Service: svc.Name, FQDN: svc.FQDN, Config: svc.Config, Secret: masked(svc.Name),
+			Upstreams: catalog.WithSecrets(svc.Upstreams, masked),
+		}
 		for _, v := range svc.Entry.Client(cl) {
 			g.Vars = append(g.Vars, EnvVar{Name: v.Name, Value: v.Value, Secret: v.Secret})
 		}
@@ -238,29 +257,36 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 		if !svc.HostRouter {
 			d.Env = []EnvGroup{g}
 		}
+
 		d.Upstreams = upstreamInfos(m, svc)
 		d.File, d.StaticFile = svc.File, svc.StaticFile
 	case model.App:
 		d.Path, d.Command = svc.App.Path, svc.App.Command
+
 		d.App, d.Instance = svc.Group(), svc.Instance
 		for _, inst := range m.Instances(svc.Group()) {
 			d.Replicas = append(d.Replicas, inst.Name)
 		}
+
 		if d.Sidecars, err = sidecarInfos(m, svc); err != nil {
 			return nil, err
 		}
+
 		groups, err := compose.AppEnv(m, svc, masked, subnets)
 		if err != nil {
 			return nil, err
 		}
+
 		for _, g := range groups {
 			if len(g.Vars) == 0 {
 				continue // a sidecar that only rewrites variables of other groups
 			}
+
 			eg := EnvGroup{Service: g.Service, Title: g.Title, Plaintext: g.Plaintext, Reason: g.Reason, Sidecar: g.Sidecar}
 			for _, v := range g.Vars {
 				eg.Vars = append(eg.Vars, EnvVar{Name: v.Name, Value: v.Value, Secret: v.Secret})
 			}
+
 			d.Env = append(d.Env, eg)
 		}
 	case model.Sidecar:
@@ -270,6 +296,7 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 			if err != nil {
 				return nil, err
 			}
+
 			for i := range infos {
 				if infos[i].Service == svc.Name {
 					d.Sidecar = &infos[i]
@@ -277,6 +304,7 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 			}
 		}
 	}
+
 	for i := range d.Env {
 		for j := range d.Env[i].Vars {
 			if d.Env[i].Vars[j].Secret {
@@ -289,14 +317,17 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 	if svc.Kind == model.Sidecar {
 		owner = svc.Parent
 	}
+
 	if certPEM, _, ok, err := p.ReadCert(owner); err == nil && ok {
 		if cert, err := pki.ParseCert(certPEM); err == nil {
 			c := &Certificate{Issuer: cert.Issuer.CommonName, DNSNames: cert.DNSNames, NotAfter: cert.NotAfter}
 			if len(cert.URIs) > 0 {
 				c.Identity = cert.URIs[0].String()
 			}
+
 			d.Certificate = c
 		}
 	}
+
 	return d, nil
 }

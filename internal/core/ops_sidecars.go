@@ -66,11 +66,14 @@ func sidecarInfos(m *model.Model, inst *model.Service) ([]SidecarInfo, error) {
 	if len(inst.Sidecars) == 0 {
 		return nil, nil
 	}
+
 	masked := func(string) func(string) string { return func(string) string { return "" } }
+
 	groups, err := compose.AppEnv(m, inst, masked, nil)
 	if err != nil {
 		return nil, err
 	}
+
 	lookup := func(name string) (EnvVar, bool) {
 		for _, g := range groups {
 			for _, v := range g.Vars {
@@ -79,30 +82,39 @@ func sidecarInfos(m *model.Model, inst *model.Service) ([]SidecarInfo, error) {
 				}
 			}
 		}
+
 		return EnvVar{}, false
 	}
+
 	var out []SidecarInfo
+
 	for _, name := range inst.Sidecars {
 		sc, ok := m.Service(name)
 		if !ok {
 			continue
 		}
+
 		info := sidecarInfo(sc)
+
 		for _, g := range groups {
 			if !g.Sidecar || g.Service != name {
 				continue
 			}
+
 			for _, v := range g.Vars {
 				info.Env = append(info.Env, envVar(v.Name, v.Value, v.Secret))
 			}
+
 			for _, n := range g.Rewrites {
 				if v, ok := lookup(n); ok {
 					info.Rewrites = append(info.Rewrites, v)
 				}
 			}
 		}
+
 		out = append(out, info)
 	}
+
 	return out, nil
 }
 
@@ -111,6 +123,7 @@ func envVar(name, value string, secret bool) EnvVar {
 	if secret {
 		value = ""
 	}
+
 	return EnvVar{Name: name, Value: value, Secret: secret}
 }
 
@@ -121,33 +134,42 @@ func sidecarInfo(sc *model.Service) SidecarInfo {
 	if t := sc.SidecarType; t != nil {
 		info.Type, info.Title, info.Summary = t.ID, t.Title, t.Summary
 	}
+
 	if sc.Sidecar != nil {
 		info.Name = sc.Sidecar.ID()
 	} else {
 		info.Name = strings.TrimPrefix(sc.Name, sc.Parent+"-")
 	}
+
 	set := func(name, value string) {
 		info.Settings = append(info.Settings, SidecarSetting{Name: name, Value: value})
 	}
+
 	switch {
 	case sc.Sidecar != nil && sc.Sidecar.Envoy != nil:
 		e := sc.Sidecar.Envoy
+
 		info.Ports = append(info.Ports, SidecarPort{Port: spec.EnvoyAdminPort, Loopback: true, Purpose: "admin API: health check and the Envoy explorer"})
 		if i := e.Inbound; i != nil {
 			info.Ports = append(info.Ports, SidecarPort{Port: i.Port, Purpose: fmt.Sprintf("inbound TLS with the app's certificate, forwarded to the app on 127.0.0.1:%d", i.AppPort)})
 		}
+
 		for _, t := range sc.Targets {
 			info.Targets = append(info.Targets, t.Service)
 			info.Ports = append(info.Ports, SidecarPort{Port: t.Outbound.Port, Loopback: true, Purpose: fmt.Sprintf("outbound to %s over TLS :%d", t.Service, t.Port)})
+
 			knobs := fmt.Sprintf("lb %s, timeout %s", t.Outbound.LB, t.Outbound.Timeout)
 			if t.Outbound.Retries != nil {
 				knobs += fmt.Sprintf(", retries %d", *t.Outbound.Retries)
 			}
+
 			if o := t.Outbound.Outlier; o != nil {
 				knobs += fmt.Sprintf(", outlier ejection after %d consecutive 5xx for %s (at most %d%% of hosts, swept every %s)", o.Consecutive5xx, o.Ejection, o.MaxEjectionPercent, o.Interval)
 			}
+
 			set("outbound "+t.Service, knobs)
 		}
+
 		if tr := e.Transparent; tr != nil {
 			info.Transparent, info.Egress = true, tr.Egress
 			info.Ports = append(info.Ports,
@@ -156,6 +178,7 @@ func sidecarInfo(sc *model.Service) SidecarInfo {
 			)
 			set("transparent", "egress "+tr.Egress)
 		}
+
 		if e.File != "" {
 			set("config", e.File+" (your own Envoy configuration replaces the generated one)")
 		}
@@ -170,6 +193,7 @@ func sidecarInfo(sc *model.Service) SidecarInfo {
 		f := sc.Sidecar.FluentBit
 		info.Targets = []string{f.To}
 		info.Ports = []SidecarPort{{Port: spec.FluentBitHTTPPort, Loopback: true, Purpose: "HTTP status: health check"}}
+
 		set("ships", sidecar.LogDir+" to "+f.To)
 		set("bucket", f.Bucket)
 	case sc.Register != nil:
@@ -177,5 +201,6 @@ func sidecarInfo(sc *model.Service) SidecarInfo {
 		info.Targets = []string{sc.Registry}
 		set("registers", fmt.Sprintf("%s on port %d", sc.Register.Name, sc.Register.Port))
 	}
+
 	return info
 }

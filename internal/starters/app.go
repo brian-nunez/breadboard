@@ -71,6 +71,7 @@ var sdkImports = map[string]string{
 // type is known; the package is empty for HTTP proxies.
 func SDKImport(typ string) (string, bool) {
 	imp, ok := sdkImports[typ]
+
 	return imp, ok
 }
 
@@ -107,12 +108,14 @@ func EnvHelp(base string) (string, bool) {
 	if h, ok := envHelp[base]; ok {
 		return h, true
 	}
+
 	switch {
 	case strings.HasSuffix(base, "_PASSTHROUGH_ADDR"):
 		return "host:port for TLS passthrough routes (by SNI)", true
 	case strings.HasSuffix(base, "_URL"):
 		return "HTTPS address of the proxy", true
 	}
+
 	return "", false
 }
 
@@ -126,6 +129,7 @@ func EnvBase(service, name string) string {
 			return base
 		}
 	}
+
 	return name
 }
 
@@ -167,6 +171,7 @@ func exampleType(a AppScaffold) string {
 			return t
 		}
 	}
+
 	return ""
 }
 
@@ -179,62 +184,80 @@ func RenderApp(a AppScaffold) ([]File, error) {
 func renderApp(fsys fs.FS, a AppScaffold) ([]File, error) {
 	d := appData{Name: a.Name, Experiment: a.Experiment, GoVersion: GoVersion, GoImage: GoImage, AlpineVersion: AlpineVersion, Example: exampleType(a)}
 	importFor := map[string][]string{}
+
 	var importOrder []string
+
 	width := 0
+
 	for _, u := range a.Uses {
 		for _, v := range u.Vars {
 			width = max(width, len(v.Name))
 		}
 	}
+
 	for _, u := range a.Uses {
 		imp, ok := SDKImport(u.Type)
 		if !ok {
 			return nil, fmt.Errorf("app %s: no client library for %s (type %s)", a.Name, u.Service, u.Type)
 		}
+
 		view := appUseView{AppUse: u}
 		for _, v := range u.Vars {
 			help, _ := EnvHelp(v.Base)
 			if help == "" {
 				help = "see bb learn " + u.Type
 			}
+
 			view.Vars = append(view.Vars, appVarView{AppVar: v, Pad: v.Name + strings.Repeat(" ", width-len(v.Name)), Help: help})
 		}
+
 		d.Uses = append(d.Uses, view)
+
 		if imp == "" {
 			continue // an HTTP proxy: net/http is the client
 		}
+
 		if _, seen := importFor[imp]; !seen {
 			importOrder = append(importOrder, imp)
 		}
+
 		if !slices.Contains(importFor[imp], u.Service) {
 			importFor[imp] = append(importFor[imp], u.Service)
 		}
 	}
+
 	for _, imp := range importOrder {
 		d.Imports = append(d.Imports, appImport{Path: imp, For: strings.Join(importFor[imp], ", ")})
 	}
 
 	var files []File
+
 	err := fs.WalkDir(fsys, AppTemplate, func(p string, de fs.DirEntry, err error) error {
 		if err != nil || de.IsDir() {
 			return err
 		}
+
 		if !strings.HasSuffix(p, ".tmpl") {
 			return fmt.Errorf("app template: %s is missing the .tmpl suffix", p)
 		}
+
 		rel := strings.TrimSuffix(strings.TrimPrefix(p, AppTemplate+"/"), ".tmpl")
+
 		src, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}
+
 		t, err := template.New(path.Base(p)).Option("missingkey=error").Parse(string(src))
 		if err != nil {
 			return fmt.Errorf("app template: %w", err)
 		}
+
 		var buf bytes.Buffer
 		if err := t.Execute(&buf, d); err != nil {
 			return fmt.Errorf("app template: %w", err)
 		}
+
 		data := buf.Bytes()
 		if strings.HasSuffix(rel, ".go") {
 			// gofmt the result, so the learner's first diff is their own.
@@ -242,11 +265,14 @@ func renderApp(fsys fs.FS, a AppScaffold) ([]File, error) {
 				return fmt.Errorf("app template: %s: %w", rel, err)
 			}
 		}
+
 		files = append(files, File{Path: rel, Data: data})
+
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+
 	return files, nil
 }

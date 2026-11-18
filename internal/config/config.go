@@ -59,9 +59,11 @@ var Keys = []Key{
 			if !dnsName.MatchString(v) || len(v) > 200 {
 				return errors.New("must be a lowercase DNS name with at least two labels, such as bb.internal")
 			}
+
 			if !slices.ContainsFunc(privateSuffixes, func(s string) bool { return strings.HasSuffix(v, s) }) {
 				return fmt.Errorf("must end in a reserved private suffix (%s), so the CA can never sign for a real site", strings.Join(privateSuffixes, ", "))
 			}
+
 			return nil
 		},
 	},
@@ -72,6 +74,7 @@ func key(name string) (Key, bool) {
 	if i < 0 {
 		return Key{}, false
 	}
+
 	return Keys[i], true
 }
 
@@ -84,10 +87,12 @@ func Load(ctx context.Context, home state.Home) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
+
 	s := Settings{Domain: cfg.GetString("domain", DefaultDomain)}
 	if k, _ := key("domain"); k.validate(s.Domain) != nil {
 		return Settings{}, spec.Invalid("domain", "%q %v (from %s)", s.Domain, k.validate(s.Domain), source(home, "domain"))
 	}
+
 	return s, nil
 }
 
@@ -96,18 +101,24 @@ func load(ctx context.Context, home state.Home) (*settings.Config, error) {
 	for _, k := range Keys {
 		defaults[k.Name] = k.Default
 	}
+
 	sources := []settings.Source{settings.Map(defaults)}
+
 	if _, err := os.Stat(home.ConfigPath()); err == nil {
 		if err := checkVersion(ctx, home); err != nil {
 			return nil, err
 		}
+
 		sources = append(sources, settings.File(home.ConfigPath(), yamlfmt.Format))
 	}
+
 	sources = append(sources, settings.Env(settings.WithPrefix(EnvPrefix)))
+
 	cfg, err := settings.Load(ctx, sources...)
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
 	}
+
 	return cfg, nil
 }
 
@@ -116,16 +127,20 @@ func checkVersion(ctx context.Context, home state.Home) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", home.ConfigPath(), err)
 	}
+
 	v, err := settings.Get[int](cfg, "version")
 	if errors.Is(err, settings.ErrNotFound) {
 		return nil
 	}
+
 	if err != nil {
 		return fmt.Errorf("read %s: version: %w", home.ConfigPath(), err)
 	}
+
 	if v > FormatVersion {
 		return fmt.Errorf("%s has version %d: %w", home.ConfigPath(), v, errs.ErrNewerFormat)
 	}
+
 	return nil
 }
 
@@ -143,10 +158,12 @@ func Get(ctx context.Context, home state.Home, name string) (Value, error) {
 	if !ok {
 		return Value{}, unknown(name)
 	}
+
 	cfg, err := load(ctx, home)
 	if err != nil {
 		return Value{}, err
 	}
+
 	return Value{Key: name, Value: cfg.GetString(name, k.Default), Source: source(home, name), Help: k.Help}, nil
 }
 
@@ -158,8 +175,10 @@ func All(ctx context.Context, home state.Home) ([]Value, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		out = append(out, v)
 	}
+
 	return out, nil
 }
 
@@ -167,6 +186,7 @@ func source(home state.Home, name string) string {
 	if _, ok := os.LookupEnv(EnvName(name)); ok {
 		return EnvName(name)
 	}
+
 	data, err := os.ReadFile(home.ConfigPath())
 	if err == nil {
 		var m map[string]any
@@ -176,6 +196,7 @@ func source(home state.Home, name string) string {
 			}
 		}
 	}
+
 	return "default"
 }
 
@@ -187,30 +208,38 @@ func Set(ctx context.Context, home state.Home, name, value string) (Value, error
 	if !ok {
 		return Value{}, unknown(name)
 	}
+
 	if err := k.validate(value); err != nil {
 		return Value{}, spec.Invalid(name, "%v", err)
 	}
+
 	if _, err := home.Ensure(); err != nil {
 		return Value{}, err
 	}
+
 	if _, err := os.Stat(home.ConfigPath()); err == nil {
 		if err := checkVersion(ctx, home); err != nil {
 			return Value{}, err
 		}
 	}
+
 	doc, err := readDoc(home.ConfigPath())
 	if err != nil {
 		return Value{}, err
 	}
+
 	setKey(doc.Content[0], "version", fmt.Sprint(FormatVersion), "!!int", "")
 	setKey(doc.Content[0], name, value, "!!str", k.Help)
+
 	out, err := yaml.Marshal(doc)
 	if err != nil {
 		return Value{}, err
 	}
+
 	if err := state.WriteFile(home.ConfigPath(), out, 0o600); err != nil {
 		return Value{}, err
 	}
+
 	return Get(ctx, home, name)
 }
 
@@ -219,18 +248,22 @@ func readDoc(path string) (*yaml.Node, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
+
 	var doc yaml.Node
 	if len(data) > 0 {
 		if err := yaml.Unmarshal(data, &doc); err != nil {
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
 	}
+
 	if doc.Kind == 0 {
 		doc = yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}}
 	}
+
 	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("read %s: the top level must be a mapping", path)
 	}
+
 	return &doc, nil
 }
 
@@ -240,13 +273,16 @@ func setKey(m *yaml.Node, name, value, tag, comment string) {
 			v := m.Content[i+1]
 			v.Kind, v.Tag, v.Value, v.Style = yaml.ScalarNode, tag, value, 0
 			v.Content = nil
+
 			return
 		}
 	}
+
 	k := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}
 	if comment != "" {
 		k.HeadComment = comment
 	}
+
 	m.Content = append(m.Content, k, &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value})
 }
 
@@ -255,5 +291,6 @@ func unknown(name string) error {
 	for i, k := range Keys {
 		names[i] = k.Name
 	}
+
 	return fmt.Errorf("setting %q (known: %s): %w", name, strings.Join(names, ", "), errs.ErrNotFound)
 }

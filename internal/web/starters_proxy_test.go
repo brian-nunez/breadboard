@@ -30,6 +30,7 @@ func TestStarterPageShowsProxies(t *testing.T) {
 		},
 		Files: []core.StarterFile{{Path: "nginx.conf", Data: []byte("upstream lb_web { server lb-web.bb.internal:8443 resolve; }\n")}},
 	}
+
 	yaml := specAdditions(d)
 	for _, want := range []string{
 		"  lb-edge:\n    type: nginx\n    upstreams:\n      - service: lb-web\n        port: 8443\n      - service: lb-web\n        name: plain\n        tls:\n          mode: off\n          reason: watch it in plaintext\n    file: ./example/nginx.conf\n",
@@ -40,15 +41,18 @@ func TestStarterPageShowsProxies(t *testing.T) {
 			t.Errorf("spec additions lack %q:\n%s", want, yaml)
 		}
 	}
+
 	cat := map[string]core.CatalogEntry{
 		"nginx":     {Type: "nginx", Title: "NGINX", Ports: []int{8443}},
 		"pgbouncer": {Type: "pgbouncer", Title: "PgBouncer", Ports: []int{6432}},
 		"postgres":  {Type: "postgres", Title: "PostgreSQL", Ports: []int{5432}},
 	}
+
 	rows := starterRows(d, cat)
 	if !hasProxies(rows) {
 		t.Fatal("no proxy row")
 	}
+
 	for _, r := range rows {
 		switch r.Name {
 		case "lb-edge":
@@ -70,12 +74,15 @@ func TestStarterPageShowsProxies(t *testing.T) {
 	if len(v.Configs) != 1 || v.Configs[0].Service != "lb-edge" {
 		t.Fatalf("configs = %+v", v.Configs)
 	}
+
 	v.Graph = layout(rows, "")
 	v.Graph.Static = true
+
 	var buf bytes.Buffer
 	if err := starterPage(v).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
+
 	body := html.UnescapeString(buf.String())
 	for _, want := range []string{"Proxy configs", "example/nginx.conf", "server lb-web.bb.internal:8443 resolve;", "PROXIES"} {
 		if !strings.Contains(body, want) {

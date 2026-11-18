@@ -24,12 +24,15 @@ func types(id string) (TypeInfo, bool) {
 			if k != "database" {
 				return fmt.Errorf("unknown option")
 			}
+
 			if v == "" {
 				return fmt.Errorf("must not be empty")
 			}
+
 			return nil
 		}}, true
 	}
+
 	return TypeInfo{}, false
 }
 
@@ -70,31 +73,39 @@ apps:                        # user code; one compose service each
 
 func load(t *testing.T, src string) (*Spec, error) {
 	t.Helper()
+
 	doc, err := Parse([]byte(src))
 	if err != nil {
 		return nil, err
 	}
+
 	s, err := doc.Decode()
 	if err != nil {
 		return nil, err
 	}
+
 	return s, Validate(s, types)
 }
 
 func paths(t *testing.T, err error) []string {
 	t.Helper()
+
 	var ve *ValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("error = %v, want a ValidationError", err)
 	}
+
 	if !errors.Is(err, errs.ErrValidation) {
 		t.Fatal("ValidationError does not match ErrValidation")
 	}
+
 	var out []string
 	for _, v := range ve.Violations {
 		out = append(out, v.Path)
 	}
+
 	slices.Sort(out)
+
 	return out
 }
 
@@ -103,23 +114,29 @@ func TestExampleDecodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if s.Name != "kafka-lab" || len(s.Services) != 2 || len(s.Apps) != 2 {
 		t.Fatalf("spec = %+v", s)
 	}
+
 	if s.Services[0].Name != "kafka" || s.Services[1].Name != "postgres" {
 		t.Errorf("service order = %v", s.Services)
 	}
+
 	pg := s.Services[1]
 	if pg.Resources != (Resources{Memory: "512m", CPUs: "0.5"}) || pg.Config["database"] != "orders" {
 		t.Errorf("postgres = %+v", pg)
 	}
+
 	c := s.Apps[1]
 	if len(c.Uses) != 2 || c.Uses[0] != (Use{Service: "kafka"}) {
 		t.Fatalf("uses = %+v", c.Uses)
 	}
+
 	if c.Uses[1].Service != "postgres" || !c.Uses[1].TLS.Plaintext() || c.Uses[1].TLS.Reason == "" {
 		t.Errorf("long-form use = %+v", c.Uses[1])
 	}
+
 	if !slices.Equal(c.Ports, []int{8080}) || c.Health == nil || *c.Health != (Health{Path: "/ready", Port: 9000}) {
 		t.Errorf("ports/health = %v %+v", c.Ports, c.Health)
 	}
@@ -146,11 +163,14 @@ apps:
           ca: lab
     ports: [http]
 `
+
 	doc, err := Parse([]byte(src))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	_, err = doc.Decode()
+
 	want := []string{
 		"apps.web.command",
 		"apps.web.path",
@@ -166,6 +186,7 @@ apps:
 	if got := paths(t, err); !slices.Equal(got, want) {
 		t.Fatalf("violation paths:\n got %v\nwant %v", got, want)
 	}
+
 	msg := err.Error()
 	for _, s := range []string{"reserved for Phase 6 (mTLS)", "reserved for Phase 6 (multiple CAs)", "services.kafka.upstream: unknown key", "unknown key", "must be on or off"} {
 		if !strings.Contains(msg, s) {
@@ -206,6 +227,7 @@ apps:
     health: {path: healthz, port: 70000}
 `
 	_, err := load(t, src)
+
 	want := []string{
 		"apps.kafka",
 		"apps.web.command[0]",
@@ -228,6 +250,7 @@ apps:
 	if got := paths(t, err); !slices.Equal(got, want) {
 		t.Fatalf("violation paths:\n got %v\nwant %v", got, want)
 	}
+
 	if !strings.Contains(err.Error(), "tls.mode is off") {
 		t.Errorf("missing reason message: %v", err)
 	}
@@ -238,9 +261,11 @@ func TestNewerVersionIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := doc.Decode(); !errors.Is(err, errs.ErrNewerFormat) {
 		t.Fatalf("Decode error = %v, want ErrNewerFormat", err)
 	}
+
 	if _, _, err := doc.Migrate(); !errors.Is(err, errs.ErrNewerFormat) {
 		t.Fatalf("Migrate error = %v, want ErrNewerFormat", err)
 	}
@@ -251,6 +276,7 @@ func TestMigrateAtCurrentVersionIsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	from, changed, err := doc.Migrate()
 	if err != nil || changed || from != CurrentVersion {
 		t.Fatalf("Migrate = %d %v %v", from, changed, err)
@@ -259,12 +285,15 @@ func TestMigrateAtCurrentVersionIsNoop(t *testing.T) {
 
 func TestMigrateRunsStepsInOrder(t *testing.T) {
 	// Simulate a future where the current version is reached through a step.
-	upgrades[0] = func(d *Document) error { return nil }
+	upgrades[0] = func(*Document) error { return nil }
+
 	t.Cleanup(func() { delete(upgrades, 0) })
+
 	doc, err := Parse([]byte("version: 0\nname: x\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, _, err := doc.Migrate(); err == nil {
 		t.Fatal("version 0 must be rejected: versions start at 1")
 	}
@@ -275,48 +304,61 @@ func TestEditsPreserveComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if err := doc.AddService("cache", "redis"); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := doc.AddService("kafka", "kafka"); !errors.Is(err, errs.ErrExists) {
 		t.Fatalf("duplicate AddService error = %v", err)
 	}
+
 	if err := doc.AddApp(App{Name: "worker", Path: "./worker", Command: []string{"go", "run", "."}, Uses: []Use{{Service: "cache"}}}); err != nil {
 		t.Fatal(err)
 	}
+
 	if section, err := doc.Remove("producer"); err != nil || section != "apps" {
 		t.Fatalf("Remove = %q %v", section, err)
 	}
+
 	if _, err := doc.Remove("nope"); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("Remove missing error = %v", err)
 	}
+
 	out, err := doc.Bytes()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	text := string(out)
 	for _, c := range []string{"# infra services, from the catalog", "# optional; overrides catalog defaults", "# user code; one compose service each", "# optional; published on 127.0.0.1 only"} {
 		if !strings.Contains(text, c) {
 			t.Errorf("comment %q lost:\n%s", c, text)
 		}
 	}
+
 	reparsed, err := Parse(out)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	s, err := reparsed.Decode()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, ok := s.Service("cache"); !ok {
 		t.Error("cache missing after round trip")
 	}
+
 	if _, ok := s.App("producer"); ok {
 		t.Error("producer still present")
 	}
+
 	if w, ok := s.App("worker"); !ok || w.Uses[0].Service != "cache" || !slices.Equal(w.Command, []string{"go", "run", "."}) {
 		t.Errorf("worker = %+v", w)
 	}
+
 	if err := Validate(s, types); err != nil {
 		t.Errorf("edited spec is invalid: %v", err)
 	}
@@ -327,14 +369,18 @@ func TestNewDocument(t *testing.T) {
 	if err := doc.AddService("kafka", "kafka"); err != nil {
 		t.Fatal(err)
 	}
+
 	out, _ := doc.Bytes()
+
 	s, err := load(t, string(out))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
+
 	if s.Version != CurrentVersion || s.Name != "lab" || len(s.Services) != 1 {
 		t.Fatalf("spec = %+v", s)
 	}
+
 	if !strings.Contains(string(out), "bb add <type>") {
 		t.Errorf("guidance comment missing:\n%s", out)
 	}
@@ -367,6 +413,7 @@ apps:
     path: .bb/runtime
 `
 	_, err := load(t, src)
+
 	want := []string{
 		"apps.gen.path",
 		"apps.web.path",
@@ -384,6 +431,7 @@ func TestNamesThatLookLikeOtherTypesStayStrings(t *testing.T) {
 	for _, name := range []string{"null", "true", "123", "on"} {
 		doc := New(name)
 		out, _ := doc.Bytes()
+
 		s, err := load(t, string(out))
 		if err != nil || s.Name != name {
 			t.Errorf("New(%q) round trip = %+v %v\n%s", name, s, err, out)
@@ -405,10 +453,12 @@ apps:
       port: 8443
       check: /healthz
 `
+
 	s, err := load(t, ok)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if r := s.Apps[0].Register; r == nil || *r != (Register{Port: 8443, Check: "/healthz"}) {
 		t.Fatalf("register = %+v", r)
 	}
@@ -417,6 +467,7 @@ apps:
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := missing.Decode(); !slices.Equal(paths(t, err), []string{"apps.g.register.port"}) {
 		t.Fatalf("decode violations = %v", paths(t, err))
 	}
@@ -445,6 +496,7 @@ apps:
     path: ./d
 `
 	_, err = load(t, bad)
+
 	want := []string{
 		"apps.badfields.register.check",
 		"apps.badfields.register.name",
@@ -461,10 +513,13 @@ apps:
 	if err := d.AddService("consul", "consul"); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := d.AddApp(App{Name: "greeter", Path: "./g", Uses: []Use{{Service: "consul"}}, Register: &Register{Port: 8443}}); err != nil {
 		t.Fatal(err)
 	}
+
 	out, _ := d.Bytes()
+
 	s, err = load(t, string(out))
 	if err != nil || s.Apps[0].Register == nil || s.Apps[0].Register.Port != 8443 {
 		t.Fatalf("round trip = %+v %v\n%s", s, err, out)

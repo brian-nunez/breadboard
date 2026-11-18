@@ -21,6 +21,7 @@ func modeName(mode string) string {
 	case "on":
 		return "re-encrypt"
 	}
+
 	return mode
 }
 
@@ -34,6 +35,7 @@ func modeHelp(mode string) string {
 	case "on":
 		return "decrypted here, then TLS to the backend, verified against the lab CA"
 	}
+
 	return ""
 }
 
@@ -43,6 +45,7 @@ func serviceLink(rows []row, name string) string {
 	if insts := instancesOf(rows, name); len(insts) > 0 {
 		return "/services/" + insts[0].Name
 	}
+
 	return "/services/" + name
 }
 
@@ -51,6 +54,7 @@ func proxyTargetLabel(u core.UpstreamInfo) string {
 	if u.App && u.Instances > 1 {
 		return fmt.Sprintf("%s ×%d", u.Service, u.Instances)
 	}
+
 	return u.Service
 }
 
@@ -59,6 +63,7 @@ func upstreamTitle(name string, u core.ProxyUpstream) string {
 	if u.Target == "" {
 		return name
 	}
+
 	return name + " → " + u.Target
 }
 
@@ -78,6 +83,7 @@ func haproxyServerStatus(s core.HAProxyServer) status {
 	case strings.HasPrefix(s.Status, "MAINT"):
 		return status{"Maintenance", "grey"}
 	}
+
 	return status{cmp.Or(s.Status, "Unknown"), "red"}
 }
 
@@ -92,6 +98,7 @@ func backendSessions(b core.HAProxyBackend) int64 {
 	for _, s := range b.Servers {
 		n += s.TotalSessions
 	}
+
 	return n
 }
 
@@ -108,6 +115,7 @@ func checkText(s core.HAProxyServer) string {
 	case s.CheckDesc != "":
 		return fmt.Sprintf("%s · %s · %d ms", s.CheckStatus, s.CheckDesc, s.CheckMillis)
 	}
+
 	return fmt.Sprintf("%s · %d ms", s.CheckStatus, s.CheckMillis)
 }
 
@@ -119,6 +127,7 @@ func traefikServerStatus(s core.TraefikServer) status {
 	case "DOWN":
 		return status{"Down", "red"}
 	}
+
 	return status{"No health check", "grey"}
 }
 
@@ -130,6 +139,7 @@ func traefikTLS(r core.TraefikRouter) string {
 	case "passthrough":
 		return "passthrough"
 	}
+
 	return "plaintext"
 }
 
@@ -138,6 +148,7 @@ func resolvedText(b core.NginxBackend) string {
 	if b.Address == "" {
 		return "does not resolve (not running?)"
 	}
+
 	return b.Address
 }
 
@@ -153,5 +164,6 @@ func infraTab(proxy, sidecarTab string) string {
 	if proxy != "" {
 		return "explore"
 	}
+
 	return sidecarTab
 }

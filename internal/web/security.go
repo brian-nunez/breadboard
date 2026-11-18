@@ -29,29 +29,40 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.ownHost(r.Host) {
 			http.Error(w, "unknown host", http.StatusMisdirectedRequest)
+
 			return
 		}
+
 		if o := r.Header.Get("Origin"); o != "" && !s.ownOrigin(o) {
 			http.Error(w, "cross-origin request refused", http.StatusForbidden)
+
 			return
 		}
+
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+
 		if r.URL.Path == "/auth" {
 			s.auth(w, r)
+
 			return
 		}
+
 		if r.URL.Path == "/static/app.css" || r.URL.Path == "/static/icon.svg" {
 			next.ServeHTTP(w, r) // the "open the link" page needs its styles
+
 			return
 		}
+
 		if !s.validSession(r) {
 			w.WriteHeader(http.StatusUnauthorized)
 			_ = needLink().Render(r.Context(), w)
+
 			return
 		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -63,13 +74,17 @@ func (s *Server) auth(w http.ResponseWriter, r *http.Request) {
 	if subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = needLink().Render(r.Context(), w)
+
 		return
 	}
+
 	id := rand.Text()
 	if err := s.sessions.Set(r.Context(), id, []byte("1"), stash.WithTTL(sessionTTL)); err != nil {
 		http.Error(w, "could not start a session", http.StatusInternalServerError)
+
 		return
 	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    id,
@@ -78,10 +93,12 @@ func (s *Server) auth(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
+
 	next := r.URL.Query().Get("next")
 	if u, err := url.Parse(next); err != nil || next == "" || u.IsAbs() || u.Host != "" || next[0] != '/' {
 		next = "/"
 	}
+
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
@@ -90,7 +107,9 @@ func (s *Server) validSession(r *http.Request) bool {
 	if err != nil || c.Value == "" {
 		return false
 	}
+
 	ok, err := s.sessions.Exists(context.WithoutCancel(r.Context()), c.Value)
+
 	return err == nil && ok
 }
 
@@ -99,10 +118,12 @@ func (s *Server) ownHost(host string) bool {
 	if err != nil || port != s.port {
 		return false
 	}
+
 	return h == "127.0.0.1" || h == "localhost"
 }
 
 func (s *Server) ownOrigin(origin string) bool {
 	u, err := url.Parse(origin)
+
 	return err == nil && u.Scheme == "http" && s.ownHost(u.Host)
 }

@@ -176,6 +176,7 @@ func (s *Server) addInfoTools() {
 		Description: "The bb version.",
 	}, func(context.Context, *sdk.CallToolRequest, noInput) (versionOut, error) {
 		v := s.eng.Version()
+
 		return versionOut{Version: v.Version, GoVersion: v.GoVersion}, nil
 	})
 
@@ -187,6 +188,7 @@ func (s *Server) addInfoTools() {
 		if err != nil {
 			return catalogOut{}, err
 		}
+
 		return catalogOut{Entries: mapSlice(res.Entries, func(e core.CatalogEntry) catalogEntry {
 			return catalogEntry{Type: e.Type, Title: e.Title, Summary: e.Summary, Image: e.Image, Ports: orEmpty(e.Ports), Memory: e.Memory, CPUs: e.CPUs, Plaintext: e.Plaintext, Env: orEmpty(e.Env)}
 		})}, nil
@@ -200,6 +202,7 @@ func (s *Server) addInfoTools() {
 		if err != nil {
 			return learnOut{}, err
 		}
+
 		return learnOut{Type: res.Type, Title: res.Title, Notes: res.Notes}, nil
 	})
 
@@ -211,6 +214,7 @@ func (s *Server) addInfoTools() {
 		if err != nil {
 			return startersOut{}, err
 		}
+
 		return startersOut{Starters: mapSlice(res.Starters, starterInfoView)}, nil
 	})
 
@@ -222,6 +226,7 @@ func (s *Server) addInfoTools() {
 		if err != nil {
 			return starterDetailsOut{}, err
 		}
+
 		return starterDetailsOut{
 			Starter: starterInfoView(res.StarterInfo),
 			Dir:     res.Dir,
@@ -230,6 +235,7 @@ func (s *Server) addInfoTools() {
 				if a.Register != nil {
 					out.Register = &register{Name: a.Register.Name, Port: a.Register.Port, Check: a.Register.Check}
 				}
+
 				return out
 			}),
 			Services: mapSlice(res.Services, func(svc core.StarterService) starterService {
@@ -237,6 +243,7 @@ func (s *Server) addInfoTools() {
 				for _, u := range svc.Upstreams {
 					out.Upstreams = append(out.Upstreams, starterUpstream{Service: u.Service, Port: u.Port, Name: u.Name, Mode: u.Mode(), Reason: u.TLS.Reason})
 				}
+
 				return out
 			}),
 			Files: mapSlice(res.Files, func(f core.StarterFile) starterFile {
@@ -253,9 +260,13 @@ func (s *Server) addInfoTools() {
 		if err != nil {
 			return caOut{}, err
 		}
+
 		h := res.Host
-		return caOut{Name: res.Name, Domain: res.Domain, Subject: res.Subject, NotBefore: timeView(res.NotBefore), NotAfter: timeView(res.NotAfter), Fingerprint: res.Fingerprint, CertPath: res.CertPath, CertPEM: string(res.CertPEM), Created: res.Created,
-			Host: hostCA{Name: h.Name, Domain: h.Domain, Subject: h.Subject, NotBefore: timeView(h.NotBefore), NotAfter: timeView(h.NotAfter), Fingerprint: h.Fingerprint, CertPath: h.CertPath, CertPEM: string(h.CertPEM), Created: h.Created}}, nil
+
+		return caOut{
+			Name: res.Name, Domain: res.Domain, Subject: res.Subject, NotBefore: timeView(res.NotBefore), NotAfter: timeView(res.NotAfter), Fingerprint: res.Fingerprint, CertPath: res.CertPath, CertPEM: string(res.CertPEM), Created: res.Created,
+			Host: hostCA{Name: h.Name, Domain: h.Domain, Subject: h.Subject, NotBefore: timeView(h.NotBefore), NotAfter: timeView(h.NotAfter), Fingerprint: h.Fingerprint, CertPath: h.CertPath, CertPEM: string(h.CertPEM), Created: h.Created},
+		}, nil
 	})
 
 	add(s, readTool, true, &sdk.Tool{
@@ -266,6 +277,7 @@ func (s *Server) addInfoTools() {
 		if err != nil {
 			return configOut{}, err
 		}
+
 		return configOut{Home: res.Home, Settings: mapSlice(res.Settings, settingView)}, nil
 	})
 }

@@ -19,22 +19,27 @@ func renderFluentBit(in Input) (Output, error) {
 	if fb == nil {
 		return Output{}, fmt.Errorf("sidecar %s: no fluent-bit settings", in.Name)
 	}
+
 	use, ok := in.use(fb.To)
 	if !ok {
 		return Output{}, fmt.Errorf("sidecar %s: %s is not in the app's uses", in.Name, fb.To)
 	}
+
 	region := "us-east-1"
+
 	for _, v := range use.Env {
 		if strings.HasSuffix(v.Name, "S3_REGION") {
 			region = v.Value
 		}
 	}
+
 	endpoint := fmt.Sprintf("https://%s:%d", use.FQDN, use.Port)
 	section := func(name string, kv ...string) []string {
 		lines := []string{"[" + name + "]"}
 		for i := 0; i < len(kv); i += 2 {
 			lines = append(lines, fmt.Sprintf("    %-20s %s", kv[i], kv[i+1]))
 		}
+
 		return append(lines, "")
 	}
 	conf := []string{
@@ -84,6 +89,7 @@ func renderFluentBit(in Input) (Output, error) {
 		"chmod 1777 " + LogDir,
 		"exec /fluent-bit/bin/fluent-bit -c " + catalog.ConfigDir + "/fluent-bit.conf",
 	}, "\n")
+
 	return Output{
 		Container: catalog.Container{
 			Entrypoint: []string{"/bin/sh", "-c", start},

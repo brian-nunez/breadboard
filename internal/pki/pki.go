@@ -47,12 +47,14 @@ func (ca *CA) Domain() string {
 	for _, d := range ca.Cert.PermittedDNSDomains {
 		return strings.TrimPrefix(d, ".")
 	}
+
 	return ""
 }
 
 // Fingerprint returns the SHA-256 fingerprint of the CA certificate.
 func (ca *CA) Fingerprint() string {
 	sum := sha256.Sum256(ca.Cert.Raw)
+
 	return strings.ToUpper(hex.EncodeToString(sum[:]))
 }
 
@@ -61,14 +63,17 @@ func NewCA(domain string, now time.Time) (*CA, error) {
 	if domain == "" {
 		return nil, errors.New("pki: domain is required")
 	}
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("pki: generate CA key: %w", err)
 	}
+
 	serial, err := serialNumber()
 	if err != nil {
 		return nil, err
 	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber:                serial,
 		Subject:                     pkix.Name{CommonName: "Breadboard root CA (" + domain + ")", Organization: []string{"Breadboard"}},
@@ -82,14 +87,17 @@ func NewCA(domain string, now time.Time) (*CA, error) {
 		PermittedDNSDomains:         []string{"." + domain},
 		PermittedURIDomains:         []string{domain},
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
 		return nil, fmt.Errorf("pki: create CA certificate: %w", err)
 	}
+
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		return nil, fmt.Errorf("pki: parse CA certificate: %w", err)
 	}
+
 	return &CA{Cert: cert, Key: key, CertPEM: pemBlock("CERTIFICATE", der)}, nil
 }
 
@@ -102,14 +110,17 @@ func LoadCA(certPEM, keyPEM []byte) (*CA, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	key, err := parseKey(keyPEM)
 	if err != nil {
 		return nil, err
 	}
+
 	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
 	if !ok || !pub.Equal(&key.PublicKey) {
 		return nil, ErrKeyMismatch
 	}
+
 	return &CA{Cert: cert, Key: key, CertPEM: certPEM}, nil
 }
 
@@ -141,26 +152,33 @@ func (ca *CA) Issue(req LeafRequest, now time.Time) (*Leaf, error) {
 	if len(req.DNSNames) == 0 {
 		return nil, errors.New("pki: a leaf needs at least one DNS name")
 	}
+
 	var uris []*url.URL
+
 	if req.Identity != "" {
 		u, err := url.Parse(req.Identity)
 		if err != nil || u.Scheme != "spiffe" {
 			return nil, fmt.Errorf("pki: identity %q is not a spiffe URI", req.Identity)
 		}
+
 		uris = append(uris, u)
 	}
+
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("pki: generate leaf key: %w", err)
 	}
+
 	serial, err := serialNumber()
 	if err != nil {
 		return nil, err
 	}
+
 	notAfter := now.Add(LeafLifetime)
 	if notAfter.After(ca.Cert.NotAfter) {
 		notAfter = ca.Cert.NotAfter
 	}
+
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: req.DNSNames[0], Organization: []string{"Breadboard"}},
@@ -171,18 +189,22 @@ func (ca *CA) Issue(req LeafRequest, now time.Time) (*Leaf, error) {
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 	}
+
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.Cert, &key.PublicKey, ca.Key)
 	if err != nil {
 		return nil, fmt.Errorf("pki: sign leaf: %w", err)
 	}
+
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
 		return nil, fmt.Errorf("pki: parse leaf: %w", err)
 	}
+
 	keyPEM, err := marshalKey(key)
 	if err != nil {
 		return nil, err
 	}
+
 	return &Leaf{CertPEM: pemBlock("CERTIFICATE", der), KeyPEM: keyPEM, Cert: cert}, nil
 }
 
@@ -193,23 +215,29 @@ func (ca *CA) NeedsReissue(cert *x509.Certificate, req LeafRequest, now time.Tim
 	if cert == nil {
 		return true
 	}
+
 	if err := cert.CheckSignatureFrom(ca.Cert); err != nil {
 		return true
 	}
+
 	if !slices.Equal(cert.DNSNames, req.DNSNames) {
 		return true
 	}
+
 	ids := []string{}
 	for _, u := range cert.URIs {
 		ids = append(ids, u.String())
 	}
+
 	want := []string{}
 	if req.Identity != "" {
 		want = append(want, req.Identity)
 	}
+
 	if !slices.Equal(ids, want) {
 		return true
 	}
+
 	return cert.NotAfter.Sub(now) < ReissueBefore
 }
 
@@ -219,10 +247,12 @@ func ParseCert(data []byte) (*x509.Certificate, error) {
 	if block == nil || block.Type != "CERTIFICATE" {
 		return nil, errors.New("pki: no PEM certificate found")
 	}
+
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("pki: parse certificate: %w", err)
 	}
+
 	return cert, nil
 }
 
@@ -232,7 +262,9 @@ func KeyMatches(cert *x509.Certificate, keyPEM []byte) bool {
 	if err != nil {
 		return false
 	}
+
 	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
+
 	return ok && pub.Equal(&key.PublicKey)
 }
 
@@ -241,14 +273,17 @@ func parseKey(data []byte) (*ecdsa.PrivateKey, error) {
 	if block == nil || block.Type != "PRIVATE KEY" {
 		return nil, errors.New("pki: no PKCS#8 PEM private key found")
 	}
+
 	k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("pki: parse private key: %w", err)
 	}
+
 	key, ok := k.(*ecdsa.PrivateKey)
 	if !ok {
 		return nil, errors.New("pki: private key is not ECDSA")
 	}
+
 	return key, nil
 }
 
@@ -257,12 +292,15 @@ func marshalKey(key *ecdsa.PrivateKey) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pki: marshal key: %w", err)
 	}
+
 	return pemBlock("PRIVATE KEY", der), nil
 }
 
 func pemBlock(typ string, der []byte) []byte {
 	var buf bytes.Buffer
+
 	_ = pem.Encode(&buf, &pem.Block{Type: typ, Bytes: der})
+
 	return buf.Bytes()
 }
 
@@ -271,6 +309,7 @@ func serialNumber() (*big.Int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pki: serial number: %w", err)
 	}
+
 	return n.Add(n, big.NewInt(1)), nil
 }
 

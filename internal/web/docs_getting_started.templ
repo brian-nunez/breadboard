@@ -39,6 +39,11 @@ func init() {
 				Sections: []docSection{{"what", "What a starter writes"}, {"build", "How starter apps run"}, {"apply", "Applying a starter"}, {"list", "The starters"}},
 				Body:     gettingStartedStarters(),
 			},
+			{
+				Slug: "your-own-app", Title: "Write your own app", Summary: "bb add app: a minimal program that shows what your lab gives it.",
+				Sections: []docSection{{"add", "Add your app"}, {"what", "What you get"}, {"next", "From here"}},
+				Body:     gettingStartedOwnApp(),
+			},
 		},
 	})
 }
@@ -296,6 +301,7 @@ templ gettingStartedExperiments() {
 		"bb add <type> [--name n]: add an infra service, named after its type by default.",
 		"bb remove <name>: remove a service or app. A service an app still uses is refused until you remove it from that app's uses.",
 		"bb starter <id> [--dir path]: write a starter's code and add its apps.",
+		"bb add app <name> [--uses a,b] [--dir path]: write your own minimal Go program and add it as an app that uses every infra service, or the ones you list.",
 		"bb up and bb down [--volumes]: start, or stop and optionally delete data.",
 		"bb status: each service's state, health, CPU and memory, plus warnings for plaintext edges.",
 		"bb logs [service] [-f] [--tail n]: stream logs.",
@@ -448,4 +454,39 @@ var gsStarterList = []struct{ ID, Teaches string }{
 	{"consul/service-discovery", "(recommended) registration through a Consul sidecar, a health-checked catalog, and resolving services by name."},
 	{"consul/self-registration", "(alternative) the same lookup, with each service registering and deregistering itself through the Consul API."},
 	{"s3/objects-basics", "buckets, keys and prefixes, multipart upload and presigned URLs against S3 Compatible storage."},
+}
+
+const gsOwnAppSpec = `apps:
+  shop:
+    path: ./shop
+    command: [shop]
+    uses: [postgres, redis]`
+
+templ gettingStartedOwnApp() {
+	@docLead() {
+		Starters are lessons. When you want to write your own program instead, @docCodeWord("bb add app") gives you the smallest one that runs in your lab and shows exactly what the lab gives it: which services it can reach, the variables that carry their addresses and credentials, and how to connect to each with its official client library.
+	}
+	@docH2("add", "Add your app")
+	@docTerminal("bb add postgres", "bb add redis", "bb add app shop", "bb up")
+	@docP() {
+		The code goes into @docCodeWord("./shop"), or wherever @docCodeWord("--dir") says, and the app is added to @docCodeWord("experiment.yaml") with every infra service in its uses. @docCodeWord("--uses redis") picks only some; @docCodeWord("--uses ''") picks none. bb add app never writes into a directory that already has files.
+	}
+	@docCode("experiment.yaml", gsOwnAppSpec)
+	@docH2("what", "What you get")
+	@docList(
+		"main.go: a header comment that maps your lab, one entry per service with each variable it gives the app and what it holds (secrets are marked, never printed).",
+		"A blank import of each service's official client, at the version the starters use; drop the _ when you use one.",
+		"An init check that stops the program with one message naming every missing variable.",
+		"An empty main for your code. The program exits at once, and bb up reports an app that exits as failed, so until your program keeps running (a server, a consumer loop) bb up shows that it exited.",
+		"go.mod and go.sum with every client library, a Dockerfile like the starters' (compiled while the image builds), and a README.",
+	)
+	@docP() {
+		The variable names are exactly the ones bb up injects. When two services of one type are in uses, the later one's variables carry its name, such as @docCodeWord("ANALYTICS_DATABASE_URL"), and the scaffold uses those names.
+	}
+	@docH2("next", "From here")
+	@docList(
+		"Write your program in main.go, then run bb up again: it rebuilds the image and restarts the app.",
+		"Add a service later with bb add <type>, list it in the app's uses, and run bb up; bb creds shows the new variables.",
+		"Reach the app from your browser with ports, or with host and TLS served from TLS_CERT_FILE and TLS_KEY_FILE.",
+	)
 }

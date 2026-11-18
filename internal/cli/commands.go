@@ -37,7 +37,7 @@ func (c *cli) initCmd(args []string) error {
 	if res.CACreated {
 		fmt.Fprintf(c.out, "Created the Breadboard CA: %s\n", res.CAPath)
 	}
-	fmt.Fprintln(c.out, "\nNext: bb catalog, then bb add <type> or bb starter <id>")
+	fmt.Fprintln(c.out, "\nNext: bb catalog, then bb add <type> or bb starter <id>; bb add app <name> writes your own program")
 	return nil
 }
 
@@ -63,7 +63,14 @@ func (c *cli) catalog(args []string) error {
 	return nil
 }
 
+// appWord is the word after bb add that scaffolds the learner's own app
+// instead of adding a catalog type. No catalog type may take it (tested).
+const appWord = "app"
+
 func (c *cli) add(args []string) error {
+	if len(args) > 0 && args[0] == appWord {
+		return c.addApp(args[1:])
+	}
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	name := fs.String("name", "", "service name (default: the type)")
 	pos, err := parse(fs, args)
@@ -73,11 +80,87 @@ func (c *cli) add(args []string) error {
 	if err := exactly(pos, 1, "a service type (see bb catalog)"); err != nil {
 		return err
 	}
+	if pos[0] == appWord {
+		return usagef("put app first: bb add app <name> [--uses a,b] [--dir path]")
+	}
 	res, err := c.eng.AddService(c.ctx, core.AddServiceRequest{Dir: c.dir, Type: pos[0], Name: *name})
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(c.out, "Added %s (%s) to experiment.yaml. Run bb up to start it.\n", res.Name, res.Type)
+	return nil
+}
+
+// listFlag is a comma-separated list that records whether it was set, so
+// an empty --uses (no services) differs from leaving it out (every service).
+type listFlag struct {
+	items []string
+	set   bool
+}
+
+func (l *listFlag) String() string { return strings.Join(l.items, ",") }
+
+func (l *listFlag) Set(v string) error {
+	l.set = true
+	l.items = []string{}
+	for _, item := range strings.Split(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			l.items = append(l.items, item)
+		}
+	}
+	return nil
+}
+
+func (c *cli) addApp(args []string) error {
+	fs := flag.NewFlagSet("add app", flag.ContinueOnError)
+	var uses listFlag
+	fs.Var(&uses, "uses", "comma-separated services the app connects to (default: every infra service; '' for none)")
+	dir := fs.String("dir", "", "directory for the code, relative to experiment.yaml (default: ./<name>)")
+	pos, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if err := exactly(pos, 1, "an app name: bb add app <name> [--uses a,b] [--dir path]"); err != nil {
+		return err
+	}
+	req := core.AddAppRequest{Dir: c.dir, Name: pos[0], Path: *dir}
+	if uses.set {
+		req.Uses = uses.items
+	}
+	res, err := c.eng.AddApp(c.ctx, req)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.out, "Added app %s in %s, and to experiment.yaml (command: %s).\n", res.Name, res.Dir, strings.Join(res.Command, " "))
+	for _, f := range res.Files {
+		fmt.Fprintf(c.out, "  wrote %s\n", f)
+	}
+	if len(res.Uses) == 0 {
+		fmt.Fprintln(c.out, "\nIt uses no services yet. Add one with bb add <type>, then list it in the app's uses.")
+	} else {
+		fmt.Fprintln(c.out, "\nIt can reach these services through environment variables:")
+		uw := c.table()
+		for _, u := range res.Uses {
+			var names []string
+			for _, v := range u.Env {
+				n := v.Name
+				if v.Secret {
+					n += " (secret)"
+				}
+				names = append(names, n)
+			}
+			fmt.Fprintf(uw, "  %s\t%s\t%s\n", u.Service, u.Title, strings.Join(names, ", "))
+		}
+		uw.Flush()
+	}
+	fmt.Fprintln(c.out, "\nNext:")
+	tw := c.table()
+	fmt.Fprintln(tw, "  bb up\tstart the lab and the app")
+	fmt.Fprintln(tw, "  bb creds\tsee every value")
+	tw.Flush()
+	fmt.Fprintf(c.out, "main in %s/main.go is empty, so the program exits at once, and bb up reports an app that\n", res.Dir)
+	fmt.Fprintln(c.out, "exits as failed: until your program keeps running (a server, a consumer loop), bb up shows it exited.")
+	fmt.Fprintln(c.out, "Write your program there and run bb up again.")
 	return nil
 }
 

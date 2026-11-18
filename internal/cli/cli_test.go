@@ -217,3 +217,84 @@ func TestPrintHostURLs(t *testing.T) {
 		t.Errorf("printed\n%q\nwant\n%q", out.String(), want)
 	}
 }
+
+// bb add app <name> scaffolds the learner's program; "app" is reserved, so
+// no catalog type may take it.
+func TestAddApp(t *testing.T) {
+	eng := engine(t)
+	res, err := eng.Catalog(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range res.Entries {
+		if e.Type == appWord {
+			t.Fatalf("catalog type %q collides with bb add %s", e.Type, appWord)
+		}
+	}
+
+	dir := filepath.Join(t.TempDir(), "lab")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "lab"}, {"add", "postgres"}, {"add", "redis"}} {
+		if code, out, errOut := run(t, eng, append([]string{"-C", dir}, args...)...); code != 0 {
+			t.Fatalf("%v: %d %q %q", args, code, out, errOut)
+		}
+	}
+	code, out, errOut := run(t, eng, "-C", dir, "add", "app", "shop")
+	if code != 0 {
+		t.Fatalf("add app: %d %q", code, errOut)
+	}
+	for _, want := range []string{
+		"Added app shop in ./shop", "wrote shop/main.go", "wrote shop/Dockerfile",
+		"postgres", "Postgres", "DATABASE_URL (secret), PGHOST", "REDIS_URL (secret)",
+		"bb up", "bb creds", "./shop/main.go is empty", "bb up shows it exited",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("add app output lacks %q:\n%s", want, out)
+		}
+		if strings.Contains(out, "bb logs") {
+			t.Errorf("add app output points at bb logs, but the empty program logs nothing:\n%s", out)
+		}
+	}
+	if code, out, _ = run(t, eng, "-C", dir, "add", "app", "cache", "--uses", "redis", "--dir", "apps/cache"); code != 0 || !strings.Contains(out, "./apps/cache") || strings.Contains(out, "Postgres") {
+		t.Fatalf("add app --uses --dir: %d %q", code, out)
+	}
+	if code, out, _ = run(t, eng, "-C", dir, "add", "app", "solo", "--uses="); code != 0 || !strings.Contains(out, "uses no services yet") {
+		t.Fatalf("add app --uses '': %d %q", code, out)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "experiment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"uses: [postgres, redis]", "path: ./apps/cache", "uses: [redis]", "command: [solo]"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("experiment.yaml lacks %q:\n%s", want, data)
+		}
+	}
+
+	for _, tc := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{[]string{"add", "app"}, 2, "expected an app name"},
+		{[]string{"add", "app", "a", "b"}, 2, "expected an app name"},
+		{[]string{"add", "--name", "x", "app"}, 2, "put app first"},
+		{[]string{"add", "app", "shop"}, 1, "a service or app named \"shop\" already exists in experiment.yaml; choose another name\n"},
+		{[]string{"add", "app", "web", "--uses", "mongo"}, 1, "uses[0]: mongo is not a service"},
+		{[]string{"add", "app", "web", "--dir", "shop"}, 1, "already exists and has files"},
+	} {
+		code, out, errOut := run(t, eng, append([]string{"-C", dir}, tc.args...)...)
+		if code != tc.code || !strings.Contains(out+errOut, tc.want) {
+			t.Errorf("bb %v = %d %q %q, want %d containing %q", tc.args, code, out, errOut, tc.code, tc.want)
+		}
+	}
+	// A bad request reads as one sentence, not as an invalid experiment.yaml.
+	if _, _, errOut := run(t, eng, "-C", dir, "add", "app", "web", "--uses", "mongo"); errOut != "bb: uses[0]: mongo is not a service in experiment.yaml; add it with bb add <type> first\n" {
+		t.Errorf("bad --uses: %q", errOut)
+	}
+	if code, out, _ := run(t, eng, "help", "add"); code != 0 || !strings.Contains(out, "app <name> [--uses a,b] [--dir path]") {
+		t.Errorf("help add = %d %q", code, out)
+	}
+}

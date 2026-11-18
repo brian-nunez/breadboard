@@ -1,0 +1,78 @@
+# {{.Name}}
+
+Your own program in the Breadboard lab `{{.Experiment}}`. `bb add app` wrote a minimal Go program here and added it to `experiment.yaml`. Nothing in it is a lesson: it shows what your lab gives this app, and `main` is empty for your code.
+
+Open `main.go` first. Its header comment is a map of the lab, the imports bring in each service's official client library, `init()` checks the variables, and `main` is empty.
+
+## What this app can reach
+{{if .Uses}}
+`bb up` gives the app these variables, from `uses` in `experiment.yaml`. Values marked secret are generated passwords and keys: `bb creds` shows them.
+
+| Service | Type | Variables |
+|---|---|---|
+{{- range .Uses}}
+| `{{.Service}}` | {{.Title}} | {{range $i, $v := .Vars}}{{if $i}}, {{end}}`{{$v.Name}}`{{if $v.Secret}} (secret){{end}}{{end}} |
+{{- end}}
+
+{{if .Imports}}Client libraries, imported blank in `main.go` (drop the `_` when you use one), at the versions Breadboard's starters use:
+{{range .Imports}}
+- `{{.Path}}` for {{.For}}
+{{- end}}
+{{end}}{{else}}
+Nothing yet: this app has no services in `uses`. See [Add a service](#add-a-service).
+{{end}}
+Every app also gets:
+
+- `SSL_CERT_FILE`: the lab's trust bundle. Go's `crypto/tls` reads it, so clients verify every server with no certificate code.
+- `BB_SERVICE` and `BB_FQDN`: this app's name and address.
+- `TLS_CERT_FILE` and `TLS_KEY_FILE`: this app's certificate and key, for serving TLS yourself.
+
+## Run it
+
+```sh
+bb up                 # build the image, start the lab, wait for health
+bb logs {{.Name}}     # what the app printed
+bb creds              # every variable, with values
+bb status             # state and health of every service
+```
+
+{{if .Uses}}`init()` in `main.go` checks the variables of the services in `uses`, listed above. If one is missing, the program stops with a message naming each one, so a change to `uses` without `bb up` shows up at once.{{else}}`init()` in `main.go` checks nothing yet: it checks the variables of the services in `uses`, and there are none.{{end}} It does not check `SSL_CERT_FILE`, `BB_SERVICE`, `BB_FQDN`, `TLS_CERT_FILE` and `TLS_KEY_FILE`: Breadboard supplies the app's own TLS and identity variables to every app.
+
+## Change it
+
+Edit `main.go`, then run `bb up` again. It rebuilds the image (only what changed recompiles) and restarts the app.
+
+`main` is empty, so the program exits as soon as it starts. `bb up` reports an app that exits as failed, so until your program keeps running, such as a server's `ListenAndServe` or a consumer loop, `bb up` shows that `{{.Name}}` exited. That is expected for the empty program.
+
+`go.mod` lists every client library Breadboard's starters use, so adding a service needs no download step. Run `go mod tidy` to keep only the ones you import. The module path is `example.com/{{.Name}}`, so no standard library package can shadow it whatever the app is called; rename it if you publish the code. The binary and the command stay `{{.Name}}`.
+
+## Add a service
+
+{{if .Example}}```sh
+bb add {{.Example}}          # bb catalog lists every type
+```
+
+Then list it in this app's `uses` in `experiment.yaml`:
+
+```yaml
+apps:
+  {{.Name}}:
+    uses: [{{range .Uses}}{{.Service}}, {{end}}{{.Example}}]
+```
+
+Run `bb up`, and `bb creds` shows the new variables. `main.go` was written once, so add the new variables to `requireEnv` in `init()` and the client's import yourself; `bb learn {{.Example}}` explains the env contract.{{else}}```sh
+bb add <type> --name <new-name>    # bb catalog lists every type
+```
+
+Then add `<new-name>` to this app's `uses` in `experiment.yaml`; each entry appears once. Run `bb up`, and `bb creds` shows the new variables. `main.go` was written once, so add the new variables to `requireEnv` in `init()` and the client's import yourself; `bb learn <type>` explains the env contract.{{end}} When two services of the same type are in `uses`, the later one's variables are prefixed with its name, such as `ANALYTICS_DATABASE_URL`.
+
+## Reach it from your browser
+
+The app is private to the lab by default. Two ways in:
+
+- `ports: [8080]` in the app's entry publishes a container port on `127.0.0.1:8080`.
+- `host: {port: 8443}` serves the app at `https://{{.Name}}.{{.Experiment}}.localhost:<port>` through the lab's host router. The app must serve TLS on that port, with `TLS_CERT_FILE` and `TLS_KEY_FILE`. `bb up` prints the URL; `bb ca --host` explains how to trust it.
+
+## Without Breadboard
+
+The program needs only its environment variables and a trust bundle, so it runs anywhere they exist. `docker build --target prod -t {{.Name}} .` builds a small non-root image.

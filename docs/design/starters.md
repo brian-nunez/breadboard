@@ -142,6 +142,40 @@ Each brings one gateway with a native, commented config the learner owns (`File`
 - `gw/bff-aggregation` (Traefik `bff-edge`, `dynamic.yml`): routes `/profile/`, `/orders/` and `/bff/`. `bff-api` fans out to `bff-profile` (80 ms) and `bff-orders` (120 ms) concurrently with a 300 ms per-call timeout and returns only the home screen's fields; `bff-client` loads the screen both ways with a simulated 150 ms mobile round trip per call and logs calls, time and bytes. Every app logs the client's `X-Request-Id`.
 - `gw/grpc-routing` (Envoy `grpc-edge`, `envoy.yaml`) pins `google.golang.org/grpc v1.85.0` and `google.golang.org/protobuf v1.36.12`. `grpc-catalog` (2 replicas, `catalog.v1.Catalog`: `GetItem`, `Search` at 800 ms) and `grpc-inventory` (`inventory.v1.Inventory/CheckStock`) register hand-written `grpc.ServiceDesc`s over well-known types (contracts in `proto/`). Routes by path, `Search` first with `max_stream_duration`/`grpc_timeout_header_max: 0.5s`; HTTP/2 clusters with ALPN `h2` and gRPC health checks; `grpc_stats` per method. `grpc-client` uses one connection and logs the replicas reached, the inventory answer, Search's `DeadlineExceeded` and an unrouted service's `Unimplemented`.
 
+## Your own app (`bb add app`)
+
+Starters are lessons. `bb add app <name> [--uses a,b] [--dir path]` starts the learner's own program instead: the least code that runs in the lab and shows what the lab gives it. It is not a starter (no `Starter` entry, no README drills), but it follows the starter rules above: official clients at the starters' versions, configuration from env only, a multi-stage `Dockerfile`, and no Breadboard code.
+
+What it does (core `AddApp`; CLI `bb add app`; MCP `add_app`):
+
+- **Name.** A DNS label not yet used in the shared namespace (`bb-host` is reserved); it is also the binary and the `command`, and the Go module is `example.com/<name>`, so an app named `log` or `context` does not shadow a standard library package. `app` is a reserved word after `bb add`, and no catalog type may take it (tested).
+- **Uses.** By default every infra service in `experiment.yaml`, in spec order (the "installed software"). `--uses a,b` picks some, each an existing infra service, listed once; `--uses ''` picks none.
+- **Directory.** `--dir`, relative to `experiment.yaml`, default `./<name>`: inside the project and outside `.bb`, checked lexically and again on the canonical destination (the nearest existing ancestor with its symlinks resolved, plus the missing rest), so neither a symlink out of the project nor one to `.bb` passes. A directory that exists and has files is refused with `ErrExists`, so the learner's work is never overwritten. Any refusal writes nothing and leaves `experiment.yaml` untouched.
+- **Spec.** The app is added through the YAML node tree with `path`, `command: [<name>]` and `uses`, and the whole spec is validated before any file is written.
+- **Variables.** The names come from the resolved model, exactly as `bb up` injects them (`compose.AppEnv`), so the prefixing rule applies: with two Postgres services the later one's are `ANALYTICS_DATABASE_URL`, and so on. The result returns them per service; secret values never leave the core.
+
+The template is `starters/go/app/` (embedded with the starters, every file `.tmpl`), rendered by `starters.RenderApp`. Go files are formatted with `go/format`. It writes one module with `main.go` at its root:
+
+| File | Content |
+|---|---|
+| `main.go` | A header comment that maps the lab: each used service with its catalog title and summary, and each variable with what it holds, its value when not secret, or `(secret)`; plus `SSL_CERT_FILE`, `BB_FQDN`, `TLS_CERT_FILE`, `TLS_KEY_FILE` and `bb creds`. A blank import of each used service's client (`_` keeps the module in the build until the learner uses it). `init()` calls `requireEnv` with every variable of the used services; any missing ones stop the program with exit code 1 and one line naming them all. `main` is empty (Brian's direction): the program exits at once, so `bb up` reports the app as failed (D-058) until the learner's code keeps running. |
+| `go.mod`, `go.sum` | One canonical pair for every app, generated with `go mod tidy` against a file importing every client, at the starters' versions; the module path is `example.com/<name>`. Unused requirements are harmless; `go mod tidy` trims them. |
+| `Dockerfile` | The starters' shape: a `dev` stage on `golang:<GoImage>` that runs `go build -o /usr/local/bin/<name> .` with the build cache mount, and a non-root `prod` stage on `alpine:<AlpineVersion>`. |
+| `README.md` | What the app is, the services and variables it can reach, that `main` is empty and what `bb up` then reports, how to run, rebuild, add a service later, and reach it from a browser (`ports`, `host`). |
+
+Each catalog type maps to one client package in `starters.sdkImports` (a test fails for a type without one). Several services of one type share one import, whose comment lists them:
+
+| Types | Blank import |
+|---|---|
+| `postgres`, `pgbouncer` | `github.com/jackc/pgx/v5/pgxpool` |
+| `redis` | `github.com/redis/go-redis/v9` |
+| `kafka` | `github.com/twmb/franz-go/pkg/kgo` |
+| `s3-compatible` | `github.com/aws/aws-sdk-go-v2/service/s3` (`go.mod` also has `aws-sdk-go-v2/config`, which the S3 starter uses) |
+| `consul` | `github.com/hashicorp/consul/api` |
+| `haproxy`, `envoy`, `traefik`, `nginx` | none: `net/http` is the client; they appear in the header and the init check only |
+
+`TestRenderedAppBuilds` renders the scaffold for every catalog type at once, each type alone, no service, prefixed and plaintext uses, colliding service names, and app names `log` and `context`, and runs `go build` and `go vet` with `-mod=readonly`; it then runs the binary without its variables (one message, exit 1) and with them (exits 0 at once, silently).
+
 ## Starter list
 
 | Id | Phase | Teaches |

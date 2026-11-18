@@ -77,6 +77,8 @@ bb logs consumer -f                                      # watch messages arrive
 bb serve                                                 # open the read-only dashboard and docs
 ```
 
+To write your own program instead of a lesson, `bb add app <name>` writes a minimal Go app and adds it to `experiment.yaml`: a header that maps every service your lab gives it with the exact environment variables, a blank import of each service's official client, an init check of those variables, and an empty `main` for your code.
+
 `bb` itself runs on your machine; only experiments run in containers. The CLI, the read-only web UI (`bb serve`) and the MCP server (`bb mcp`) are thin wrappers over one core engine. See [architecture](docs/design/architecture.md).
 
 ## Use it from an AI agent

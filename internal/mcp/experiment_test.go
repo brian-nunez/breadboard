@@ -11,7 +11,7 @@ import (
 
 var (
 	readTools  = []string{"ca", "catalog", "config_get", "consul_catalog", "creds", "envoy_clusters", "guide", "haproxy_stats", "kafka_topics", "learn", "logs", "nginx_status", "pgbouncer_pools", "postgres_tables", "redis_keys", "s3_buckets", "service_details", "starter_details", "starters", "status", "traefik_routes", "version"}
-	writeTools = []string{"add_service", "apply_starter", "config_set", "down", "export_compose", "init", "migrate", "remove_service", "up"}
+	writeTools = []string{"add_app", "add_service", "apply_starter", "config_set", "down", "export_compose", "init", "migrate", "remove_service", "up"}
 )
 
 func TestToolsMirrorTheCoreAndReadOnlyDropsWrites(t *testing.T) {

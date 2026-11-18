@@ -43,6 +43,7 @@ Operations (Phase 1):
 | `Catalog`, `Learn` | List catalog entries; return an entry's learning notes. |
 | `AddService`, `RemoveService` | Edit `experiment.yaml`. Removing a service or app still listed in an app's `uses` or a proxy's `upstreams` is refused. |
 | `Starters`, `ApplyStarter` | List starters; write starter code and update the spec. |
+| `AddApp` | Write the learner's own minimal Go program into a new directory (never one with files) and add it as an app with `path`, `command` and `uses` (default: every infra service). The result lists the files and, per used service, the variables the app receives, named as `bb up` injects them (secret values never returned). See [`starters.md`](starters.md#your-own-app-bb-add-app). |
 | `Up`, `Down` | Reconcile, materialize, run, wait for health; stop and optionally delete data. |
 | `Status`, `Logs` | Per-service state, health, resources, TLS warnings; log stream. Each app instance row carries its app, instance number, replica count and sidecars, and is followed by its sidecars' rows (type, ports, env they give the app, transparent mode); the pod's namespace holder is never a row but decides the instance's state while it is down. Edges carry `Via` and `ToApp` for Envoy outbound targets (Phase 5). A proxy's row lists its upstream edges, each with its `Mode` (`on`, `off`, `passthrough`); every terminate hop is a plaintext warning (Phase 5). |
 | `StartStatsSampler` | Keeps the latest CPU and memory of every running container from one streaming `docker stats` until its context ends or the returned `stop` (which waits for the process to end) is called; `Status` reads it instead of taking its own two-second sample. `bb serve` starts it; the CLI and MCP do not (D-211). |
@@ -183,10 +184,10 @@ Not part of Phase 1. Both are wrappers over the core API above.
   |---|---|
   | About bb | `guide` (embedded agent guide), `version`, `catalog`, `learn`, `starters`, `starter_details` (every file's content), `ca`, `config_get` |
   | Inspect | `status`, `logs` (no follow; default 200, at most 2,000 lines per service), `creds` (with values, D-071), `service_details`, `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets`, `envoy_clusters`, `pgbouncer_pools` (sidecars and infra services), `haproxy_stats`, `traefik_routes`, `nginx_status` |
-  | Change | `init`, `add_service`, `apply_starter`, `migrate`, `config_set`, `export_compose`, `up` |
+  | Change | `init`, `add_service`, `add_app`, `apply_starter`, `migrate`, `config_set`, `export_compose`, `up` |
   | Destructive | `remove_service`, `down` (with `volumes`, deletes data) |
 
-- Safety (D-073): `dir` and `export_compose`'s `out` resolve against the directory `bb mcp` started in (or `-C`), following symlinks, and anything outside it is refused. `--read-only` registers only the tools that change nothing the user owns. Annotations mark reads `readOnlyHint`, `down` and `remove_service` `destructiveHint`, and every tool `openWorldHint: false`.
+- Safety (D-073): `dir` and `export_compose`'s `out` resolve against the directory `bb mcp` started in (or `-C`), following symlinks, and anything outside it is refused. `add_app`'s `path` is relative to the project and may not leave it, through `..` or a symlink. `--read-only` registers only the tools that change nothing the user owns. Annotations mark reads `readOnlyHint`, `down` and `remove_service` `destructiveHint`, and every tool `openWorldHint: false`.
 - Progress: `up`, `down`, `apply_starter` and `export_compose` send each core event as a progress notification when the request carries a progress token, and return the events in the result (on failure, in the error text). Cancelling a call cancels its context, so the core operation stops and releases the experiment's lock.
 - Status for every page and live view reads the stats sampler (`StartStatsSampler`, started by `bb serve`), so a page waits only for `docker ps` and `docker inspect`, and one `docker stats` process serves every open tab (D-211).
 - Explorers read service data through Docker: each runs the service's own command-line tool with `docker exec`, inside the experiment's network ([ADR-0012](../adr/README.md)). Status comes from `docker inspect` and `docker stats`. The UI never changes the system.
@@ -200,6 +201,7 @@ Each command is a thin wrapper over one core operation.
 | `bb init [name]` | Create `experiment.yaml` and `.bb/` in the current directory; create `BB_HOME` and the CA if missing. |
 | `bb catalog` | List available infra service types. |
 | `bb add <type> [--name n]` | Add an infra service to `experiment.yaml`. |
+| `bb add app <name> [--uses a,b] [--dir path]` | Write your own minimal Go program (default `./<name>`) and add it as an app using every infra service, or those in `--uses` (`--uses ''` for none). `app` is reserved: no catalog type takes it. |
 | `bb remove <name>` | Remove a service or app from `experiment.yaml`. |
 | `bb starters` | List starters. |
 | `bb starter <id> [--dir path]` | Apply a starter: write code, add app services. |
@@ -217,7 +219,7 @@ Each command is a thin wrapper over one core operation.
 | `bb mcp [--read-only]` | Serve the core as MCP tools over stdio for AI agents; `--read-only` exposes only tools that change nothing the user owns (Phase 4). |
 | `bb version` | Print the bb version. |
 
-`bb add`, `bb remove`, and `bb starter` edit `experiment.yaml` through a YAML node tree, so the user's comments and ordering survive.
+`bb add`, `bb add app`, `bb remove`, and `bb starter` edit `experiment.yaml` through a YAML node tree, so the user's comments and ordering survive.
 
 The CLI is built on the standard library `flag` package with a small subcommand dispatcher. Flags may follow positional arguments (`bb logs consumer -f`), and the global `-C dir` runs a command as if started in `dir`. Commands find the experiment by walking up from the current directory to the nearest `experiment.yaml`. Exit codes: 0 success, 1 error, 2 usage.
 
@@ -245,6 +247,7 @@ internal/
   export/               exporters (Phase 7+)
 starters/                    package embedding the templates (starters.FS)
 starters/go/<area>/<name>/   starter templates; every file ends in .tmpl so Go never compiles starter code as part of this module
+starters/go/app/             the template bb add app renders (internal/starters/app.go), also .tmpl
 docs/design/            this design
 ```
 

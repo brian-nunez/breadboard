@@ -100,7 +100,7 @@ func renderModelErr(m *model.Model, mode secrets.Mode, readFile func(string) ([]
 			next = next.Next()
 		}
 	}
-	return Render(Input{
+	in := Input{
 		Model:        m,
 		ExperimentID: "0123456789abcdef",
 		Secrets:      secrets.NewMaterializer(mode, store),
@@ -112,7 +112,12 @@ func renderModelErr(m *model.Model, mode secrets.Mode, readFile func(string) ([]
 		AppDir:       func(app string) string { return "../../" + app },
 		ReadFile:     readFile,
 		Header:       "Generated for a golden test.",
-	})
+	}
+	if _, ok := m.HostRouter(); ok {
+		in.HostCert = &Cert{Cert: []byte("HOST CERT\n"), Key: []byte("HOST KEY\n")}
+		in.HostPort = 44312
+	}
+	return Render(in)
 }
 
 func golden(t *testing.T, name string, b *Bundle) {

@@ -34,6 +34,9 @@ func (*fakeRuntime) ImageUser(context.Context, runtime.Project, string) (runtime
 	return runtime.ImageUser{}, nil
 }
 func (*fakeRuntime) Owners(context.Context, string) ([]string, error) { return nil, nil }
+func (*fakeRuntime) PublishedPorts(context.Context) ([]runtime.PublishedPort, error) {
+	return nil, nil
+}
 func (f *fakeRuntime) Exec(_ context.Context, _, service string, _ []string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

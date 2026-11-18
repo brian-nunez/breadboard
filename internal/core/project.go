@@ -227,6 +227,10 @@ type prepared struct {
 	// addresses are the default network's fixed addresses (static
 	// addressing), or nil.
 	addresses map[string]netip.Addr
+	// hostCert and hostPort are the host router's host certificate and
+	// published port; nil and zero without a router.
+	hostCert *compose.Cert
+	hostPort int
 	// networkChanged is set when an existing network's addressing differs
 	// from what this up renders: the default network's subnet (static
 	// addressing switched on, off, or moved), or an app segment's ip_range.
@@ -234,8 +238,11 @@ type prepared struct {
 }
 
 // prepare reconciles project state with the spec: CA, secrets, leaf
-// certificates, and segment subnets. It writes state; the caller holds the lock.
-func (e *Engine) prepare(ctx context.Context, p *project, events EventSink) (*prepared, error) {
+// certificates, segment subnets, and host access. It writes state; the
+// caller holds the lock. probe lets it test the host router's port on the
+// host and record it (up); without, the recorded or start port is used
+// as is (export).
+func (e *Engine) prepare(ctx context.Context, p *project, events EventSink, probe bool) (*prepared, error) {
 	st, err := e.settings(ctx)
 	if err != nil {
 		return nil, err
@@ -279,6 +286,14 @@ func (e *Engine) prepare(ctx context.Context, p *project, events EventSink) (*pr
 	if err != nil {
 		return nil, err
 	}
+	hostCert, err := e.reconcileHostCert(p, m, ps, events)
+	if err != nil {
+		return nil, err
+	}
+	hostPort, err := e.hostPort(ctx, m, ps, probe, events)
+	if err != nil {
+		return nil, err
+	}
 	subnets, addrs, err := e.allocateSubnets(ctx, m, ps)
 	if err != nil {
 		return nil, err
@@ -293,7 +308,7 @@ func (e *Engine) prepare(ctx context.Context, p *project, events EventSink) (*pr
 	for _, edge := range m.PlaintextEdges() {
 		events.warn(fmt.Sprintf("Plaintext edge %s -> %s (tls.mode: off): %s", edge.From, edge.To, edge.Reason))
 	}
-	return &prepared{model: m, ca: ca, secrets: sec, state: ps, certs: certs, subnets: subnets, addresses: addrs, networkChanged: stale}, nil
+	return &prepared{model: m, ca: ca, secrets: sec, state: ps, certs: certs, subnets: subnets, addresses: addrs, hostCert: hostCert, hostPort: hostPort, networkChanged: stale}, nil
 }
 
 // reconcileCerts issues a leaf for every service that lacks a valid one and
@@ -586,6 +601,8 @@ func (e *Engine) render(p *project, pr *prepared, dir string, mode secrets.Mode,
 		AppDir:       func(app string) string { return appDirs[app] },
 		ReadFile:     func(path string) ([]byte, error) { return os.ReadFile(filepath.Join(p.Dir, filepath.FromSlash(path))) },
 		Header:       header,
+		HostCert:     pr.hostCert,
+		HostPort:     pr.hostPort,
 	})
 }
 

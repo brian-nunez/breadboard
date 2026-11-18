@@ -114,6 +114,9 @@ type Server struct {
 	// generated config file (Proxy.ConfigFile); nil without one. Render
 	// swaps it in, so entries need not handle it.
 	UserConfig []byte
+	// HostTargets are what the host router serves; set only for the host
+	// router, which renders with HostRouter.
+	HostTargets []HostTarget
 }
 
 // Plain describes the private segment a plaintext listener lives on.

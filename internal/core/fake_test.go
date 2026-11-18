@@ -47,6 +47,8 @@ type fakeRuntime struct {
 	execs   []string
 	// imageUser is the user each service's image starts as (default root).
 	imageUser map[string]runtime.ImageUser
+	// published is what PublishedPorts reports.
+	published []runtime.PublishedPort
 }
 
 func newFake() *fakeRuntime {
@@ -193,6 +195,12 @@ func (f *fakeRuntime) Owners(ctx context.Context, experiment string) ([]string, 
 	return f.owners, nil
 }
 
+func (f *fakeRuntime) PublishedPorts(ctx context.Context) ([]runtime.PublishedPort, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.published, nil
+}
+
 // harness is an engine on a fake runtime with a private BB_HOME and project.
 type harness struct {
 	t   *testing.T
@@ -200,6 +208,9 @@ type harness struct {
 	rt  *fakeRuntime
 	dir string
 	now time.Time
+	// bound are the 127.0.0.1 ports that do not bind (another program
+	// holds them); no test opens a real socket.
+	bound map[int]bool
 }
 
 // TestMain clears BB_DOMAIN once, so harnesses see the default domain
@@ -228,7 +239,7 @@ func newHarness(t *testing.T) *harness {
 // alone, before the parallel tests start.
 func newEnvHarness(t *testing.T) *harness {
 	t.Helper()
-	h := &harness{t: t, rt: newFake(), dir: filepath.Join(t.TempDir(), "lab"), now: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)}
+	h := &harness{t: t, rt: newFake(), dir: filepath.Join(t.TempDir(), "lab"), now: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC), bound: map[int]bool{}}
 	eng, err := New(Options{
 		Home:          filepath.Join(t.TempDir(), "home"),
 		Runtime:       h.rt,
@@ -238,6 +249,7 @@ func newEnvHarness(t *testing.T) *harness {
 		HealthTimeout: time.Second,
 		PollInterval:  time.Millisecond,
 		StartupSettle: 20 * time.Millisecond,
+		PortFree:      func(port int) bool { return !h.bound[port] },
 	})
 	if err != nil {
 		t.Fatal(err)

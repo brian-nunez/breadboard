@@ -282,7 +282,7 @@ func (e *Engine) ExportCompose(ctx context.Context, req ExportComposeRequest) (*
 	if err := checkExportDir(out, p.Dir); err != nil {
 		return nil, err
 	}
-	pr, err := e.prepare(ctx, p, req.Events)
+	pr, err := e.prepare(ctx, p, req.Events, false)
 	if err != nil {
 		return nil, err
 	}
@@ -294,9 +294,12 @@ func (e *Engine) ExportCompose(ctx context.Context, req ExportComposeRequest) (*
 	}
 	b.Files = append(b.Files,
 		compose.File{Path: exportMarker, Data: []byte("Written by bb export compose. bb replaces this directory on the next export.\n"), Mode: 0o644},
-		compose.File{Path: "README.md", Data: exportReadme(p.spec.Name, pr.model, mode), Mode: 0o644},
+		compose.File{Path: "README.md", Data: exportReadme(p.spec.Name, pr.model, mode, pr.hostPort), Mode: 0o644},
 	)
 	ignore := "# Private keys and secrets stay on this machine.\ntls/*/tls.key\ntls/*/keystore.pem\n"
+	if pr.hostCert != nil {
+		ignore += "tls/*/host.key\n"
+	}
 	if mode == secrets.Dotenv {
 		ignore += ".env\n"
 	} else {
@@ -333,7 +336,7 @@ func checkExportDir(out, projectDir string) error {
 	return fmt.Errorf("%s is not empty and was not written by bb export: %w", out, ErrExists)
 }
 
-func exportReadme(name string, m *model.Model, mode secrets.Mode) []byte {
+func exportReadme(name string, m *model.Model, mode secrets.Mode, hostPort int) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s (compose export)\n\nExported by Breadboard. This stack runs with plain Docker Compose; bb is not needed.\n\n", name)
 	b.WriteString("```sh\ndocker compose up -d --wait\n```\n\n")
@@ -343,6 +346,16 @@ func exportReadme(name string, m *model.Model, mode secrets.Mode) []byte {
 		b.WriteString("- `.env`: generated secrets, read by compose. It is git-ignored.\n")
 	} else {
 		b.WriteString("- Secrets are inline in `docker-compose.yml`, so that file is git-ignored. Export with `--secrets dotenv` to keep them in `.env` instead.\n")
+	}
+	if urls := hostURLs(m, hostPort); len(urls) > 0 {
+		fmt.Fprintf(&b, "\n## Host access\n\n`bb-host` publishes these on 127.0.0.1:%d with the certificate in `tls/bb-host/host.crt`, from the Breadboard host CA (`bb ca` shows it and how to trust it):\n\n", hostPort)
+		for _, u := range urls {
+			to := u.Target
+			if u.Instance != "" {
+				to = u.Instance
+			}
+			fmt.Fprintf(&b, "- %s -> %s\n", u.URL, to)
+		}
 	}
 	if pe := m.PlaintextEdges(); len(pe) > 0 {
 		b.WriteString("\n## Plaintext edges\n\n")

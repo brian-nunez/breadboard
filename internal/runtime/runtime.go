@@ -301,6 +301,94 @@ func (c *Compose) Containers(ctx context.Context, experiment string) ([]Containe
 	return list, nil
 }
 
+// PublishedPort is a host port a container publishes (or will publish
+// when it starts), with the experiment and service labels of its owner.
+type PublishedPort struct {
+	HostIP       string
+	HostPort     int
+	ExperimentID string // empty for a container no experiment owns
+	Service      string
+	// Running reports whether the container runs and so holds the port
+	// now; a stopped container only reserves it.
+	Running bool
+}
+
+// PublishedPorts lists the fixed host ports of every container, running or
+// not: a stopped container takes its ports back when it starts.
+func (c *Compose) PublishedPorts(ctx context.Context) ([]PublishedPort, error) {
+	out, err := c.run(ctx, "ps", "--all", "--quiet", "--no-trunc")
+	if err != nil {
+		return nil, err
+	}
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	out, err = c.run(ctx, append([]string{"inspect"}, ids...)...)
+	// A container removed between the list and the inspect publishes
+	// nothing any more: inspect still prints every other one.
+	if ce := (*cmdError)(nil); errors.As(err, &ce) && onlyMissingContainers(ce.stderr) {
+		err = nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return parsePublishedPorts(out)
+}
+
+func parsePublishedPorts(data []byte) ([]PublishedPort, error) {
+	var raw []struct {
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+		State struct {
+			Running bool `json:"Running"`
+		} `json:"State"`
+		HostConfig struct {
+			PortBindings map[string][]struct {
+				HostIP   string `json:"HostIp"`
+				HostPort string `json:"HostPort"`
+			} `json:"PortBindings"`
+		} `json:"HostConfig"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("docker inspect: %w", err)
+	}
+	var list []PublishedPort
+	for _, r := range raw {
+		for _, bindings := range r.HostConfig.PortBindings {
+			for _, b := range bindings {
+				lo, hi, _ := strings.Cut(b.HostPort, "-")
+				first, err := strconv.Atoi(lo)
+				if err != nil {
+					continue // empty: Docker picks an ephemeral port
+				}
+				last := first
+				if hi != "" {
+					if last, err = strconv.Atoi(hi); err != nil {
+						last = first
+					}
+				}
+				for port := first; port <= last; port++ {
+					list = append(list, PublishedPort{HostIP: b.HostIP, HostPort: port, ExperimentID: r.Config.Labels[labelExperimentID], Service: r.Config.Labels["breadboard.service"], Running: r.State.Running})
+				}
+			}
+		}
+	}
+	return list, nil
+}
+
+// missingContainer is the daemon's message for a container that does not
+// exist.
+var missingContainer = regexp.MustCompile(`^Error(: No such (object|container)| response from daemon: No such container): \S+$`)
+
+// onlyMissingContainers reports whether every line of an inspect's stderr
+// says a container does not exist.
+func onlyMissingContainers(stderr string) bool {
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	return lines[0] != "" && !slices.ContainsFunc(lines, func(l string) bool { return !missingContainer.MatchString(strings.TrimSpace(l)) })
+}
+
 // Exec runs a command in the running container of an experiment's service
 // and returns its standard output. It is how the web UI's explorers read
 // service data with each service's own tools (ADR-0012).

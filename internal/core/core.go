@@ -55,6 +55,7 @@ type Runtime interface {
 	Exec(ctx context.Context, experiment, service string, cmd []string) ([]byte, error)
 	Build(ctx context.Context, p runtime.Project, services []string) error
 	ImageUser(ctx context.Context, p runtime.Project, service string) (runtime.ImageUser, error)
+	PublishedPorts(ctx context.Context) ([]runtime.PublishedPort, error)
 }
 
 // Options configures an Engine. Zero values pick production defaults.
@@ -77,6 +78,9 @@ type Options struct {
 	// StartupSettle is how long every service must stay healthy, without
 	// restarting, before Up reports success.
 	StartupSettle time.Duration
+	// PortFree reports whether a TCP port binds on 127.0.0.1 now, for the
+	// host router's port; nil tries to listen on it.
+	PortFree func(port int) bool
 }
 
 // Engine is the Breadboard core.
@@ -89,6 +93,7 @@ type Engine struct {
 	healthTimeout time.Duration
 	pollInterval  time.Duration
 	startupSettle time.Duration
+	portFree      func(port int) bool
 }
 
 // New returns an Engine.
@@ -101,6 +106,7 @@ func New(opts Options) (*Engine, error) {
 		healthTimeout: opts.HealthTimeout,
 		pollInterval:  opts.PollInterval,
 		startupSettle: opts.StartupSettle,
+		portFree:      opts.PortFree,
 	}
 	if opts.Home != "" {
 		e.home = state.Home{Dir: opts.Home}
@@ -128,6 +134,9 @@ func New(opts Options) (*Engine, error) {
 	}
 	if e.pollInterval == 0 {
 		e.pollInterval = 2 * time.Second
+	}
+	if e.portFree == nil {
+		e.portFree = loopbackPortFree
 	}
 	if e.startupSettle == 0 {
 		e.startupSettle = 5 * time.Second

@@ -198,3 +198,22 @@ func TestStatusRowsShowProxyUpstreamModes(t *testing.T) {
 		t.Errorf("worker uses = %q", got)
 	}
 }
+
+func TestPrintHostURLs(t *testing.T) {
+	var out strings.Builder
+	c := &cli{out: &out}
+	c.printHostURLs(nil)
+	if out.Len() != 0 {
+		t.Errorf("no URLs printed %q", out.String())
+	}
+	c.printHostURLs([]core.HostURL{
+		{URL: "https://api.lab.localhost:44312", Target: "api"},
+		{URL: "https://api-2.lab.localhost:44312", Target: "api", Instance: "api-2"},
+	})
+	want := "\nHost access (trust the host CA: bb ca):\n" +
+		"  https://api.lab.localhost:44312    → api\n" +
+		"  https://api-2.lab.localhost:44312  → api-2 (one instance of api)\n"
+	if out.String() != want {
+		t.Errorf("printed\n%q\nwant\n%q", out.String(), want)
+	}
+}

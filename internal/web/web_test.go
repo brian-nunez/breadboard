@@ -28,6 +28,9 @@ func (nullRuntime) ImageUser(context.Context, runtime.Project, string) (runtime.
 	return runtime.ImageUser{}, nil
 }
 func (nullRuntime) Owners(context.Context, string) ([]string, error) { return nil, nil }
+func (nullRuntime) PublishedPorts(context.Context) ([]runtime.PublishedPort, error) {
+	return nil, nil
+}
 func (nullRuntime) Exec(context.Context, string, string, []string) ([]byte, error) {
 	return nil, errors.New("not running")
 }

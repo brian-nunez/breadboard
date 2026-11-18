@@ -171,6 +171,7 @@ func (c *cli) up(args []string) error {
 	}
 	fmt.Fprintf(c.out, "\n%s is up.\n\n", res.Experiment)
 	c.printServices(res.Services, res.Warnings)
+	c.printHostURLs(res.HostURLs)
 	return nil
 }
 
@@ -210,6 +211,7 @@ func (c *cli) status(args []string) error {
 	}
 	fmt.Fprintf(c.out, "%s (domain %s)\n\n", res.Experiment, res.Domain)
 	c.printServices(res.Services, res.Warnings)
+	c.printHostURLs(res.HostURLs)
 	return nil
 }
 
@@ -223,6 +225,24 @@ func (c *cli) printServices(services []core.ServiceStatus, warnings []string) {
 	for _, w := range warnings {
 		fmt.Fprintf(c.out, "warning: %s\n", w)
 	}
+}
+
+// printHostURLs lists the URLs that reach lab targets from the host, each
+// with its target (or the one instance it reaches).
+func (c *cli) printHostURLs(urls []core.HostURL) {
+	if len(urls) == 0 {
+		return
+	}
+	fmt.Fprintln(c.out, "\nHost access (trust the host CA: bb ca):")
+	tw := c.table()
+	for _, u := range urls {
+		to := u.Target
+		if u.Instance != "" {
+			to = u.Instance + " (one instance of " + u.Target + ")"
+		}
+		fmt.Fprintf(tw, "  %s\t→ %s\n", u.URL, to)
+	}
+	tw.Flush()
 }
 
 // serviceRows lays out the status table: an app with replicas gets a line

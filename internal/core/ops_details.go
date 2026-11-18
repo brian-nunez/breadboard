@@ -60,6 +60,10 @@ type ServiceDetails struct {
 	Parent   string
 	Registry string
 	Sidecar  *SidecarInfo
+	// HostURLs reach the service from the host, as in ServiceStatus.
+	HostURLs []string
+	// HostRouter marks the lab's host router (bb-host).
+	HostRouter bool
 }
 
 // UpstreamInfo is one backend of a proxy and how traffic reaches it.
@@ -187,7 +191,10 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 		}
 	}
 
-	d := &ServiceDetails{Name: svc.Name, Kind: string(svc.Kind), FQDN: svc.FQDN, Address: listenerAddress(svc)}
+	d := &ServiceDetails{Name: svc.Name, Kind: string(svc.Kind), FQDN: svc.FQDN, Address: listenerAddress(svc), HostRouter: svc.HostRouter}
+	if _, ok := m.HostRouter(); ok {
+		d.HostURLs = serviceHostURLs(m, svc, recordedHostPort(p))
+	}
 	for _, other := range m.Services {
 		if other.Kind == model.App && other.Instance > 1 {
 			continue // an app is listed once, by its first instance's group

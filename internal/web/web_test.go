@@ -226,7 +226,11 @@ func TestLandingSuggestionsComeFromTheRegistry(t *testing.T) {
 		if !ok {
 			t.Fatalf("starter %s is not in the registry", id)
 		}
-		for _, want := range []string{cardTitle(st.Title), templEscape(st.Summary), techNames(st.Requires, d.Catalog)} {
+		want := []string{cardTitle(st.Title), templEscape(st.Summary)}
+		for _, typ := range st.Requires {
+			want = append(want, techName(typ, d.Catalog))
+		}
+		for _, want := range want {
 			if !strings.Contains(body, want) {
 				t.Errorf("card %s lacks %q", id, want)
 			}

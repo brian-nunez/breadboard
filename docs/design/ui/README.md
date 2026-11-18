@@ -35,7 +35,7 @@ Accepted by Brian on 2026-11-14 (D-031). This is the reference design for the Ph
 
 - **Type:** Inter for UI and prose; Menlo for commands, addresses, env vars and code.
 - **Colour:** slate neutrals. Indigo only for links and selection. Status colours (green healthy, amber near limit, red unhealthy, blue starting, grey stopped) always appear with a word.
-- **Shapes:** square badge for catalog infrastructure, round badge for the user's apps.
+- **Shapes:** square badge carrying the tech's logo for catalog infrastructure, round lettered badge for the user's apps.
 - **Commands:** dark terminal block with a Copy control. Docs code: light block with a filename tab.
 
 ## Known limits

@@ -15,7 +15,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 # Release platforms, GOOS/GOARCH. Breadboard supports macOS and Linux hosts.
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
-.PHONY: all build install check fmt fmt-check vet lint test test-integration test-scripts web-check tidy-check release clean
+.PHONY: all build install check fmt fmt-check vet lint test test-integration test-scripts web-check tidy-check release site clean
 
 all: check build
 
@@ -69,6 +69,11 @@ release:
 	done
 	cd dist && shasum -a 256 $(BINARY)-* > SHA256SUMS
 	@cat dist/SHA256SUMS
+
+# The docs, starters and landing page as a static site in dist/site.
+site:
+	rm -rf dist/site
+	go run ./internal/web/site dist/site
 
 clean:
 	rm -rf bin dist

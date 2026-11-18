@@ -1221,7 +1221,7 @@ func guidePage(d docsData, t tech, g guide) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if g.Live != "" {
+				if g.Live != "" && !isStatic(ctx) {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "<div data-load=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err

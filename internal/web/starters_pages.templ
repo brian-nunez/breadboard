@@ -20,7 +20,14 @@ templ landingPage(d docsData) {
 			<nav class="ml-auto flex items-center gap-6 text-sm">
 				<a href="/docs" class="hidden text-slate-500 hover:text-slate-900 sm:inline">Docs</a>
 				<a href="/starters" class="hidden text-slate-500 hover:text-slate-900 sm:inline">Starters</a>
-				<a href="/dashboard" class="rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 font-medium text-slate-900 hover:border-slate-400">Skip to dashboard →</a>
+				if isStatic(ctx) {
+					<div class="hidden items-center gap-3 rounded-lg border border-slate-300 bg-white py-1 pl-3 pr-1 md:flex">
+						<div class="font-mono text-xs text-slate-700" data-copy-source><div>go install github.com/brian-nunez/breadboard/bb@latest</div></div>
+						<div><button type="button" data-copy class="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-700">Copy</button></div>
+					</div>
+				} else {
+					<a href="/dashboard" class="rounded-lg border border-slate-300 bg-white px-3.5 py-1.5 font-medium text-slate-900 hover:border-slate-400">Skip to dashboard →</a>
+				}
 			</nav>
 		</header>
 		<main class="mx-auto max-w-[912px] px-4 py-12 md:px-6">

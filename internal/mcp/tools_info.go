@@ -84,10 +84,12 @@ type register struct {
 }
 
 type starterService struct {
-	Name      string            `json:"name"`
-	Type      string            `json:"type" jsonschema:"a proxy type from the catalog"`
-	Upstreams []starterUpstream `json:"upstreams" jsonschema:"the proxy's backends"`
-	File      string            `json:"file,omitempty" jsonschema:"its native config, one of files (relative to dir); set as the service's file, replacing the generated config"`
+	Name       string            `json:"name"`
+	Type       string            `json:"type" jsonschema:"a proxy type from the catalog"`
+	Upstreams  []starterUpstream `json:"upstreams" jsonschema:"the proxy's backends"`
+	File       string            `json:"file,omitempty" jsonschema:"its native config, one of files (relative to dir); set as the service's file, replacing the generated config"`
+	StaticFile string            `json:"static_file,omitempty" jsonschema:"its static configuration, one of files (relative to dir); set as the service's static_file, merged into the generated static config"`
+	Config     map[string]string `json:"config,omitempty" jsonschema:"the service's config as written to experiment.yaml"`
 }
 
 type starterUpstream struct {
@@ -231,7 +233,7 @@ func (s *Server) addInfoTools() {
 				return out
 			}),
 			Services: mapSlice(res.Services, func(svc core.StarterService) starterService {
-				out := starterService{Name: svc.Name, Type: svc.Type, File: svc.File, Upstreams: []starterUpstream{}}
+				out := starterService{Name: svc.Name, Type: svc.Type, File: svc.File, StaticFile: svc.StaticFile, Config: svc.Config, Upstreams: []starterUpstream{}}
 				for _, u := range svc.Upstreams {
 					out.Upstreams = append(out.Upstreams, starterUpstream{Service: u.Service, Port: u.Port, Name: u.Name, Mode: u.Mode(), Reason: u.TLS.Reason})
 				}

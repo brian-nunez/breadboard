@@ -288,3 +288,63 @@ apps:
 		t.Fatal(err)
 	}
 }
+
+// static_file follows file's path rules and is accepted only by proxy
+// types whose ProxyInfo.StaticFile is set.
+func TestProxyStaticFileValidation(t *testing.T) {
+	lookup := func(id string) (TypeInfo, bool) {
+		if id == "traefik" {
+			return TypeInfo{HTTPS: true, Proxy: &ProxyInfo{Modes: []string{TLSOn}, HTTP: true, StaticFile: true}}, true
+		}
+		return proxyLookup(id)
+	}
+	doc, err := Parse([]byte(`version: 1
+name: lab
+services:
+  ok:
+    type: traefik
+    static_file: ./ok/static.yml
+  abs:
+    type: traefik
+    static_file: /etc/traefik.yml
+  inbb:
+    type: traefik
+    static_file: .bb/static.yml
+  comma:
+    type: traefik
+    static_file: "./a,b.yml"
+  edge:
+    type: haproxy
+    static_file: ./edge/static.yml
+  redis:
+    type: redis
+    static_file: ./redis.yml
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := doc.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.Service("ok"); ok.StaticFile != "./ok/static.yml" {
+		t.Errorf("static_file = %q", ok.StaticFile)
+	}
+	got := paths(t, Validate(s, lookup))
+	want := []string{
+		"services.abs.static_file",   // absolute
+		"services.comma.static_file", // a comma
+		"services.edge.static_file",  // haproxy has no static configuration to extend
+		"services.inbb.static_file",  // into .bb
+		"services.redis.static_file", // not a proxy
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("violations:\n got %v\nwant %v", got, want)
+	}
+	msg := Validate(s, lookup).Error()
+	for _, m := range []string{"services.edge.static_file: type haproxy has no static configuration a static_file can extend", "services.redis.static_file: type redis is not a proxy"} {
+		if !strings.Contains(msg, m) {
+			t.Errorf("error lacks %q:\n%s", m, msg)
+		}
+	}
+}

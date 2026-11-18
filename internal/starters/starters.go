@@ -78,6 +78,13 @@ type Service struct {
 	// code and sets the service's file to it, relative to experiment.yaml.
 	// Empty keeps the generated config.
 	File string
+	// StaticFile is like File for the service's static_file: a rendered
+	// template file merged into the proxy's generated static
+	// configuration (Traefik only).
+	StaticFile string
+	// Config is the service's config, written as given and validated
+	// against the catalog entry's options like any config.
+	Config map[string]string
 }
 
 var all = []Starter{
@@ -897,8 +904,10 @@ func RenderFS(fsys fs.FS, s Starter, lab Lab) ([]File, error) {
 		return nil, err
 	}
 	for _, svc := range s.Services {
-		if svc.File != "" && !slices.ContainsFunc(files, func(f File) bool { return f.Path == svc.File }) {
-			return nil, fmt.Errorf("starter %s: service %s: file %s is not in the template (add %s.tmpl)", s.ID, svc.Name, svc.File, svc.File)
+		for _, f := range []struct{ key, path string }{{"file", svc.File}, {"static_file", svc.StaticFile}} {
+			if f.path != "" && !slices.ContainsFunc(files, func(tf File) bool { return tf.Path == f.path }) {
+				return nil, fmt.Errorf("starter %s: service %s: %s %s is not in the template (add %s.tmpl)", s.ID, svc.Name, f.key, f.path, f.path)
+			}
 		}
 	}
 	return files, nil

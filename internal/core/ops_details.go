@@ -38,6 +38,11 @@ type ServiceDetails struct {
 	// Upstreams are a proxy's backends, in spec order, with the route
 	// that reaches each.
 	Upstreams []UpstreamInfo
+	// File and StaticFile are a proxy's user-owned configs from
+	// experiment.yaml, relative to it: file replaces the generated native
+	// config, static_file is merged into the generated static one.
+	File       string
+	StaticFile string
 	// Env is, for infra, the variables every app that uses it receives (one
 	// group); for an app, its whole environment. Secret values are empty with
 	// Secret set: bb creds shows them.
@@ -230,6 +235,7 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 		}
 		d.Env = []EnvGroup{g}
 		d.Upstreams = upstreamInfos(m, svc)
+		d.File, d.StaticFile = svc.File, svc.StaticFile
 	case model.App:
 		d.Path, d.Command = svc.App.Path, svc.App.Command
 		d.App, d.Instance = svc.Group(), svc.Instance

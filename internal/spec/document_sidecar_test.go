@@ -51,7 +51,7 @@ func TestAddAppSidecarsRoundTrip(t *testing.T) {
 	}
 }
 
-// AddProxy writes upstreams and file so that decoding gives them back: the
+// AddProxy writes config, upstreams, file and static_file so that decoding gives them back: the
 // short form when an upstream sets only its target, a mapping otherwise.
 func TestAddProxyRoundTrip(t *testing.T) {
 	d := New("lab")
@@ -61,7 +61,7 @@ func TestAddProxyRoundTrip(t *testing.T) {
 		}
 	}
 	short := Service{Name: "front", Type: "nginx", Upstreams: []Upstream{{Service: "web"}}}
-	full := Service{Name: "edge", Type: "haproxy", File: "./edge/haproxy.cfg", Upstreams: []Upstream{
+	full := Service{Name: "edge", Type: "traefik", File: "./edge/dynamic.yml", StaticFile: "./edge/static.yml", Config: map[string]string{"b": "2", "a": "true"}, Upstreams: []Upstream{
 		{Service: "web"},
 		{Service: "api", Port: 9090, Name: "v1", TLS: TLS{Mode: TLSOff, Reason: "practice TLS termination"}},
 		{Service: "payments", TLS: TLS{Mode: TLSPassthrough}},
@@ -86,11 +86,11 @@ func TestAddProxyRoundTrip(t *testing.T) {
 	}
 	for i, want := range []Service{short, full} {
 		got := s.Services[i]
-		if got.Name != want.Name || got.Type != want.Type || got.File != want.File || !reflect.DeepEqual(got.Upstreams, want.Upstreams) {
+		if got.Name != want.Name || got.Type != want.Type || got.File != want.File || got.StaticFile != want.StaticFile || !reflect.DeepEqual(got.Config, want.Config) || !reflect.DeepEqual(got.Upstreams, want.Upstreams) {
 			t.Errorf("round trip:\n got %+v\nwant %+v\n%s", got, want, out)
 		}
 	}
-	for _, line := range []string{"upstreams: [web]", "tls: {mode: passthrough}", "file: ./edge/haproxy.cfg"} {
+	for _, line := range []string{"upstreams: [web]", "tls: {mode: passthrough}", "file: ./edge/dynamic.yml", "static_file: ./edge/static.yml", "config:\n      a: \"true\"\n      b: \"2\"\n"} {
 		if !strings.Contains(string(out), line) {
 			t.Errorf("experiment.yaml lacks %q:\n%s", line, out)
 		}

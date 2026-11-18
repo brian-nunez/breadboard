@@ -70,6 +70,9 @@ type Service struct {
 	Upstreams []catalog.Upstream
 	// File is a proxy's user-owned config, relative to experiment.yaml.
 	File string
+	// StaticFile is a proxy's user-owned static configuration, relative
+	// to experiment.yaml, merged into its generated one.
+	StaticFile string
 	// HostRouter marks the engine-owned host router (spec.HostRouterName),
 	// an infra service of type traefik; HostTargets are what it serves,
 	// in route order (ADR-0017).
@@ -248,16 +251,17 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 		}
 		fqdn := svc.Name + "." + domain
 		m.Services = append(m.Services, &Service{
-			Name:      svc.Name,
-			Kind:      Infra,
-			FQDN:      fqdn,
-			Aliases:   []string{fqdn},
-			Identity:  pki.Identity(domain, s.Name, svc.Name),
-			Resources: resources(svc.Resources, entry.Resources),
-			Image:     entry.Image,
-			Entry:     entry,
-			Config:    entry.ResolveConfig(svc.Config),
-			File:      svc.File,
+			Name:       svc.Name,
+			Kind:       Infra,
+			FQDN:       fqdn,
+			Aliases:    []string{fqdn},
+			Identity:   pki.Identity(domain, s.Name, svc.Name),
+			Resources:  resources(svc.Resources, entry.Resources),
+			Image:      entry.Image,
+			Entry:      entry,
+			Config:     entry.ResolveConfig(svc.Config),
+			File:       svc.File,
+			StaticFile: svc.StaticFile,
 		})
 	}
 	// Apps behind a terminating proxy run as pods whose netinit confines

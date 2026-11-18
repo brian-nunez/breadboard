@@ -42,6 +42,12 @@ type Proxy struct {
 	// ConfigFile is the name (under ConfigDir) of the generated native
 	// config that a spec's file replaces. Server must emit a File with it.
 	ConfigFile string
+	// StaticFile is the name (under ConfigDir) of the generated static
+	// configuration that a spec's static_file extends; empty when the
+	// type takes no static_file. MergeStatic renders it with
+	// Server.UserStatic merged in, or refuses the user's file.
+	StaticFile  string
+	MergeStatic func(Server) ([]byte, error)
 	// Unit names the part of the generated config that balances one
 	// upstream (an HAProxy backend, an Envoy cluster, a Traefik service),
 	// so explorers can tell which upstream a live counter belongs to; nil
@@ -130,21 +136,42 @@ func Passthroughs(ups []Upstream) []Upstream {
 }
 
 // Render renders the service's container: Server, with a proxy's file
-// swapped in for its generated config.
+// swapped in for its generated config and its static_file merged into
+// its generated static configuration.
 func (e *Entry) Render(s Server) (Container, error) {
 	c := e.Server(s)
-	if s.UserConfig == nil {
+	if s.UserConfig == nil && s.UserStatic == nil {
 		return c, nil
 	}
-	if e.Proxy == nil || e.Proxy.ConfigFile == "" {
-		return Container{}, fmt.Errorf("%s: type %s takes no file", s.Name, e.ID)
-	}
-	i := slices.IndexFunc(c.Files, func(f File) bool { return f.Name == e.Proxy.ConfigFile })
-	if i < 0 {
-		return Container{}, fmt.Errorf("%s: type %s rendered no %s to replace", s.Name, e.ID, e.Proxy.ConfigFile)
-	}
 	c.Files = slices.Clone(c.Files)
-	c.Files[i].Data = s.UserConfig
+	swap := func(name, what string, data []byte) error {
+		i := slices.IndexFunc(c.Files, func(f File) bool { return f.Name == name })
+		if i < 0 {
+			return fmt.Errorf("%s: type %s rendered no %s for its %s", s.Name, e.ID, name, what)
+		}
+		c.Files[i].Data = data
+		return nil
+	}
+	if s.UserConfig != nil {
+		if e.Proxy == nil || e.Proxy.ConfigFile == "" {
+			return Container{}, fmt.Errorf("%s: type %s takes no file", s.Name, e.ID)
+		}
+		if err := swap(e.Proxy.ConfigFile, "file", s.UserConfig); err != nil {
+			return Container{}, err
+		}
+	}
+	if s.UserStatic != nil {
+		if e.Proxy == nil || e.Proxy.StaticFile == "" || e.Proxy.MergeStatic == nil {
+			return Container{}, fmt.Errorf("%s: type %s takes no static_file", s.Name, e.ID)
+		}
+		data, err := e.Proxy.MergeStatic(s)
+		if err != nil {
+			return Container{}, fmt.Errorf("%s: static_file %s: %w", s.Name, s.UserStatic.Path, err)
+		}
+		if err := swap(e.Proxy.StaticFile, "static_file", data); err != nil {
+			return Container{}, err
+		}
+	}
 	return c, nil
 }
 

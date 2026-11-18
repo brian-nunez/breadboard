@@ -191,3 +191,44 @@ apps:
 	})
 	return eng, name
 }
+
+// TestIntegrationTraefikStaticFile runs Traefik with a static_file that
+// enables Prometheus metrics on the loopback traefik entry point (D-207).
+// The merged traefik.yml loads with no warning, the health check passes,
+// and /metrics, read inside the container, carries Traefik's metrics,
+// including the request a client just made through the proxy.
+func TestIntegrationTraefikStaticFile(t *testing.T) {
+	_, _, name := sidecarLab(t, "proxy-traefik-static", `services:
+  edge:
+    type: traefik
+    upstreams:
+      - service: web
+        port: 8443
+    static_file: ./edge/static.yml
+apps:
+  web:
+    path: ./probe
+    command: [probe, servetls, ":8443"]
+  client:
+    path: ./probe
+    command: [probe, serve]
+    uses: [edge]
+`, map[string]map[string]string{"edge": {"static.yml": `# Prometheus metrics on the loopback API entry point.
+metrics:
+  prometheus:
+    entryPoint: traefik
+    addEntryPointsLabels: true
+    addServicesLabels: true
+`}})
+	eventually(t, time.Minute, "a request through the proxy", func() bool {
+		out, err := execIn(t, name, "client", `probe get "$EDGE_URL/"`)
+		return err == nil && strings.Contains(out+" ", "instance=web ")
+	})
+	out, err := execIn(t, name, "edge", `wget -qO- http://127.0.0.1:8080/metrics`)
+	if err != nil || !strings.Contains(out, "traefik_") || !strings.Contains(out, `traefik_entrypoint_requests_total{code="200",entrypoint="websecure"`) {
+		t.Errorf("Traefik's /metrics: %v\n%s", err, out)
+	}
+	if logs := docker(t, "logs", containerOf(t, name, "edge")); strings.Contains(logs, " WRN ") || strings.Contains(logs, " ERR ") || strings.Contains(logs, "Error while building configuration") {
+		t.Errorf("Traefik logged a warning or error:\n%s", logs)
+	}
+}

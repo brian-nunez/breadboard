@@ -69,14 +69,16 @@ A starter can add proxy services (Phase 5 wave C) through `starters.Starter.Serv
 - `Type`: a proxy type (`haproxy`, `envoy`, `traefik`, `nginx`, `pgbouncer`).
 - `Upstreams`: `spec.Upstream` values. `Service` names an app of the starter, or a catalog type in `Requires`, which resolves to the experiment's service of that type like `uses`. `Port`, `Name` and `TLS` (`Mode`, `Reason`) are written as given, and validated like any upstream ([`spec.md`](spec.md#proxies-and-upstreams)).
 - `File`: optional. The path of a rendered template (without `.tmpl`) relative to the starter's directory. It is written with the code, and the service's `file` is set to it relative to `experiment.yaml` (`./<dir>/<File>`), so the proxy runs the learner's native config instead of a generated one. Rendering fails when the template has no such file.
+- `StaticFile`: optional, like `File`, for the service's `static_file` (Traefik only): a rendered template merged into the generated `traefik.yml`, such as `metrics` or `tracing` sections (D-206, D-207). Rendering fails when the template has no such file.
+- `Config`: optional. The service's `config`, written as given (keys sorted) and validated against the catalog entry's options like any `config`, before any file is written (D-206).
 
 An app of the starter reaches a proxy by listing the proxy's name in `starters.App.Uses` (`uses: [<proxy>]`); other entries of `Uses` stay catalog types.
 
-`bb starter` writes the proxies through the YAML node tree (comments survive), validates the whole `experiment.yaml` before writing any file, and re-applies idempotently: an existing service of that name is the starter's own when it has the same type and either the same `file` or an upstream to one of the starter's apps in the same directory; anything else is `ErrExists`.
+`bb starter` writes the proxies through the YAML node tree (comments survive), validates the whole `experiment.yaml` before writing any file, and re-applies idempotently: an existing service of that name is the starter's own when it has the same type and either the same `file` or `static_file`, an upstream to one of the starter's apps in the same directory, or a client among those apps that uses it (D-137); anything else is `ErrExists`. An existing service is left as the learner has it, `config` included.
 
 Templates render with `{{.Experiment}}` (the experiment name) and `{{.Domain}}` (the install's service domain, default `bb.internal`), so native configs can name their backends: `<app>.{{.Domain}}` resolves to every replica, `<app>-<n>.{{.Domain}}` to one. For each catalog type in `Requires`, `{{.Service "<type>"}}` is the experiment's service of that type (an existing one, or the one `bb starter` adds) and `{{.Config "<type>" "<key>"}}` one of its config options with catalog defaults applied, so a config can follow a Postgres that is not named `postgres` (D-161). A proxy config must keep what the catalog entry says its file must keep (the loopback health endpoint, Envoy's admin API, PgBouncer's auth files; see `catalog.md`), and contains no secrets.
 
-`bb serve`'s starter page, `starter_details` (MCP) and `StarterDetails` (core) list each proxy, its upstreams and its config file.
+`bb serve`'s starter page, `starter_details` (MCP) and `StarterDetails` (core) list each proxy, its upstreams, its `config` and its config files (`file` and `static_file`).
 
 ### Load-balancing strategy starters
 

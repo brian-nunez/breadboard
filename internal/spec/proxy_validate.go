@@ -8,7 +8,7 @@ import (
 	"github.com/brian-nunez/bkit/gate"
 )
 
-// validateProxy checks a service's upstreams and file. Only proxy types
+// validateProxy checks a service's upstreams, file and static_file. Only proxy types
 // (TypeInfo.Proxy set) take them; what their upstreams may be is data on
 // the catalog entry.
 func validateProxy(s *Spec, types TypeLookup, svc Service, info TypeInfo, p string, add func(error)) {
@@ -20,14 +20,23 @@ func validateProxy(s *Spec, types TypeLookup, svc Service, info TypeInfo, p stri
 		if svc.File != "" {
 			add(Violation{Path: join(p, "file"), Message: fmt.Sprintf("type %s is not a proxy; only proxy types take a file", svc.Type)})
 		}
+		if svc.StaticFile != "" {
+			add(Violation{Path: join(p, "static_file"), Message: fmt.Sprintf("type %s is not a proxy; only proxy types with a static configuration take a static_file", svc.Type)})
+		}
 		return
 	}
-	if svc.File != "" {
-		fp := join(p, "file")
+	for _, f := range []struct{ key, path string }{{"file", svc.File}, {"static_file", svc.StaticFile}} {
+		if f.path == "" {
+			continue
+		}
+		fp := join(p, f.key)
 		add(gate.Join(
 			check(isRelativePath, fp, "must be a path relative to experiment.yaml"),
 			check(isUsablePath, fp, "must not contain a colon, comma, or newline, and must not point into .bb"),
-		)(svc.File))
+		)(f.path))
+	}
+	if svc.StaticFile != "" && !px.StaticFile {
+		add(Violation{Path: join(p, "static_file"), Message: fmt.Sprintf("type %s has no static configuration a static_file can extend", svc.Type)})
 	}
 	if len(svc.Upstreams) < px.MinUpstreams {
 		add(Violation{Path: join(p, "upstreams"), Message: fmt.Sprintf("type %s needs %s; list it under upstreams", svc.Type, upstreamCount(px))})

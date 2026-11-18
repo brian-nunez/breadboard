@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -418,6 +419,36 @@ func TestTraefikConfigLoads(t *testing.T) {
 			}
 		}
 	})
+	// Aliases across replaced and added sections load in the pinned image
+	// (review F2: unexpanded, Traefik exits on an unknown anchor).
+	t.Run("static file aliases", func(t *testing.T) {
+		t.Parallel()
+		s := haproxyServer()
+		s.UserStatic = &UserFile{Path: "./edge/static.yml", Data: []byte(traefikStaticAliases)}
+		run, _ := runTraefik(t, s, "default-web@file")
+		if out, err := run("wget", "-qO-", fmt.Sprintf("http://127.0.0.1:%d/metrics", TraefikAPIPort)); err != nil || !strings.Contains(out, "traefik_config_reloads_total") {
+			t.Errorf("/metrics: %v\n%s", err, out)
+		}
+	})
+	// A static_file is merged into traefik.yml (D-207): Prometheus metrics
+	// on the loopback API entry point, a global servers transport and a
+	// JSON access log load with no warning, and /metrics answers.
+	t.Run("static file", func(t *testing.T) {
+		t.Parallel()
+		s := haproxyServer()
+		s.UserStatic = &UserFile{Path: "./edge/static.yml", Data: []byte(traefikStaticSample)}
+		run, _ := runTraefik(t, s, "default-web@file")
+		// No backend is reachable (--network none): the request fails, and
+		// is counted per router all the same.
+		_, _ = run("wget", "-qO-", "--no-check-certificate", "https://127.0.0.1:8443/elsewhere")
+		out, err := run("wget", "-qO-", fmt.Sprintf("http://127.0.0.1:%d/metrics", TraefikAPIPort))
+		if err != nil || !strings.Contains(out, "traefik_config_reloads_total") || !strings.Contains(out, `router="default-web@file"`) {
+			t.Errorf("/metrics: %v\n%s", err, out)
+		}
+		if out, err := run("traefik", "healthcheck", "--configFile=/etc/bb/config/traefik.yml", "--ping"); err != nil {
+			t.Errorf("health check with a static_file: %v\n%s", err, out)
+		}
+	})
 	t.Run("no upstream", func(t *testing.T) {
 		t.Parallel()
 		none := haproxyServer()
@@ -450,7 +481,10 @@ func traefikLogProblem(logs string) bool {
 func runTraefik(t *testing.T, s Server, router string) (func(...string) (string, error), func(string) string) {
 	t.Helper()
 	e, _ := Lookup("traefik")
-	c := e.Server(s)
+	c, err := e.Render(s)
+	if err != nil {
+		t.Fatal(err)
+	}
 	files := map[string][]byte{}
 	for _, f := range c.Files {
 		rel, ok := strings.CutPrefix(f.MountPath(), "/etc/bb/")
@@ -489,4 +523,111 @@ func runTraefik(t *testing.T, s Server, router string) (func(...string) (string,
 		t.Errorf("Traefik logged configuration problems:\n%s", logs)
 	}
 	return run, api
+}
+
+// traefikStaticSample is a static_file with sections Breadboard leaves to
+// the user: metrics, a global servers transport and the access log.
+const traefikStaticSample = `metrics:
+  prometheus:
+    entryPoint: traefik
+    addEntryPointsLabels: true
+    addRoutersLabels: true
+    addServicesLabels: true
+serversTransport:
+  maxIdleConnsPerHost: 4
+accessLog:
+  format: json
+`
+
+// A static_file merges into the generated document: an empty mapping
+// changes nothing, and new sections come after Breadboard's.
+func TestTraefikMergeStatic(t *testing.T) {
+	s := haproxyServer()
+	gen := traefikStaticConfig(s)
+	s.UserStatic = &UserFile{Path: "./static.yml", Data: []byte("{}\n")}
+	same, err := traefikMergeStatic(s)
+	if err != nil || !bytes.Equal(same, gen) {
+		t.Errorf("an empty static_file changed traefik.yml (%v):\n%s", err, same)
+	}
+	s.UserStatic.Data = []byte(traefikStaticSample)
+	merged, err := traefikMergeStatic(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(merged, gen[:bytes.Index(gen, []byte("accessLog:"))]) {
+		t.Errorf("Breadboard's sections before accessLog changed:\n%s", merged)
+	}
+	for _, want := range []string{"accessLog:\n  format: json\n", "# accessLog from ./static.yml, replacing Breadboard's.", "# Added from ./static.yml (services.edge.static_file), as given.\nmetrics:", "serversTransport:\n  maxIdleConnsPerHost: 4\n"} {
+		if !bytes.Contains(merged, []byte(want)) {
+			t.Errorf("merged traefik.yml lacks %q:\n%s", want, merged)
+		}
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(merged, &doc); err != nil {
+		t.Fatalf("merged traefik.yml is not YAML: %v", err)
+	}
+}
+
+// traefikStaticAliases moves sections around anchors: accessLog takes
+// Breadboard's place after log, so the alias would come before its
+// anchor unless it is expanded (review F2).
+const traefikStaticAliases = `accessLog: &common {format: json}
+log: *common
+metrics: &m
+  prometheus: {entryPoint: traefik}
+`
+
+// Aliases are expanded before sections move, so the merged document
+// decodes with no alias left and both sections hold the value.
+func TestTraefikMergeStaticAliases(t *testing.T) {
+	s := haproxyServer()
+	s.UserStatic = &UserFile{Path: "./static.yml", Data: []byte(traefikStaticAliases)}
+	merged, err := traefikMergeStatic(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(merged, []byte("*common")) || bytes.Contains(merged, []byte("&common")) || bytes.Contains(merged, []byte("&m")) {
+		t.Errorf("merged traefik.yml keeps an anchor or alias:\n%s", merged)
+	}
+	var doc map[string]map[string]any
+	if err := yaml.Unmarshal(merged, &doc); err != nil {
+		t.Fatalf("merged traefik.yml does not decode: %v\n%s", err, merged)
+	}
+	for _, k := range []string{"log", "accessLog"} {
+		if doc[k]["format"] != "json" {
+			t.Errorf("%s = %v, want format json", k, doc[k])
+		}
+	}
+}
+
+// A replaced section keeps the user's comments, the trailing one too.
+func TestTraefikMergeStaticComments(t *testing.T) {
+	s := haproxyServer()
+	s.UserStatic = &UserFile{Path: "./static.yml", Data: []byte("# head note\nlog: # line note\n  level: DEBUG\n# foot note\n")}
+	merged, err := traefikMergeStatic(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# head note", "# line note", "# foot note"} {
+		if !bytes.Contains(merged, []byte(want)) {
+			t.Errorf("merged traefik.yml lost %q:\n%s", want, merged)
+		}
+	}
+}
+
+// Only Traefik takes a static_file; spec learns it through ProxyInfo.
+func TestStaticFileSupport(t *testing.T) {
+	for _, id := range []string{"haproxy", "envoy", "traefik", "nginx", "pgbouncer"} {
+		info, ok := Types(id)
+		if !ok || info.Proxy == nil {
+			t.Fatalf("%s is not a proxy type", id)
+		}
+		if info.Proxy.StaticFile != (id == "traefik") {
+			t.Errorf("%s: ProxyInfo.StaticFile = %v", id, info.Proxy.StaticFile)
+		}
+	}
+	e, _ := Lookup("haproxy")
+	if _, err := e.Render(Server{Name: "edge", UserStatic: &UserFile{Path: "./s.yml", Data: []byte("{}")}}); err == nil || !strings.Contains(err.Error(), "takes no static_file") {
+		t.Errorf("haproxy with a static_file: %v", err)
+	}
 }

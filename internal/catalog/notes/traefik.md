@@ -10,7 +10,7 @@ Traefik 3.7 in front of the upstreams you list under `services.<name>.upstreams`
 
 The configuration is in `.bb/runtime/config/<name>/`, commented for copying:
 
-- `traefik.yml` is the static (install) configuration: entrypoints, the file provider, `ping` and the API. Breadboard owns it.
+- `traefik.yml` is the static (install) configuration: entrypoints, the file provider, `ping` and the API. Breadboard owns it. `static_file:` adds your own sections to it (metrics, tracing, plugins, a global `serversTransport`); `log` and `accessLog` from your file replace Breadboard's, and `entryPoints`, `providers`, `api`, `ping` and `global` are refused.
 - `dynamic.yml` is the routing: routers, middlewares, services and transports. `file:` replaces this one.
 - `tls.yml` is the certificate store and the minimum TLS version. It stays when you own `dynamic.yml`.
 
@@ -31,6 +31,7 @@ The configuration is in `.bb/runtime/config/<name>/`, commented for copying:
 - List what Traefik loaded, with each server's status: `docker exec bb-<experiment>-<name>-1 wget -qO- http://127.0.0.1:8080/api/http/services`.
 - Give an app `replicas: 3` and call `$<NAME>_URL` thirty times: the answering instance rotates.
 - Copy `dynamic.yml`, set `file:`, and change `strategy` to `p2c` or `hrw`; or give one server `weight: 3` and count how often it answers.
+- Turn on Prometheus metrics: write `metrics: {prometheus: {entryPoint: traefik}}` to `traefik-static.yml` next to `experiment.yaml`, set `static_file: ./traefik-static.yml`, run `bb up`, and read `docker exec bb-<experiment>-<name>-1 wget -qO- http://127.0.0.1:8080/metrics | grep traefik_entrypoint_requests_total`.
 - Add a `headers` middleware that sets a response header, attach it to a router, and find the header in your app's responses through the proxy.
 - Connect to `$<NAME>_PASSTHROUGH_ADDR` with `openssl s_client -servername <backend>.bb.internal` and read whose certificate you get.
 

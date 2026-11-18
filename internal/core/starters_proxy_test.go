@@ -319,3 +319,91 @@ func TestApplyStarterProxyFileMissing(t *testing.T) {
 		t.Fatal("experiment.yaml was written")
 	}
 }
+
+// A starter service's config and static_file are written into
+// experiment.yaml and decode back; config is validated against the
+// catalog entry's options before any file is written, and the export
+// carries the merged Traefik static configuration.
+func TestApplyStarterServiceConfigAndStaticFile(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.writeSpec("version: 1\nname: lab\nservices:\n  db:\n    type: postgres\n")
+	st, _ := proxyFixture(t)
+	st.Requires = []string{"postgres"}
+	st.Apps[1].Uses = []string{"fixture-pool"} // so a re-apply knows the pool (D-137)
+	st.Services = []starters.Service{
+		{Name: "fixture-pool", Type: "pgbouncer", Upstreams: []spec.Upstream{{Service: "postgres"}}, Config: map[string]string{"pool_mode": "bogus"}},
+		{Name: "fixture-traefik", Type: "traefik", Upstreams: []spec.Upstream{{Service: "fixture-web", Port: 8443}}, StaticFile: "traefik-static.yml"},
+	}
+	fsys := fstest.MapFS{
+		st.Template + "/traefik-static.yml.tmpl": {Data: []byte("metrics:\n  prometheus:\n    entryPoint: traefik\n")},
+		st.Template + "/Dockerfile.tmpl":         {Data: []byte("FROM scratch AS dev\n")},
+	}
+	render := func(s starters.Starter, lab starters.Lab) ([]starters.File, error) {
+		return starters.RenderFS(fsys, s, lab)
+	}
+	if _, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir}); err == nil || !strings.Contains(err.Error(), "services.fixture-pool.config.pool_mode") {
+		t.Fatalf("a bad config value: err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, "proxy-fixture")); !os.IsNotExist(err) {
+		t.Fatalf("files were written before validation: %v", err)
+	}
+
+	st.Services[0].Config = map[string]string{"pool_mode": "transaction", "pool_size": "5"}
+	if _, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir}); err != nil {
+		t.Fatal(err)
+	}
+	yaml := h.read("experiment.yaml")
+	for _, want := range []string{
+		"  fixture-pool:\n    type: pgbouncer\n    config:\n      pool_mode: transaction\n      pool_size: \"5\"\n    upstreams: [db]\n",
+		"  fixture-traefik:\n    type: traefik\n    upstreams:\n      - service: fixture-web\n        port: 8443\n    static_file: ./proxy-fixture/traefik-static.yml\n",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Errorf("experiment.yaml lacks %q:\n%s", want, yaml)
+		}
+	}
+	doc, err := spec.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := decodeAndValidate(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, _ := serviceNamed(s, "fixture-pool")
+	if pool.Config["pool_mode"] != "transaction" || pool.Config["pool_size"] != "5" || len(pool.Config) != 2 {
+		t.Errorf("pool config = %v", pool.Config)
+	}
+	tr, _ := serviceNamed(s, "fixture-traefik")
+	if tr.StaticFile != "./proxy-fixture/traefik-static.yml" || tr.File != "" {
+		t.Errorf("traefik = %+v", tr)
+	}
+
+	out := filepath.Join(t.TempDir(), "export")
+	if _, err := h.eng.ExportCompose(h.ctx(), ExportComposeRequest{Dir: h.dir, Out: out}); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := os.ReadFile(filepath.Join(out, "config", "fixture-traefik", "traefik.yml"))
+	if err != nil || !strings.Contains(string(merged), "metrics:\n  prometheus:\n    entryPoint: traefik\n") || !strings.Contains(string(merged), "entryPoints:") {
+		t.Errorf("the export's traefik.yml (%v):\n%s", err, merged)
+	}
+	readme, _ := os.ReadFile(filepath.Join(out, "README.md"))
+	if !strings.Contains(string(readme), "- fixture-traefik: `./proxy-fixture/traefik-static.yml` (static_file) is merged into `config/fixture-traefik/traefik.yml`.") {
+		t.Errorf("the export README does not name the static_file:\n%s", readme)
+	}
+	d, err := h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: "fixture-traefik"})
+	if err != nil || d.StaticFile != "./proxy-fixture/traefik-static.yml" || d.File != "" {
+		t.Errorf("service details: %v %+v", err, d)
+	}
+
+	again, err := h.eng.applyStarter(h.ctx(), st, render, ApplyStarterRequest{Dir: h.dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.AddedServices) != 0 || strings.Join(again.ExistingServices, ",") != "fixture-pool,fixture-traefik" {
+		t.Errorf("re-apply = %+v", again)
+	}
+	if h.read("experiment.yaml") != yaml {
+		t.Error("re-applying changed experiment.yaml")
+	}
+}

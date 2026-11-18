@@ -39,7 +39,7 @@ func init() {
 				Body:     traefikAnatomy(),
 			},
 			{
-				Slug: "in-breadboard", Title: "Traefik in Breadboard", Summary: "The image, 8443 and 9443, upstreams and modes, file:, the routes tab.",
+				Slug: "in-breadboard", Title: "Traefik in Breadboard", Summary: "The image, 8443 and 9443, upstreams and modes, file:, static_file:, the routes tab.",
 				Sections: []docSection{{"image", "Image and limits"}, {"upstreams", "Upstreams and routes"}, {"modes", "The three TLS modes"}, {"health", "Health checks"}, {"env", "What your app receives"}, {"see", "Seeing it work"}, {"own", "Owning the config"}},
 				Body:     traefikInBreadboard(),
 			},
@@ -791,8 +791,97 @@ func traefikInBreadboard() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = docH2("static", "Extending the static config").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var14 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "Metrics, tracing, plugins and a global serversTransport are static configuration, which a dynamic file cannot set. Put them in a YAML file next to ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("experiment.yaml").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, " and set ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("static_file:").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " on the service; Breadboard merges its sections into the generated ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("traefik.yml").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, " at every ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("bb up").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, ", and an edit recreates the service. It works with or without ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("file:").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "&#46;")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var14), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docCode("traefik-static.yml", traefikStaticExample).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docList(
+			"entryPoints, providers, api, ping and global are Breadboard's and are refused: the listeners, the file provider, the loopback API and the health check keep working.",
+			"log and accessLog replace Breadboard's. bb logs <name> shows only what goes to stdout.",
+			"Every other section is added as given. Exporters and plugins reach whatever endpoint you name.",
+		).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docTerminal("docker exec bb-lab-edge-1 wget -qO- http://127.0.0.1:8080/metrics | grep traefik_entrypoint").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		return nil
 	})
 }
+
+const traefikStaticExample = `# Prometheus metrics on the loopback traefik entrypoint, beside the API.
+metrics:
+  prometheus:
+    entryPoint: traefik
+    addRoutersLabels: true
+`
 
 var _ = templruntime.GeneratedTemplate

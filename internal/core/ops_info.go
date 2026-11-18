@@ -357,6 +357,19 @@ func exportReadme(name string, m *model.Model, mode secrets.Mode, hostPort int) 
 			fmt.Fprintf(&b, "- %s -> %s\n", u.URL, to)
 		}
 	}
+	var own []string
+	for _, svc := range m.Services {
+		if svc.File != "" {
+			own = append(own, fmt.Sprintf("- %s: `%s` (file) replaces the generated config.\n", svc.Name, svc.File))
+		}
+		if svc.StaticFile != "" {
+			own = append(own, fmt.Sprintf("- %s: `%s` (static_file) is merged into `config/%s/%s`.\n", svc.Name, svc.StaticFile, svc.Name, svc.Entry.Proxy.StaticFile))
+		}
+	}
+	if len(own) > 0 {
+		b.WriteString("\n## Your proxy configs\n\nCopied into `config/` at export from these files next to experiment.yaml. Export again after editing them.\n\n")
+		b.WriteString(strings.Join(own, ""))
+	}
 	if pe := m.PlaintextEdges(); len(pe) > 0 {
 		b.WriteString("\n## Plaintext edges\n\n")
 		for _, e := range pe {

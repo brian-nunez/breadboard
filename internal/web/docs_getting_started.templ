@@ -233,10 +233,10 @@ templ gettingStartedHowItWorks() {
 	@docTerminal("bb up", "bb status")
 	@docH2("down", "Stopping and resetting")
 	@docP() {
-		@docCodeWord("bb down") runs @docCodeWord("docker compose down") on the experiment and also removes networks labeled with the experiment's id, so networks of services you removed since an earlier @docCodeWord("bb up") do not linger. Data volumes stay, so the next @docCodeWord("bb up") finds your topics, tables and keys where you left them.
+		@docCodeWord("bb down") runs @docCodeWord("docker compose down") on the experiment and also removes networks labeled with the experiment's id, so networks of services you removed since an earlier @docCodeWord("bb up") do not linger. It deletes the data volumes too, including volumes of services you removed.
 	}
 	@docP() {
-		@docCodeWord("bb down --volumes") deletes the data volumes too. Secrets are kept even then, because they live in @docCodeWord(".bb/")&#46; To reset an experiment completely, run @docCodeWord("bb down --volumes") and delete @docCodeWord(".bb/"): the next @docCodeWord("bb up") generates fresh secrets and certificates.
+		@docCodeWord("bb down --keep-volumes") keeps the data volumes, so the next @docCodeWord("bb up") finds your topics, tables and keys where you left them. Secrets are kept either way, because they live in @docCodeWord(".bb/")&#46; To reset an experiment completely, run @docCodeWord("bb down") and delete @docCodeWord(".bb/"): the next @docCodeWord("bb up") generates fresh secrets and certificates.
 	}
 	@docP() {
 		Every container, network and volume carries the experiment's id as a label. If another directory holds an experiment with the same name, @docCodeWord("bb up") and @docCodeWord("bb down") refuse to act rather than touch its resources.
@@ -302,7 +302,7 @@ templ gettingStartedExperiments() {
 		"bb remove <name>: remove a service or app. A service an app still uses is refused until you remove it from that app's uses.",
 		"bb starter <id> [--dir path]: write a starter's code and add its apps.",
 		"bb add app <name> [--uses a,b] [--dir path]: write your own minimal Go program and add it as an app that uses every infra service, or the ones you list.",
-		"bb up and bb down [--volumes]: start, or stop and optionally delete data.",
+		"bb up and bb down [--keep-volumes]: start, or stop and delete data unless --keep-volumes is given.",
 		"bb status: each service's state, health, CPU and memory, plus warnings for plaintext edges.",
 		"bb logs [service] [-f] [--tail n]: stream logs.",
 	)

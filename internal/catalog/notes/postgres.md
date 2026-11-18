@@ -4,7 +4,7 @@
 
 PostgreSQL with TLS required on every network connection. Apps connect as the role in `config.user` (default `app`) to the database in `config.database` (default `app`), with `sslmode=verify-full`, so the client checks both the certificate chain and the hostname `postgres.bb.internal`. The superuser password is generated too, but apps never use it.
 
-The role and database are created on the first start, when the data volume is empty. After changing `config.user` or `config.database`, run `bb down --volumes` so the next `bb up` creates them.
+The role and database are created on the first start, when the data volume is empty. After changing `config.user` or `config.database`, run `bb down` so the next `bb up` creates them.
 
 ## Key concepts
 

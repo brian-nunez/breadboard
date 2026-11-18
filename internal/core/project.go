@@ -594,7 +594,7 @@ func (e *Engine) checkOwnership(ctx context.Context, p *project) error {
 	}
 	for _, id := range owners {
 		if id != ps.ExperimentID {
-			return fmt.Errorf("another experiment named %q (in a different directory) has containers, networks, or volumes in Docker; run bb down --volumes in that directory, or rename this one in experiment.yaml: %w", p.spec.Name, ErrExists)
+			return fmt.Errorf("another experiment named %q (in a different directory) has containers, networks, or volumes in Docker; run bb down in that directory (it deletes their data), or rename this one in experiment.yaml: %w", p.spec.Name, ErrExists)
 		}
 	}
 	return nil

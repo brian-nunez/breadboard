@@ -260,7 +260,10 @@ func (c *cli) up(args []string) error {
 
 func (c *cli) down(args []string) error {
 	fs := flag.NewFlagSet("down", flag.ContinueOnError)
-	volumes := fs.Bool("volumes", false, "also delete data volumes")
+	keepVolumes := fs.Bool("keep-volumes", false, "keep data volumes")
+	// --volumes was the opt-in to deletion before deletion became the
+	// default; it stays accepted so existing scripts keep working.
+	volumes := fs.Bool("volumes", false, "")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -268,14 +271,17 @@ func (c *cli) down(args []string) error {
 	if err := exactly(pos, 0, ""); err != nil {
 		return err
 	}
-	res, err := c.eng.Down(c.ctx, core.DownRequest{Dir: c.dir, Volumes: *volumes, Events: c.events()})
+	if *keepVolumes && *volumes {
+		return usagef("--keep-volumes and --volumes cannot be used together")
+	}
+	res, err := c.eng.Down(c.ctx, core.DownRequest{Dir: c.dir, Volumes: !*keepVolumes, Events: c.events()})
 	if err != nil {
 		return err
 	}
 	if res.VolumesRemoved {
 		fmt.Fprintf(c.out, "%s is down; its data volumes are deleted.\n", res.Experiment)
 	} else {
-		fmt.Fprintf(c.out, "%s is down; data volumes are kept (use --volumes to delete them).\n", res.Experiment)
+		fmt.Fprintf(c.out, "%s is down; data volumes are kept (run bb down without --keep-volumes to delete them).\n", res.Experiment)
 	}
 	return nil
 }

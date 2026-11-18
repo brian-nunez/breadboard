@@ -48,7 +48,7 @@ func init() {
 		{"starters", "", "List starters", (*cli).starters},
 		{"starter", "<id> [--dir path]", "Write a starter's code and add its apps", (*cli).starter},
 		{"up", "[--timeout d]", "Start the experiment and wait for health", (*cli).up},
-		{"down", "[--volumes]", "Stop the experiment; --volumes also deletes its data", (*cli).down},
+		{"down", "[--keep-volumes]", "Stop the experiment and delete its data volumes; --keep-volumes keeps them", (*cli).down},
 		{"status", "", "Show each service's state, health, CPU, and memory", (*cli).status},
 		{"logs", "[service] [-f] [--tail n]", "Show or follow logs", (*cli).logs},
 		{"creds", "[service]", "Show generated credentials and connection strings", (*cli).creds},

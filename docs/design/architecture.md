@@ -122,7 +122,7 @@ Created by `bb init` next to `experiment.yaml`, directory mode `0700`.
 
 - **Writes are atomic**: write a temp file in the same directory, `fsync`, rename.
 - **Locking**: `bb up`, `bb down`, and other state-changing operations hold an exclusive advisory lock on `.bb/lock` (`flock`), so a CLI command and the running UI never change one experiment at the same time. A second caller gets a clear "busy" error naming the operation in progress.
-- **Deleting `.bb/`** after `bb down --volumes` resets the experiment: the next `bb up` generates fresh secrets and certificates.
+- **Deleting `.bb/`** after `bb down` resets the experiment: the next `bb up` generates fresh secrets and certificates.
 
 ## Versioning and migrations
 
@@ -206,7 +206,7 @@ Each command is a thin wrapper over one core operation.
 | `bb starters` | List starters. |
 | `bb starter <id> [--dir path]` | Apply a starter: write code, add app services. |
 | `bb up [--timeout d]` | Reconcile state, materialize, `docker compose up -d`, wait for health. |
-| `bb down [--volumes]` | Stop the experiment; `--volumes` also deletes its data. |
+| `bb down [--keep-volumes]` | Stop the experiment and delete its data volumes; `--keep-volumes` keeps them. |
 | `bb status` | Per service: state, health, CPU, memory; plus TLS warnings. |
 | `bb logs [service] [-f] [--tail n]` | Stream logs. |
 | `bb creds [service]` | Show generated credentials and connection strings. |

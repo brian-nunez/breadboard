@@ -703,15 +703,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " do not linger. Data volumes stay, so the next ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("bb up").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, " finds your topics, tables and keys where you left them.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " do not linger. It deletes the data volumes too, including volumes of services you removed.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -733,11 +725,19 @@ func gettingStartedHowItWorks() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = docCodeWord("bb down --volumes").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = docCodeWord("bb down --keep-volumes").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, " deletes the data volumes too. Secrets are kept even then, because they live in ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, " keeps the data volumes, so the next ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("bb up").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, " finds your topics, tables and keys where you left them. Secrets are kept either way, because they live in ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -749,7 +749,7 @@ func gettingStartedHowItWorks() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = docCodeWord("bb down --volumes").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = docCodeWord("bb down").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1228,7 +1228,7 @@ func gettingStartedExperiments() templ.Component {
 			"bb remove <name>: remove a service or app. A service an app still uses is refused until you remove it from that app's uses.",
 			"bb starter <id> [--dir path]: write a starter's code and add its apps.",
 			"bb add app <name> [--uses a,b] [--dir path]: write your own minimal Go program and add it as an app that uses every infra service, or the ones you list.",
-			"bb up and bb down [--volumes]: start, or stop and optionally delete data.",
+			"bb up and bb down [--keep-volumes]: start, or stop and delete data unless --keep-volumes is given.",
 			"bb status: each service's state, health, CPU and memory, plus warnings for plaintext edges.",
 			"bb logs [service] [-f] [--tail n]: stream logs.",
 		).Render(ctx, templ_7745c5c3_Buffer)

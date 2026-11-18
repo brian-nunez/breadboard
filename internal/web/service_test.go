@@ -149,14 +149,14 @@ func TestStarterPages(t *testing.T) {
 		}
 	}
 
-	sink := s.get(t, "/starters/kafka/sink-to-postgres", cookie).Body.String()
+	sink := plainText([]string{s.get(t, "/starters/kafka/sink-to-postgres", cookie).Body.String()})
 	for _, want := range []string{"github.com/jackc/pgx/v5", "uses: [kafka, postgres]", "ON CONFLICT (id) DO NOTHING"} {
 		if !strings.Contains(sink, want) {
 			t.Errorf("sink-to-postgres page lacks %q", want)
 		}
 	}
 
-	if sd := s.get(t, "/starters/consul/service-discovery", cookie).Body.String(); !strings.Contains(sd, "register: {port: 8443}") {
+	if sd := plainText([]string{s.get(t, "/starters/consul/service-discovery", cookie).Body.String()}); !strings.Contains(sd, "register: {port: 8443}") {
 		t.Error("service-discovery page lacks the register line")
 	}
 

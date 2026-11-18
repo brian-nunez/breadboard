@@ -325,8 +325,9 @@ templ docSteps(items ...string) {
 }
 
 // docCode is a code block with its file name and a Copy button. A file name
-// ending in .go is syntax highlighted (highlightGo); in any other block, lines
-// that start with //, # or -- (after indentation) are shown as comments.
+// ending in .go is syntax highlighted (highlightGo), and so is a YAML file
+// (highlightYAML); in any other block, lines that start with //, # or --
+// (after indentation) are shown as comments.
 templ docCode(filename, code string) {
 	<div class="my-5 overflow-hidden rounded-xl border border-slate-200 bg-white">
 		<div class="flex items-center justify-between border-b border-slate-200 px-4 py-2">
@@ -336,6 +337,12 @@ templ docCode(filename, code string) {
 		<pre class="overflow-x-auto px-4 py-3.5 font-mono text-[13px] leading-6 text-slate-800 [tab-size:4]" data-copy-source>
 			if strings.HasSuffix(filename, ".go") {
 				for _, line := range highlightGo(strings.Trim(code, "\n")) {
+					<div class="min-h-6 whitespace-pre">
+						@templ.Raw(line)
+					</div>
+				}
+			} else if isYAML(filename) {
+				for _, line := range highlightYAML(strings.Trim(code, "\n")) {
 					<div class="min-h-6 whitespace-pre">
 						@templ.Raw(line)
 					</div>

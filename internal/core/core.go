@@ -14,6 +14,7 @@ import (
 	"iter"
 	"os"
 	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	"github.com/brian-nunez/breadboard/internal/errs"
@@ -49,6 +50,9 @@ type Runtime interface {
 	RemoveOwned(ctx context.Context, experimentID string, volumes bool) error
 	Containers(ctx context.Context, experiment string) ([]runtime.Container, error)
 	Stats(ctx context.Context, ids []string) (map[string]runtime.Usage, error)
+	// StatsStream yields usage rows for every running container until ctx
+	// ends (StartStatsSampler).
+	StatsStream(ctx context.Context) iter.Seq2[runtime.Sample, error]
 	Logs(ctx context.Context, p runtime.Project, services []string, follow bool, tail int) iter.Seq2[runtime.LogLine, error]
 	Subnets(ctx context.Context) ([]runtime.Network, error)
 	Owners(ctx context.Context, experiment string) ([]string, error)
@@ -94,6 +98,9 @@ type Engine struct {
 	pollInterval  time.Duration
 	startupSettle time.Duration
 	portFree      func(port int) bool
+	// sampler holds the latest usage per container while a stats
+	// sampler runs (StartStatsSampler); nil otherwise.
+	sampler atomic.Pointer[usageCache]
 }
 
 // New returns an Engine.

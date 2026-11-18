@@ -5,7 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/brian-nunez/breadboard/internal/errs"
 )
@@ -155,5 +158,44 @@ func TestOnlyMissingContainers(t *testing.T) {
 		if got := onlyMissingContainers(stderr); got != want {
 			t.Errorf("%q: %v, want %v", stderr, got, want)
 		}
+	}
+}
+
+// Streaming docker stats prefixes rows with terminal control sequences
+// and prints control-only lines between refreshes.
+func TestParseStatsLine(t *testing.T) {
+	id, u, ok := parseStatsLine([]byte("\x1b[J\x1b[H{\"ID\":\"abc\",\"CPUPerc\":\"12.50%\",\"MemUsage\":\"64MiB / 256MiB\"}\x1b[K"))
+	if !ok || id != "abc" || u.CPUPercent != 12.5 || u.MemoryBytes != 64<<20 || u.MemoryLimit != 256<<20 {
+		t.Errorf("row = %q %+v %v", id, u, ok)
+	}
+	for _, line := range []string{"\x1b[H\x1b[K", "", "{not json", `{"CPUPerc":"1%"}`} {
+		if _, _, ok := parseStatsLine([]byte(line)); ok {
+			t.Errorf("%q parsed as a row", line)
+		}
+	}
+}
+
+// A row over the read limit ends the stream with an error, and the docker
+// process (still writing) is killed, so the sampler can retry instead of
+// waiting forever.
+func TestStatsStreamOversizedRow(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "docker")
+	script := "#!/bin/sh\nhead -c " + strconv.Itoa(statsRowMax+10) + " /dev/zero | tr '\\0' x\necho\nexec sleep 60\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	var got error
+	for _, err := range (&Compose{Bin: bin}).StatsStream(ctx) {
+		got = err
+	}
+	if got == nil || !strings.Contains(got.Error(), "read") {
+		t.Errorf("err = %v, want a read error", got)
+	}
+	if ctx.Err() != nil || time.Since(start) > 10*time.Second {
+		t.Errorf("the stream waited %v for a process it should have killed", time.Since(start))
 	}
 }

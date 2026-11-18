@@ -45,6 +45,7 @@ Operations (Phase 1):
 | `Starters`, `ApplyStarter` | List starters; write starter code and update the spec. |
 | `Up`, `Down` | Reconcile, materialize, run, wait for health; stop and optionally delete data. |
 | `Status`, `Logs` | Per-service state, health, resources, TLS warnings; log stream. Each app instance row carries its app, instance number, replica count and sidecars, and is followed by its sidecars' rows (type, ports, env they give the app, transparent mode); the pod's namespace holder is never a row but decides the instance's state while it is down. Edges carry `Via` and `ToApp` for Envoy outbound targets (Phase 5). A proxy's row lists its upstream edges, each with its `Mode` (`on`, `off`, `passthrough`); every terminate hop is a plaintext warning (Phase 5). |
+| `StartStatsSampler` | Keeps the latest CPU and memory of every running container from one streaming `docker stats` until its context ends or the returned `stop` (which waits for the process to end) is called; `Status` reads it instead of taking its own two-second sample. `bb serve` starts it; the CLI and MCP do not (D-211). |
 | `Creds`, `CA` | Generated credentials and connection strings; CA details: the lab CA and, since wave E, the host CA (`CAResult.Host`). |
 | `PostgresTables`, `RedisKeys`, `ConsulCatalog`, `KafkaTopics`, `S3Buckets` | Read-only explorers for the web UI: each runs the service's own CLI tool with `docker exec` and parses its output (ADR-0012) (Phase 3). |
 | `EnvoyClusters`, `PgBouncerPools` | Read-only sidecar explorers (Phase 5): Envoy's admin API (`/clusters`, `/stats`, `/listeners` over bash `/dev/tcp`, host addresses mapped to replicas with `getent` inside the sidecar) and PgBouncer's `SHOW POOLS` / `SHOW STATS` through `psql` inside the sidecar, both with `docker exec` (ADR-0012). They take an app, an instance, or the sidecar's service name. |
@@ -187,6 +188,7 @@ Not part of Phase 1. Both are wrappers over the core API above.
 
 - Safety (D-073): `dir` and `export_compose`'s `out` resolve against the directory `bb mcp` started in (or `-C`), following symlinks, and anything outside it is refused. `--read-only` registers only the tools that change nothing the user owns. Annotations mark reads `readOnlyHint`, `down` and `remove_service` `destructiveHint`, and every tool `openWorldHint: false`.
 - Progress: `up`, `down`, `apply_starter` and `export_compose` send each core event as a progress notification when the request carries a progress token, and return the events in the result (on failure, in the error text). Cancelling a call cancels its context, so the core operation stops and releases the experiment's lock.
+- Status for every page and live view reads the stats sampler (`StartStatsSampler`, started by `bb serve`), so a page waits only for `docker ps` and `docker inspect`, and one `docker stats` process serves every open tab (D-211).
 - Explorers read service data through Docker: each runs the service's own command-line tool with `docker exec`, inside the experiment's network ([ADR-0012](../adr/README.md)). Status comes from `docker inspect` and `docker stats`. The UI never changes the system.
 
 ## CLI surface (Phase 1)
@@ -254,7 +256,7 @@ Breadboard's own internals use Brian's [bkit](https://github.com/brian-nunez/bki
 |---|---|---|---|
 | Configuration | `settings` + `settings/drivers/yaml` | Layered install settings: defaults → `config.yaml` → `BB_*` env. | 1 |
 | Rule checks | `gate` | Spec and policy validation: naming rules, TLS-off-requires-reason, reserved fields, phase-gated features. `gate.Join` reports every violation at once. | 1 |
-| Key/value store | `stash` + `stash/drivers/memory` | UI sessions with TTL; short-lived caches such as container stats. | 3 |
+| Key/value store | `stash` + `stash/drivers/memory` | UI sessions with TTL. (Container stats are the latest value per container, kept by the stats sampler without expiry, D-211.) | 3 |
 
 `experiment.yaml` is parsed directly with `go.yaml.in/yaml/v3` (strict decoding to reject unknown keys, and node-level editing to preserve comments), which `settings` does not offer. `bb mcp` uses the official MCP Go SDK (ADR-0014). Where bkit has no matching capability, the engine uses the standard library; any other direct dependency needs Brian's approval and a row in [`decisions.md`](decisions.md).
 

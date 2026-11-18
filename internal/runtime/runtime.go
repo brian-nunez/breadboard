@@ -422,23 +422,94 @@ func (c *Compose) Stats(ctx context.Context, ids []string) (map[string]Usage, er
 	usage := map[string]Usage{}
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
-		var row struct {
-			ID       string `json:"ID"`
-			CPUPerc  string `json:"CPUPerc"`
-			MemUsage string `json:"MemUsage"`
+		if id, u, ok := parseStatsLine(sc.Bytes()); ok {
+			usage[id] = u
 		}
-		if json.Unmarshal(sc.Bytes(), &row) != nil {
-			continue
-		}
-		u := Usage{}
-		u.CPUPercent, _ = strconv.ParseFloat(strings.TrimSuffix(row.CPUPerc, "%"), 64)
-		if used, limit, ok := strings.Cut(row.MemUsage, "/"); ok {
-			u.MemoryBytes = parseSize(used)
-			u.MemoryLimit = parseSize(limit)
-		}
-		usage[row.ID] = u
 	}
 	return usage, nil
+}
+
+// StatsStream runs one streaming docker stats over every running
+// container, a container started later included, and yields each row as
+// docker refreshes it (about once a second) until ctx is cancelled or the
+// command ends. It costs one process however many readers use the result.
+func (c *Compose) StatsStream(ctx context.Context) iter.Seq2[Sample, error] {
+	return func(yield func(Sample, error) bool) {
+		cmd := exec.CommandContext(ctx, c.bin(), "stats", "--no-trunc", "--format", "{{json .}}")
+		out, err := cmd.StdoutPipe()
+		if err != nil {
+			yield(Sample{}, err)
+			return
+		}
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Start(); err != nil {
+			yield(Sample{}, err)
+			return
+		}
+		stopCmd := func() {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+		sc := bufio.NewScanner(out)
+		// A row is a few hundred bytes; a container name can make it longer.
+		sc.Buffer(make([]byte, 0, 64<<10), statsRowMax)
+		for sc.Scan() {
+			if id, u, ok := parseStatsLine(sc.Bytes()); ok {
+				if !yield(Sample{ID: id, Usage: u}, nil) {
+					stopCmd()
+					return
+				}
+			}
+		}
+		if err := sc.Err(); err != nil {
+			// Reading stopped (a row over the limit, say) while docker
+			// stats may still be writing: end it so the caller can retry.
+			stopCmd()
+			if ctx.Err() == nil {
+				yield(Sample{}, fmt.Errorf("docker stats: read: %w", err))
+			}
+			return
+		}
+		if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+			yield(Sample{}, fmt.Errorf("docker stats: %w: %s", err, strings.TrimSpace(stderr.String())))
+		}
+	}
+}
+
+// statsRowMax is the longest stats row StatsStream reads.
+const statsRowMax = 1 << 20
+
+// Sample is one container's usage from a stats stream.
+type Sample struct {
+	ID    string
+	Usage Usage
+}
+
+// parseStatsLine reads one row of docker stats --format '{{json .}}'.
+// Streaming output puts terminal control sequences before and after the
+// JSON (\x1b[H{...}\x1b[K).
+func parseStatsLine(line []byte) (string, Usage, bool) {
+	i, j := bytes.IndexByte(line, '{'), bytes.LastIndexByte(line, '}')
+	if i < 0 || j < i {
+		return "", Usage{}, false
+	}
+	line = line[:j+1]
+	var row struct {
+		ID       string `json:"ID"`
+		CPUPerc  string `json:"CPUPerc"`
+		MemUsage string `json:"MemUsage"`
+	}
+	if json.Unmarshal(line[i:], &row) != nil || row.ID == "" {
+		return "", Usage{}, false
+	}
+	u := Usage{}
+	u.CPUPercent, _ = strconv.ParseFloat(strings.TrimSuffix(row.CPUPerc, "%"), 64)
+	if used, limit, ok := strings.Cut(row.MemUsage, "/"); ok {
+		u.MemoryBytes = parseSize(used)
+		u.MemoryLimit = parseSize(limit)
+	}
+	return row.ID, u, true
 }
 
 var sizeRe = regexp.MustCompile(`^([0-9.]+)\s*([A-Za-z]*)$`)

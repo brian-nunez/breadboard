@@ -40,6 +40,9 @@ func (nullRuntime) Containers(context.Context, string) ([]runtime.Container, err
 func (nullRuntime) Stats(context.Context, []string) (map[string]runtime.Usage, error) {
 	return map[string]runtime.Usage{}, nil
 }
+func (nullRuntime) StatsStream(context.Context) iter.Seq2[runtime.Sample, error] {
+	return func(func(runtime.Sample, error) bool) {}
+}
 func (nullRuntime) Logs(context.Context, runtime.Project, []string, bool, int) iter.Seq2[runtime.LogLine, error] {
 	return func(func(runtime.LogLine, error) bool) {}
 }

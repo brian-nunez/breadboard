@@ -173,6 +173,8 @@ templ serviceOverview(p servicePage) {
 							</p>
 						} else if p.Details.Kind == "sidecar" && p.Details.Registry != "" {
 							<p>A Consul client agent sharing { p.Details.Parent }'s network address and certificate. It joined the Consul server { p.Details.Registry } and registered { p.Details.Parent } there with a health check; when it stops, it leaves and the registration goes with it.</p>
+						} else if p.Details.HostRouter {
+							<p>The lab's host router. It is the only container published on your machine for host access: { hostRouterListen(p.Dash) }. It answers each <code class="font-mono text-sm">host</code> target at its own <code class="font-mono text-sm">*.localhost</code> name, terminates TLS with a certificate from the host CA, and opens a new TLS connection to the target, verified against the lab CA. Breadboard generates its configuration; it has no Docker socket.</p>
 						} else if p.Details.Kind == "sidecar" {
 							<p>{ p.Details.Summary } It runs in { p.Details.Parent }'s pod: same network namespace (same address, same <code class="font-mono text-sm">localhost</code>), same certificate, and the shared directory <code class="font-mono text-sm">/var/run/bb</code>. The app reaches it on loopback; other containers only see the ports it opens to them.</p>
 						} else {
@@ -180,6 +182,9 @@ templ serviceOverview(p servicePage) {
 						}
 					</div>
 				</div>
+			}
+			if p.Details.HostRouter {
+				@hostRoutesCard(p)
 			}
 			if len(p.Details.Upstreams) > 0 {
 				@upstreamsCard(p)
@@ -193,7 +198,7 @@ templ serviceOverview(p servicePage) {
 			if p.Details.Sidecar != nil {
 				@sidecarCard(p, *p.Details.Sidecar)
 			}
-			if p.Details.Kind == "infra" {
+			if p.Details.Kind == "infra" && !p.Details.HostRouter {
 				<div class="grid gap-6 md:grid-cols-2">
 					@exerciseCard("Try this", "text-indigo-700", p.Notes.section("Try this").bullets())
 					@exerciseCard("Break this", "text-red-700", p.Notes.section("Break this").bullets())
@@ -262,6 +267,52 @@ templ upstreamsCard(p servicePage) {
 			</tbody>
 		</table>
 		<div class="p-5 text-xs text-slate-500">Live state of each backend: the <a href={ templ.SafeURL("/services/" + p.Row.Name + "?tab=explore") } class="text-indigo-600 hover:text-indigo-800">{ explorerTabs[p.Details.Type] }</a> tab.</div>
+	}
+}
+
+// hostRouterListen is where the host router listens on the host.
+func hostRouterListen(d dashboardData) string {
+	if d.HostPort == 0 {
+		return "127.0.0.1, on a port chosen at the next bb up"
+	}
+	return "127.0.0.1:" + itoa(d.HostPort)
+}
+
+// hostRoutesCard lists the host router's routes: each host name and the
+// containers it reaches.
+templ hostRoutesCard(p servicePage) {
+	@card() {
+		<div class="px-6 pt-6 pb-4">
+			<h2 class="text-base font-semibold">Host routes</h2>
+			<p class="mt-1 text-sm text-slate-600">Each URL opens from a browser or curl on your machine. Trust the host CA first: <code class="font-mono text-[13px]">bb ca</code> shows how.</p>
+		</div>
+		if len(p.Dash.HostURLs) == 0 {
+			<p class="border-t border-slate-200 px-6 py-4 text-sm text-slate-600">The URLs appear after the next <code class="font-mono">bb up</code>.</p>
+		} else {
+			<table class="w-full text-left text-sm">
+				<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+					<tr>
+						@th("URL")
+						@th("Reaches")
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-200">
+					for _, u := range p.Dash.HostURLs {
+						<tr>
+							<td class="px-5 py-2.5">
+								<a href={ templ.SafeURL(u.URL) } target="_blank" rel="noopener" class="break-all font-mono text-[13px] text-indigo-600 hover:text-indigo-800">{ u.URL }</a>
+							</td>
+							<td class="px-5 py-2.5">
+								<a href={ templ.SafeURL(serviceLink(p.Dash.Services, hostTarget(u))) } class="hover:text-indigo-700">{ hostRoute(p.Dash.Services, u) }</a>
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+		<div class="p-5 text-xs text-slate-500">
+			Live state of each route: the <a href={ templ.SafeURL("/services/" + p.Row.Name + "?tab=explore") } class="text-indigo-600 hover:text-indigo-800">{ explorerTabs[p.Details.Type] }</a> tab. How it works: <a href="/docs/getting-started/host-access" class="text-indigo-600 hover:text-indigo-800">Host access</a>.
+		</div>
 	}
 }
 
@@ -419,6 +470,18 @@ templ connectionCard(p servicePage) {
 				if len(p.Details.UsedBy) > 0 {
 					@kv("Used by") {
 						{ strings.Join(p.Details.UsedBy, ", ") }
+					}
+				}
+				if p.Details.HostRouter {
+					@kv("On the host") {
+						<span class="font-mono text-[13px]">{ hostRouterListen(p.Dash) }</span>
+					}
+				}
+				if len(p.Details.HostURLs) > 0 {
+					@kv("From the host") {
+						for _, u := range p.Details.HostURLs {
+							<a href={ templ.SafeURL(u) } target="_blank" rel="noopener" class="block break-all font-mono text-[13px] text-indigo-600 hover:text-indigo-800">{ u }</a>
+						}
 					}
 				}
 			</div>

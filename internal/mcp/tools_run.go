@@ -23,6 +23,8 @@ type upOut struct {
 	Services   []serviceStatus `json:"services"`
 	Warnings   []string        `json:"warnings"`
 	Events     []event         `json:"events"`
+	HostURLs   []hostURL       `json:"host_urls,omitempty" jsonschema:"URLs that reach host targets from the host; absent without host access"`
+	HostPort   int             `json:"host_port,omitempty" jsonschema:"the 127.0.0.1 port the host router is published on"`
 }
 
 type downIn struct {
@@ -50,7 +52,8 @@ func (s *Server) addRunTools() {
 		if err != nil {
 			return upOut{}, withEvents(err, p.list())
 		}
-		return upOut{Experiment: res.Experiment, Services: mapSlice(res.Services, statusView), Warnings: orEmpty(res.Warnings), Events: p.list()}, nil
+		return upOut{Experiment: res.Experiment, Services: mapSlice(res.Services, statusView), Warnings: orEmpty(res.Warnings), Events: p.list(),
+			HostURLs: mapSlice(res.HostURLs, hostURLView), HostPort: res.HostPort}, nil
 	})
 
 	add(s, destructiveTool, true, &sdk.Tool{

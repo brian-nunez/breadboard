@@ -55,6 +55,9 @@ templ overviewBody(d dashboardData) {
 				@tlsStat(d)
 				@memoryStat(d)
 			</div>
+			if len(d.HostURLs) > 0 {
+				@hostAccessCard(d)
+			}
 			<div class="mt-6 flex flex-col gap-3 md:hidden">
 				for _, s := range d.Services {
 					if c := s.Status().Color; c == "amber" || c == "red" {
@@ -105,6 +108,28 @@ templ overviewBody(d dashboardData) {
 				</div>
 			}
 	}
+}
+
+// hostAccessCard lists the URLs that reach the lab from the host, through
+// its host router.
+templ hostAccessCard(d dashboardData) {
+	<div class="mt-6">
+		@card() {
+			<div class="flex items-center justify-between gap-4 px-5 pt-5">
+				<h2 class="text-base font-semibold">Host access</h2>
+				<a href={ templ.SafeURL("/services/" + hostRouterName(d)) } class="text-sm text-indigo-600 hover:text-indigo-800">{ hostRouterName(d) } →</a>
+			</div>
+			<p class="px-5 pt-1 text-sm text-slate-600">Open from your machine through the host router on <span class="font-mono text-[13px]">127.0.0.1:{ itoa(d.HostPort) }</span>. Trust the host CA first: <code class="font-mono text-[13px]">bb ca</code> shows how.</p>
+			<div class="flex flex-col gap-1.5 p-5 text-sm">
+				for _, u := range d.HostURLs {
+					<div class="flex flex-wrap items-baseline gap-x-3">
+						<a href={ templ.SafeURL(u.URL) } target="_blank" rel="noopener" class="break-all font-mono text-[13px] text-indigo-600 hover:text-indigo-800">{ u.URL }</a>
+						<span class="text-slate-500">→ { hostRoute(d.Services, u) }</span>
+					</div>
+				}
+			</div>
+		}
+	</div>
 }
 
 templ tlsStat(d dashboardData) {

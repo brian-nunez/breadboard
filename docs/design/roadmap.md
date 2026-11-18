@@ -197,13 +197,13 @@ Reaching services from the host by name through `*.localhost` routing, including
 
 **Completion criteria:**
 
-- [ ] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift after commit.
-- [ ] Unit tests: the host CA rejects a name outside `.localhost` and any URI SAN; the host certificate's SANs, EKU and reissue on a changed name set; `root` and every lab certificate are unchanged by host access; `host` validation reports every rule with its YAML path; port allocation (start, wrap, taken port, kept port).
-- [ ] Golden tests: experiments without `host` render byte-identical to `main`; a golden fixture covers the host router for an app with replicas, an app with one instance and an infra proxy; Traefik loads the generated config with every router and no error.
-- [ ] Integration (real Docker, `TestIntegrationHostAccess`): an app with 3 replicas and an HAProxy proxy in front of it, both with `host`; from the host, with the host CA as the only root and SNI set to each name: the app's name reaches more than one replica, each instance name reaches only that instance, the proxy's name answers through HAProxy, an unknown name gets 404, and the presented certificate does not verify against the lab CA.
-- [ ] Every integration test leaves no labelled containers, networks or volumes; the full suite (`go test -tags integration ./internal/core/ ./internal/mcp/`) passes on the top of the wave E stack in under 10 minutes.
-- [ ] `bb ca` shows both CAs with trust steps; `bb status`, the web UI and MCP show the host URLs; the docs page renders (HTTP 200 through `bb serve`) and is in search.
-- [ ] README and AGENTS stage updated; docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated (D-185 onward).
+- [x] `gofmt -l` is empty; `go vet ./...` passes (with and without the `integration` tag); `go test ./...` passes; `scripts/web.sh check` reports no drift after commit.
+- [x] Unit tests: the host CA rejects a name outside `.localhost` and any URI SAN; the host certificate's SANs, EKU and reissue on a changed name set; `root` and every lab certificate are unchanged by host access; `host` validation reports every rule with its YAML path; port allocation (start, wrap, taken port, kept port).
+- [x] Golden tests: experiments without `host` render byte-identical to `main`; a golden fixture covers the host router for an app with replicas, an app with one instance and an infra proxy; Traefik loads the generated config with every router and no error.
+- [x] Integration (real Docker, `TestIntegrationHostAccess`): an app with 3 replicas and an HAProxy proxy in front of it, both with `host`; from the host, with the host CA as the only root and SNI set to each name: the app's name reaches more than one replica, each instance name reaches only that instance, the proxy's name answers through HAProxy, an unknown name gets 404, and the presented certificate does not verify against the lab CA.
+- [x] Every integration test leaves no labelled containers, networks or volumes; the full suite (`go test -tags integration ./internal/core/ ./internal/mcp/`) passes on the top of the wave E stack in under 10 minutes.
+- [x] `bb ca` shows both CAs with trust steps; `bb status`, the web UI and MCP show the host URLs; the docs page renders (HTTP 200 through `bb serve`) and is in search.
+- [x] README and AGENTS stage updated; docs in `docs/design/` match what was built; [`decisions.md`](decisions.md) updated (D-185 onward).
 
 ## Phase 6: mTLS and multiple CAs
 

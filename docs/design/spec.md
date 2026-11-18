@@ -42,18 +42,20 @@ apps:                        # user code; one compose service each
 | `services.<name>.resources` | no | `memory` (Docker size string), `cpus` (decimal). |
 | `services.<name>.config` | no | Type-specific options defined by the catalog entry (e.g. Postgres database name). Validated by the entry. |
 | `services.<name>.upstreams` | no | Proxy types only (`haproxy`, `nginx`, `pgbouncer`, …): the services and apps the proxy sits in front of, each with its own TLS mode. See [Proxies and upstreams](#proxies-and-upstreams). |
+| `services.<name>.host` | no | `true`: reach the service from the host at `https://<name>.<experiment>.localhost:<port>` through the lab's host router. Only infra with an HTTPS listener (proxies, Consul, S3 Compatible). See [Host access](#host-access). |
 | `services.<name>.file` | no | Proxy types only: a native config file, relative to `experiment.yaml`, that replaces the generated one. See [Proxies and upstreams](#proxies-and-upstreams). |
 | `apps.<name>.path` | yes | Relative to the spec file. Must contain a `Dockerfile` with a `dev` stage (checked by `bb up` and `bb export`). Compile the app in that stage and run the binary as the `command`, as the starters do; then the app is the container's main process and receives SIGTERM. |
 | `apps.<name>.command` | no | Overrides the image command. |
 | `apps.<name>.uses` | no | Infra services this app connects to. Each entry creates an edge, injects that service's env contract, and adds `depends_on: service_healthy`. When two used services share an env variable name (two Postgres services, say), the later one's variables are prefixed with its name: `ANALYTICS_DATABASE_URL`. |
 | `apps.<name>.ports` | no | Container ports to publish on `127.0.0.1`. |
+| `apps.<name>.host` | no | `true` or `{port: <n>}`: reach the app from the host at `https://<app>.<experiment>.localhost:<port>`, and each replica at `https://<app>-<n>.<experiment>.localhost:<port>`. The app must serve TLS: on `port`, else its Envoy `inbound.port`, else its `register.port`. Works with replicas. See [Host access](#host-access). |
 | `apps.<name>.health` | no | Opt into an HTTP health check (`path`, default `/healthz`; `port`, default 8080; the port is injected as `BB_HEALTH_PORT`). Without it, the check is that the container's main process is running, so app code needs no health endpoint. |
 | `apps.<name>.register` | no | Register the app in a service registry (Consul) through a sidecar agent, so app code does not register itself. `port` (required): the port the app serves TLS on. `name`: the registered service name, default the app's name. `check`: a path for an HTTPS health check; without it the check is a TCP connection that completes a TLS handshake. Requires a registry service in `uses`; the sidecar is a service named `<app>-agent`, which takes that name in the namespace. |
 | `apps.<name>.replicas` | no | Number of instances, 1 to 10 (default 1). With more than one, the app runs as `<app>-1` … `<app>-N`, each reachable as `<app>-<n>.<domain>` and all of them as `<app>.<domain>` (a DNS alias on every instance). Such an app cannot publish `ports`. See [Replicas](#replicas). |
 | `apps.<name>.sidecars` | no | Containers that share the app's network namespace and a directory with it; the app becomes a pod. See [Sidecars](#sidecars). |
 | `apps.<name>.resources` | no | As for services. Default `256m` and `0.5` cpus: room for a running Go app. Compiling happens while the image builds, outside this limit. An app that instead runs `go run` at start compiles under the limit and needs much more (`github.com/redis/go-redis/v9` alone takes over 1 GiB). |
 
-Service and app names share one namespace and must be unique DNS labels. Names the engine generates for an app take their place in it too: `<app>-<n>` for replicas, `<app>-pod` and `<app>-<sidecar>` for a pod, `<app>-netinit` in transparent mode, `<app>-agent` for `register` (with replicas, each instance's names: `<app>-<n>-pod`, `<app>-<n>-envoy`, `<app>-<n>-agent`, …).
+Service and app names share one namespace and must be unique DNS labels. The name `bb-host` is reserved for the host router. Names the engine generates for an app take their place in it too: `<app>-<n>` for replicas, `<app>-pod` and `<app>-<sidecar>` for a pod, `<app>-netinit` in transparent mode, `<app>-agent` for `register` (with replicas, each instance's names: `<app>-<n>-pod`, `<app>-<n>-envoy`, `<app>-<n>-agent`, …).
 
 ## `uses` entries and TLS overrides
 
@@ -142,6 +144,26 @@ apps:
 
 renders three services, `api-1`, `api-2` and `api-3`. Each has its own certificate with DNS SANs for its own name and the shared name, its own health check and status row, and receives `BB_SERVICE` and `BB_FQDN` with its own name. The app's `uses` edges and env contract are the same for every instance. `bb logs api` streams every instance; `bb logs api-2` one. With `replicas: 1` (or none) the service stays `api`. Decision: [ADR-0016](../adr/README.md).
 
+## Host access
+
+```yaml
+services:
+  edge:
+    type: haproxy
+    upstreams:
+      - service: api
+        port: 8443        # an upstream app names its TLS port; host.port does not set it
+    host: true
+apps:
+  api:
+    path: ./api
+    replicas: 3
+    host:
+      port: 8443          # the port the app serves TLS on
+```
+
+Browsers and curl resolve every `*.localhost` name to loopback, so a lab with `host` targets is reachable from the host by name: `https://edge.<experiment>.localhost:<port>`, `https://api.<experiment>.localhost:<port>` (every replica) and `https://api-2.<experiment>.localhost:<port>` (one replica). The lab gets one router, the service `bb-host`, published on `127.0.0.1:<port>`; the port is chosen once per lab and printed by `bb up` and `bb status`. The router's certificate comes from the install's host CA, which `bb ca` shows and explains how to trust; behind it every hop is TLS verified against the lab CA ([`security.md`](security.md#host-access-phase-5-wave-e)). Only HTTP over TLS is routed; TCP services keep using `ports` on an app or a client inside the lab. Decision: [ADR-0017](../adr/README.md).
+
 ## Sidecars
 
 A sidecar is a container that shares its app's network namespace (same address, same `localhost`) and the directory `/var/run/bb` (`BB_SHARED_DIR` in the app's environment). An app with at least one sidecar runs as a **pod**: a small holder container, `<app>-pod`, owns the network, and the app and its sidecars join it; the sidecars are healthy before the app starts ([`architecture.md`](architecture.md#pods)). Traffic between an app and its own sidecars stays on loopback and may be plaintext; every hop between containers stays TLS ([`security.md`](security.md)). Types come from the sidecar catalog ([`catalog.md`](catalog.md#sidecar-catalog)).
@@ -216,4 +238,5 @@ Validation fails with every violation listed, each with its YAML path:
 - Proxies: `upstreams` and `file` are accepted only on proxy types. Each upstream names an existing app or service other than the proxy, at most once; route names are unique DNS labels; the mode is one the type supports; `off` requires a `reason`, and toward an infra service a plaintext listener; an HTTP proxy decrypts (`on`, `off`) only HTTP targets (apps, or infra with an HTTPS listener) and takes other TLS services as `passthrough`; `port` is not allowed on infra targets; an app target of `on` or `passthrough` needs a TLS port (its own or `port`); an `off` app target is not in transparent mode, its plaintext port differs from its TLS and health ports, and every terminating proxy of that app uses the same port. A type may restrict targets to catalog types, require a minimum number of upstreams (`pgbouncer`: one) and cap the number.
 - `replicas` is between 1 and 10; an app with more than one replica cannot publish `ports`.
 - Sidecars: `type` must be a sidecar catalog type; keys must belong to that type (`transparent` only on `envoy`); names are unique within the app; no two containers of one pod bind the same port (the app's `inbound.app_port`, Envoy's `inbound.port`, outbound ports, admin `15000`, transparent `15001`/`15006`, PgBouncer's `port`, Fluent Bit's `2020`, the registration agent's `8301`/`8501`); `pgbouncer.service` is a postgres service and `fluent-bit.to` an s3-compatible service in the app's `uses`; `outbound.service` names an existing app or HTTPS infra service other than the app itself. The app's own ports (`health.port`, default 8080 with `health`; `register.port` unless it is an Envoy `inbound.port`; `inbound.app_port`) are claimed before any sidecar's, and the error names where each was declared. A variable a sidecar gives the app (`BB_LISTEN_ADDR`, `<TARGET>_URL`, `BB_LOG_DIR`) must not share a name with one the app already receives from Breadboard, a used service or another sidecar (for example an outbound target named `database` beside Postgres's `DATABASE_URL`); PgBouncer's rewrite of its own service's variables is allowed.
+- `host`: on an app, `port` (when given) is a valid port and, in transparent mode, a declared listener (Envoy's `inbound.port` or `register.port`); without `port` the app needs an Envoy `inbound.port` or a `register.port`. On a service, the type has an HTTPS listener and `port` is not allowed. No service or app is named `bb-host`.
 - Every name the engine generates for an app is unique in the shared namespace and at most 63 characters.

@@ -11,16 +11,17 @@ Breadboard is secure by default and insecure only by intent. This document is th
 
 ## Certificate authority
 
-- v1 has exactly **one CA per install**, named `root`, created on first use with Go's standard library (`crypto/x509`, ECDSA P-256).
+- Lab traffic has exactly **one CA per install**, named `root`, created on first use with Go's standard library (`crypto/x509`, ECDSA P-256).
 - The CA is **name-constrained** (critical) to the domain: permitted DNS domain `.<domain>` and permitted URI domain `<domain>`. A leaked CA key cannot mint a certificate a client would accept for any real site.
 - The CA lives in `<BB_HOME>/ca/` (`root.key` at `0600`, directory `0700`). Future CAs sit beside it, one file pair per CA name. It is never added to the host trust store automatically; `bb ca` prints instructions for anyone who opts in.
+- A second CA, `host`, signs only the host router's certificate for `*.localhost` names (see [Host access](#host-access-phase-5-wave-e)); it never signs a lab certificate.
 - Lifetimes: CA 5 years; leaf certificates 90 days, reissued on `bb up` when fewer than 30 days remain.
 
 ## Leaf certificates
 
 One per service (infra and app), issued at `bb up`:
 
-- DNS SANs: `<service>.<domain>`; `<service>.<experiment>.<domain>` reserved for host-side access through a proxy (Phase 5). A replica's certificate names both `<app>-<n>.<domain>` and `<app>.<domain>`, so a client verifies it by either name.
+- DNS SANs: `<service>.<domain>`. Host-side names are `*.localhost` names on the host router's certificate, never on a lab certificate (ADR-0017). A replica's certificate names both `<app>-<n>.<domain>` and `<app>.<domain>`, so a client verifies it by either name.
 - Replicas of one app share its identity (`.../service/<app>`): authorization by identity (Phase 6) treats them as one workload.
 - Sidecars have no certificate of their own: they present their app instance's certificate, as the address they listen on is the instance's.
 - URI SAN: the service **identity** `spiffe://<domain>/experiment/<exp>/service/<svc>`.
@@ -87,6 +88,16 @@ Proxies are infra services (catalog entries marked as proxies) with **upstream**
 - No proxy gets the Docker socket. Traefik is configured by its file provider only, so a proxy compromised through its routing config cannot reach the Docker API.
 - In the generated Envoy and Traefik configs, text from `experiment.yaml` (an upstream's `reason`) appears only inside comments, and line breaks or control characters in it cannot end the comment (D-114).
 
+## Host access (Phase 5 wave E)
+
+Apps and infra HTTPS services marked `host` are reachable from the host at `https://<target>.<experiment>.localhost:<port>` ([ADR-0017](../adr/README.md)):
+
+- **Host CA.** The install's second CA, `host`, in `<BB_HOME>/ca/` (`host.key` at `0600`), ECDSA P-256, 5 years. Name-constrained (critical) to the permitted DNS domain `.localhost` only, with no permitted URI domain: a leaked key can sign neither a real site nor a lab identity. Created by `bb ca` or the first `bb up` that needs it; never added to a trust store automatically. `bb ca` prints it and how to trust it (macOS keychain, Linux trust anchors, Firefox's own store).
+- **Host certificate.** One per lab, for the router: DNS SANs exactly the lab's host names (`<target>.<experiment>.localhost`, plus `<app>-<n>.<experiment>.localhost` for each replica), no URI SAN, `serverAuth` only, 90 days, reissued below 30 days or when the names change. Stored in `.bb/certs/bb-host/` and mounted only in the router.
+- **Router.** `bb-host` (Traefik, file provider only, no Docker socket) is published on `127.0.0.1:<port>` only and joins only the lab's default network. It terminates the host's TLS with the host certificate (TLS 1.2 minimum) and re-encrypts to every replica of the target, verifying it against the lab CA with the server name set to the target's shared name (or the instance's name for an instance route). There is no plaintext hop and no passthrough: the host never sees a lab certificate, and lab clients never see the host CA.
+- **Scope.** Only HTTP over TLS. TCP services are not routed.
+- **Exposure.** A host name is reachable by any program on the host, including web pages in a browser, exactly as a published port is; it is opt-in per target for that reason. Cross-site requests from a web page still reach the app, so an app that changes state on a request should check `Origin` as it would in production.
+
 ## Extension points for mTLS and multiple CAs
 
 These are designed into v1 so later phases add policy, not rework:
@@ -94,7 +105,7 @@ These are designed into v1 so later phases add policy, not rework:
 | Extension | v1 shape | Later |
 |---|---|---|
 | Client authentication | Every leaf has `clientAuth` EKU and a SPIFFE identity. Edge `tls.clientAuth` is reserved; v1 only allows `none`. | `request` / `require`; per-service authorization by identity (Kafka ACLs, Postgres `cert` auth, Consul intentions). |
-| Multiple CAs | CAs are addressed by name (`root` in v1); `.bb/state.json` records which CA issued each leaf; trust bundles are built from a list of CA names. | Per-experiment or per-service CAs, intermediates, cross-signing, and rotation drills via edge `tls.ca`. |
+| Multiple CAs | CAs are addressed by name (`root` for lab traffic; `host` for the host router since wave E); `.bb/state.json` records which CA issued each leaf; trust bundles are built from a list of CA names. | Per-experiment or per-service CAs, intermediates, cross-signing, and rotation drills via edge `tls.ca`. |
 | Identity | SPIFFE URI in every leaf. | Authorization rules keyed by identity; export to SPIRE / service-mesh identities. |
 
 ## Secrets

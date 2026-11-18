@@ -65,9 +65,51 @@ templ bar(used, limit float64, warn bool) {
 	</svg>
 }
 
-// badge marks a service: square for catalog infrastructure, round for apps.
+// logoFiles maps each catalog and sidecar type to its file in static/logos.
+// The consul-agent sidecar shows Consul's logo.
+var logoFiles = map[string]string{
+	"kafka": "kafka", "postgres": "postgres", "redis": "redis", "consul": "consul", "consul-agent": "consul",
+	"envoy": "envoy", "traefik": "traefik", "nginx": "nginx", "fluent-bit": "fluent-bit",
+	"haproxy": "haproxy", "pgbouncer": "pgbouncer", "s3-compatible": "s3-compatible",
+}
+
+// logoSrc is a catalog or sidecar type's logo URL, or "" for an app or an
+// unknown type.
+func logoSrc(typeID string) string {
+	if f, ok := logoFiles[typeID]; ok {
+		return "/static/logos/" + f + ".svg"
+	}
+	return ""
+}
+
+// topicLogo is a docs topic's logo: its tech's logo, or the Breadboard mark
+// for a topic with none (Getting started, Sidecars, Load balancing, ...).
+templ topicLogo(id string, sizeClass string) {
+	if src := logoSrc(id); src != "" {
+		<img src={ src } alt="" class={ "shrink-0", sizeClass }/>
+	} else {
+		<img src="/static/logos/breadboard.svg" alt="" class={ "shrink-0", sizeClass }/>
+	}
+}
+
+// techLogo is a catalog or sidecar type's logo; it renders nothing for an
+// unknown type.
+templ techLogo(typeID string, sizeClass string) {
+	if src := logoSrc(typeID); src != "" {
+		<img src={ src } alt="" class={ "shrink-0", sizeClass }/>
+	}
+}
+
+// badge marks a service: square with the tech's logo for catalog
+// infrastructure and sidecars, round with a letter for apps.
 templ badge(r row) {
-	<span class={ "flex size-8 shrink-0 items-center justify-center text-sm font-semibold", templ.KV("rounded-md bg-slate-100 text-slate-700", r.Kind == "infra"), templ.KV("rounded-full bg-indigo-50 text-indigo-700", r.Kind != "infra") }>{ r.Initial() }</span>
+	if logoSrc(r.Type) != "" {
+		<span class="flex size-8 shrink-0 items-center justify-center rounded-md bg-slate-100">
+			@techLogo(r.Type, "size-5")
+		</span>
+	} else {
+		<span class={ "flex size-8 shrink-0 items-center justify-center text-sm font-semibold", templ.KV("rounded-md bg-slate-100 text-slate-700", r.Kind == "infra"), templ.KV("rounded-full bg-indigo-50 text-indigo-700", r.Kind != "infra") }>{ r.Initial() }</span>
+	}
 }
 
 templ card() {

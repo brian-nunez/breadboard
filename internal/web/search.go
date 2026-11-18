@@ -5,11 +5,13 @@ import (
 	"net/http"
 )
 
-// searchEntry is one page the search dialog can open.
+// searchEntry is one page the search dialog can open. Logo is the tech's
+// logo, for a tech's docs page or an infrastructure or sidecar service.
 type searchEntry struct {
 	Title string `json:"title"`
 	Kind  string `json:"kind"`
 	URL   string `json:"url"`
+	Logo  string `json:"logo,omitempty"`
 }
 
 // searchIndex lists every page: docs, starters, and the experiment's
@@ -17,17 +19,17 @@ type searchEntry struct {
 func (s *Server) searchIndex(w http.ResponseWriter, r *http.Request) {
 	var out []searchEntry
 	for _, t := range techs {
-		out = append(out, searchEntry{t.Name, "Docs", "/docs/" + t.ID})
+		out = append(out, searchEntry{t.Name, "Docs", "/docs/" + t.ID, logoSrc(t.ID)})
 		for _, g := range t.Guides {
-			out = append(out, searchEntry{g.Title, "Docs · " + t.Name, "/docs/" + t.ID + "/" + g.Slug})
+			out = append(out, searchEntry{g.Title, "Docs · " + t.Name, "/docs/" + t.ID + "/" + g.Slug, ""})
 		}
 	}
 	d := s.docsData(r)
 	for _, id := range starterOrder(d) {
-		out = append(out, searchEntry{cardTitle(d.Starters[id].Title), "Starter · " + id, "/starters/" + id})
+		out = append(out, searchEntry{cardTitle(d.Starters[id].Title), "Starter · " + id, "/starters/" + id, ""})
 	}
 	for _, row := range s.dashboard(r.Context()).Services {
-		out = append(out, searchEntry{row.Name, "Service", "/services/" + row.Name})
+		out = append(out, searchEntry{row.Name, "Service", "/services/" + row.Name, logoSrc(row.Type)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)

@@ -56,6 +56,7 @@ type node struct {
 // chip is a sidecar drawn inside its app's pod outline.
 type chip struct {
 	Name        string // the first instance's sidecar service, for links
+	Type        string // the sidecar type, for its logo
 	Label       string
 	Color       string // status colour: the worst over the app's instances
 	Transparent bool
@@ -264,7 +265,7 @@ func chips(n node, instances []row, sidecars map[string][]row, selected string) 
 	var out []chip
 	x, y := n.X, n.Y+nodeH+chipGap
 	for i, s := range sidecars[instances[0].Name] {
-		c := chip{Name: s.Name, Label: s.Type, Color: s.Status().Color}
+		c := chip{Name: s.Name, Type: s.Type, Label: s.Type, Color: s.Status().Color}
 		if s.Sidecar != nil && s.Sidecar.Transparent {
 			c.Transparent = true
 			c.Label += " · transparent"
@@ -276,7 +277,7 @@ func chips(n node, instances []row, sidecars map[string][]row, selected string) 
 				c.Color = worse(c.Color, list[i].Status().Color)
 			}
 		}
-		c.W = labelWidth(c.Label) + 14 // room for the status dot
+		c.W = labelWidth(c.Label) + 14 + chipLogoW(c) // room for the status dot and logo
 		if x > n.X && x+c.W > n.X+nodeW {
 			x, y = n.X, y+chipH+chipGap
 		}
@@ -285,6 +286,14 @@ func chips(n node, instances []row, sidecars map[string][]row, selected string) 
 		x += c.W + chipGap
 	}
 	return out
+}
+
+// chipLogoW is the room a chip's logo takes before its label.
+func chipLogoW(c chip) int {
+	if logoSrc(c.Type) != "" {
+		return 16
+	}
+	return 0
 }
 
 // worse is the more alarming of two status colours.

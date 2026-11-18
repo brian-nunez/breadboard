@@ -270,7 +270,7 @@ func sidecarFields(e *spec.EnvoySidecar, p *spec.PgBouncerSidecar, f *spec.Fluen
 func starterRows(d *core.StarterDetails, cat map[string]core.CatalogEntry) []row {
 	var rows []row
 	for _, t := range d.Requires {
-		rows = append(rows, row{ServiceStatus: core.ServiceStatus{Name: t, Kind: "infra", Health: core.HealthHealthy}, TLS: true})
+		rows = append(rows, row{ServiceStatus: core.ServiceStatus{Name: t, Kind: "infra", Type: t, Health: core.HealthHealthy}, TLS: true})
 	}
 	proxyType := map[string]string{}
 	for _, svc := range d.Services {
@@ -349,7 +349,7 @@ func starterRows(d *core.StarterDetails, cat map[string]core.CatalogEntry) []row
 				rows = append(rows, row{ServiceStatus: core.ServiceStatus{Name: info.Service, Kind: "sidecar", Type: sc.Type, Health: core.HealthHealthy, Parent: name, Sidecar: info}, TLS: true})
 			}
 			if a.Register != nil {
-				rows = append(rows, row{ServiceStatus: core.ServiceStatus{Name: name + "-agent", Kind: "sidecar", Health: core.HealthHealthy, Parent: name, Registry: "consul"}, TLS: true})
+				rows = append(rows, row{ServiceStatus: core.ServiceStatus{Name: name + "-agent", Kind: "sidecar", Type: "consul-agent", Health: core.HealthHealthy, Parent: name, Registry: "consul"}, TLS: true})
 			}
 		}
 	}
@@ -370,14 +370,10 @@ func starterTLSPort(a core.StarterApp) int {
 	return 0
 }
 
-// techNames names a starter's catalog types for display.
-func techNames(types []string, cat map[string]core.CatalogEntry) string {
-	names := make([]string, len(types))
-	for i, t := range types {
-		names[i] = t
-		if e, ok := cat[t]; ok {
-			names[i] = e.Title
-		}
+// techName names a catalog type for display.
+func techName(t string, cat map[string]core.CatalogEntry) string {
+	if e, ok := cat[t]; ok {
+		return e.Title
 	}
-	return strings.Join(names, " · ")
+	return t
 }

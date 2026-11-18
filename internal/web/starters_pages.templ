@@ -66,8 +66,23 @@ templ starterCard(id string, st core.StarterInfo, cat map[string]core.CatalogEnt
 	<a href={ templ.SafeURL("/starters/" + id) } class="flex flex-col rounded-xl border border-slate-200 bg-white p-5 hover:border-slate-300">
 		<span class="font-semibold">{ cardTitle(st.Title) }</span>
 		<span class="mt-2 text-sm leading-6 text-slate-500">{ st.Summary }</span>
-		<span class="mt-auto pt-4 text-[13px] text-slate-700">{ techNames(st.Requires, cat) }</span>
+		<span class="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 pt-4 text-[13px] text-slate-700">
+			@techList(st.Requires, cat)
+		</span>
 	</a>
+}
+
+// techList names catalog types, each after its logo, separated by dots.
+templ techList(types []string, cat map[string]core.CatalogEntry) {
+	for i, t := range types {
+		if i > 0 {
+			<span class="text-slate-400">·</span>
+		}
+		<span class="inline-flex items-center gap-1.5">
+			@techLogo(t, "size-4")
+			{ techName(t, cat) }
+		</span>
+	}
 }
 
 // cardTitle drops the "(recommended)" style suffix on cards; the summary
@@ -108,7 +123,13 @@ templ starterPage(v starterView) {
 		<main class="mx-auto max-w-[1120px] px-6 py-10">
 			<nav class="text-sm text-slate-500"><a href="/starters" class="hover:text-slate-900">Starters</a> <span class="mx-1.5">/</span> { strings.Split(v.Details.ID, "/")[0] }</nav>
 			<h1 class="mt-2 text-[34px] font-semibold leading-tight">{ v.Details.Title }</h1>
-			<p class="mt-1 font-mono text-sm text-slate-500">{ v.Details.ID } · Go 1.27.4 · { techNames(v.Details.Requires, v.Catalog) }</p>
+			<p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-sm text-slate-500">
+				<span>{ v.Details.ID }</span>
+				<span class="text-slate-400">·</span>
+				<span>Go 1.27.4</span>
+				<span class="text-slate-400">·</span>
+				@techList(v.Details.Requires, v.Catalog)
+			</p>
 			<div class="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
 				<div class="min-w-0">
 					<h2 class="text-xl font-semibold">About this example</h2>
@@ -145,7 +166,13 @@ templ starterPage(v starterView) {
 						<h2 class="mt-8 text-xl font-semibold">Proxy configs</h2>
 						<p class="mt-3 text-[15px] leading-6 text-slate-600">Native configs the starter writes into your code directory. Each proxy runs its own instead of a generated one; edit it and run <code class="font-mono text-[13px]">bb up</code>.</p>
 						for _, c := range v.Configs {
-							<h3 class="mt-5 font-semibold">{ c.Service } <span class="font-normal text-slate-500">· { techNames([]string{c.Type}, v.Catalog) }</span></h3>
+							<h3 class="mt-5 flex flex-wrap items-center gap-x-2 font-semibold">
+								{ c.Service }
+								<span class="flex items-center gap-x-2 font-normal text-slate-500">
+									<span class="text-slate-400">·</span>
+									@techList([]string{c.Type}, v.Catalog)
+								</span>
+							</h3>
 							@docCode(v.Details.Dir+"/"+c.Path, c.Data)
 						}
 					}

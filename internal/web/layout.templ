@@ -135,7 +135,14 @@ templ sidebar(d dashboardData, active string) {
 			<nav class="mt-2 flex flex-col gap-0.5 text-sm">
 				for _, s := range d.Services {
 					<a href={ templ.SafeURL("/services/" + s.Name) } class={ "flex items-center justify-between rounded-lg px-2.5 py-1.5", templ.KV("bg-indigo-50 font-medium text-indigo-700", active == "service:"+s.Name), templ.KV("text-slate-700 hover:bg-slate-50", active != "service:"+s.Name) }>
-						{ s.Name }
+						<span class="flex min-w-0 items-center gap-2">
+							if logoSrc(s.Type) != "" {
+								@techLogo(s.Type, "size-4")
+							} else {
+								<span class="flex size-4 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-[9px] font-semibold text-indigo-700">{ s.Initial() }</span>
+							}
+							<span class="truncate">{ s.Name }</span>
+						</span>
 						@dot(s.Status().Color)
 					</a>
 				}

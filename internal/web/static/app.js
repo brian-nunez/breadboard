@@ -61,7 +61,7 @@ for (const el of document.querySelectorAll("[data-load]")) {
 })();
 
 // Search: ⌘K / Ctrl+K or any [data-search-open] opens the dialog. The index
-// (title, kind, url for every page) is fetched once; filtering is local.
+// (title, kind, url and any tech logo for every page) is fetched once; filtering is local.
 (() => {
   const dialog = document.getElementById("search");
   if (!dialog) return;
@@ -82,7 +82,15 @@ for (const el of document.querySelectorAll("[data-load]")) {
         a.href = e.url;
         a.className = "flex items-center justify-between rounded-lg px-3 py-2 " + (i === selected ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50");
         const title = document.createElement("span");
-        title.textContent = e.title;
+        title.className = "flex items-center gap-2";
+        if (e.logo) {
+          const img = document.createElement("img");
+          img.src = e.logo;
+          img.alt = "";
+          img.className = "size-4 shrink-0";
+          title.append(img);
+        }
+        title.append(e.title);
         const kind = document.createElement("span");
         kind.className = "text-xs text-slate-400";
         kind.textContent = e.kind;

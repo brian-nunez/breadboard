@@ -171,6 +171,9 @@ func TestUpHostAccess(t *testing.T) {
 		t.Errorf("api-3 details = %v %v %v", d.HostURLs, d.HostRouter, err)
 	}
 	d, err = h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: "bb-host"})
+	if err == nil && len(d.Env) != 0 {
+		t.Errorf("bb-host details list env vars no app receives: %v", d.Env)
+	}
 	if err != nil || !d.HostRouter || d.Type != "traefik" || d.Certificate == nil || !slices.Equal(d.Certificate.DNSNames, []string{"bb-host.bb.internal"}) {
 		t.Errorf("bb-host details = %+v %v", d, err)
 	}

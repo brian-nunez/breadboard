@@ -233,7 +233,11 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 		for _, v := range svc.Entry.Client(cl) {
 			g.Vars = append(g.Vars, EnvVar{Name: v.Name, Value: v.Value, Secret: v.Secret})
 		}
-		d.Env = []EnvGroup{g}
+		// No app can use the host router (it is not in experiment.yaml),
+		// so no app receives its variables.
+		if !svc.HostRouter {
+			d.Env = []EnvGroup{g}
+		}
 		d.Upstreams = upstreamInfos(m, svc)
 		d.File, d.StaticFile = svc.File, svc.StaticFile
 	case model.App:

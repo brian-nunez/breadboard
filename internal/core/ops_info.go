@@ -109,7 +109,8 @@ func (e *Engine) Creds(ctx context.Context, req CredsRequest) (*CredsResult, err
 	return res, nil
 }
 
-// CAResult describes the install CA.
+// CAResult describes the install CA. Its top-level fields are the lab CA,
+// root, which signs every lab certificate; Host is the host CA.
 type CAResult struct {
 	Name        string
 	Domain      string
@@ -120,16 +121,36 @@ type CAResult struct {
 	CertPath    string
 	CertPEM     []byte
 	Created     bool
+	// Host is the host CA, which signs only the host router's certificate
+	// for https://<target>.<experiment>.localhost names.
+	Host *CAInfo
 }
 
-// CA returns the install CA's details, creating the CA if needed. It never
-// touches the host trust store.
+// CAInfo describes one CA.
+type CAInfo struct {
+	Name        string
+	Domain      string // the DNS domain the CA is constrained to
+	Subject     string
+	NotBefore   time.Time
+	NotAfter    time.Time
+	Fingerprint string // SHA-256, hex
+	CertPath    string
+	CertPEM     []byte
+	Created     bool
+}
+
+// CA returns the install CAs' details, creating either CA if needed. It
+// never touches the host trust store.
 func (e *Engine) CA(ctx context.Context) (*CAResult, error) {
 	st, err := e.settings(ctx)
 	if err != nil {
 		return nil, err
 	}
 	ca, created, err := e.ensureCA(st.Domain)
+	if err != nil {
+		return nil, err
+	}
+	host, hostCreated, err := e.ensureHostCA()
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +164,17 @@ func (e *Engine) CA(ctx context.Context) (*CAResult, error) {
 		CertPath:    e.home.CACertPath(caName),
 		CertPEM:     ca.CertPEM,
 		Created:     created,
+		Host: &CAInfo{
+			Name:        hostCAName,
+			Domain:      host.Domain(),
+			Subject:     host.Cert.Subject.CommonName,
+			NotBefore:   host.Cert.NotBefore,
+			NotAfter:    host.Cert.NotAfter,
+			Fingerprint: host.Fingerprint(),
+			CertPath:    e.home.CACertPath(hostCAName),
+			CertPEM:     host.CertPEM,
+			Created:     hostCreated,
+		},
 	}, nil
 }
 

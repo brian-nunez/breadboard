@@ -145,6 +145,35 @@ func (h *harness) tools(t *testing.T) map[string]*sdk.Tool {
 	return m
 }
 
+func TestCAReturnsHostCA(t *testing.T) {
+	h := newHarness(t, true)
+	out := h.mustCall(t, "ca", nil)
+	if out["name"] != "root" || out["domain"] != "bb.internal" {
+		t.Fatalf("ca root = %v %v", out["name"], out["domain"])
+	}
+	host, ok := out["host"].(map[string]any)
+	if !ok {
+		t.Fatalf("ca has no host object: %v", out)
+	}
+	for key, want := range map[string]any{"name": "host", "domain": "localhost", "subject": "Breadboard host CA (localhost)", "created": true} {
+		if host[key] != want {
+			t.Errorf("host.%s = %v, want %v", key, host[key], want)
+		}
+	}
+	for _, key := range []string{"not_before", "not_after", "fingerprint", "cert_path", "cert_pem"} {
+		if v, _ := host[key].(string); v == "" {
+			t.Errorf("host.%s is empty", key)
+		}
+	}
+	if pemText, _ := host["cert_pem"].(string); host["fingerprint"] == out["fingerprint"] || !strings.HasPrefix(pemText, "-----BEGIN CERTIFICATE-----") {
+		t.Error("host CA is not a distinct certificate")
+	}
+	again, _ := h.mustCall(t, "ca", nil)["host"].(map[string]any)
+	if again["created"] != false || again["fingerprint"] != host["fingerprint"] {
+		t.Error("a second ca call replaced the host CA")
+	}
+}
+
 func TestGuidesAndStarterCode(t *testing.T) {
 	h := newHarness(t, true)
 	if g := h.mustCall(t, "guide", nil)["guide"].(string); !strings.Contains(g, "experiment.yaml") {

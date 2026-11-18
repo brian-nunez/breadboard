@@ -24,9 +24,13 @@ import (
 	"github.com/brian-nunez/breadboard/internal/state"
 )
 
-// caName is the only CA in v1. CAs are addressed by name so later phases can
-// add more.
+// caName is the lab CA, which signs every lab certificate. CAs are addressed
+// by name so later phases can add more.
 const caName = "root"
+
+// hostCAName is the host CA, which signs only the host router's *.localhost
+// certificate (ADR-0017).
+const hostCAName = "host"
 
 // project is an opened experiment.
 type project struct {
@@ -168,6 +172,45 @@ func (e *Engine) ensureCA(domain string) (ca *pki.CA, created bool, err error) {
 		return nil, false, err
 	}
 	if err := e.home.SaveCA(caName, ca.CertPEM, keyPEM); err != nil {
+		return nil, false, err
+	}
+	return ca, true, nil
+}
+
+// ensureHostCA loads the install's host CA, which signs only the host
+// router's *.localhost certificate, creating it when missing, when its key
+// does not match, or when it is not a host CA able to sign a full leaf. It
+// holds the same CA lock as ensureCA and never touches the root CA.
+func (e *Engine) ensureHostCA() (ca *pki.CA, created bool, err error) {
+	lock, err := e.home.LockCA("ca")
+	if err != nil {
+		return nil, false, err
+	}
+	defer lock.Release()
+	certPEM, keyPEM, ok, err := e.home.LoadCA(hostCAName)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		ca, err = pki.LoadCA(certPEM, keyPEM)
+		switch {
+		case errors.Is(err, pki.ErrKeyMismatch):
+			// A torn pair from an interrupted write: replace it.
+		case err != nil:
+			return nil, false, fmt.Errorf("load host CA from %s: %w", e.home.CADir(), err)
+		case ca.HostUsable(e.now()):
+			return ca, false, nil
+		}
+	}
+	ca, err = pki.NewHostCA(e.now())
+	if err != nil {
+		return nil, false, err
+	}
+	keyPEM, err = ca.KeyPEM()
+	if err != nil {
+		return nil, false, err
+	}
+	if err := e.home.SaveCA(hostCAName, ca.CertPEM, keyPEM); err != nil {
 		return nil, false, err
 	}
 	return ca, true, nil

@@ -94,6 +94,45 @@ func TestInformationCommands(t *testing.T) {
 	}
 }
 
+func TestCAShowsBothCAs(t *testing.T) {
+	eng := engine(t)
+	res, err := eng.CA(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := run(t, eng, "ca")
+	if code != 0 {
+		t.Fatalf("bb ca = %d %q", code, errOut)
+	}
+	for _, want := range []string{
+		"Lab CA (root)", res.Subject, "*.bb.internal", res.Fingerprint, res.CertPath,
+		"Host CA (host)", "Breadboard host CA (localhost)", "*.localhost", res.Host.Fingerprint, res.Host.CertPath,
+		"https://<service>.<experiment>.localhost:<port>",
+		"security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db",
+		"update-ca-certificates", "trust anchor", "Firefox", "curl --resolve", "/etc/hosts",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("bb ca output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "Lab CA") > strings.Index(out, "Host CA") {
+		t.Error("bb ca shows the host CA before the lab CA")
+	}
+
+	code, out, _ = run(t, eng, "ca", "--host")
+	if code != 0 || strings.Contains(out, "Lab CA") || !strings.Contains(out, res.Host.Fingerprint) {
+		t.Errorf("bb ca --host = %d %q", code, out)
+	}
+	code, out, _ = run(t, eng, "ca", "--pem")
+	if code != 0 || out != string(res.CertPEM) {
+		t.Errorf("bb ca --pem = %d %q, want the lab CA only", code, out)
+	}
+	code, out, _ = run(t, eng, "ca", "--host", "--pem")
+	if code != 0 || out != string(res.Host.CertPEM) {
+		t.Errorf("bb ca --host --pem = %d %q, want the host CA only", code, out)
+	}
+}
+
 func TestUsageErrors(t *testing.T) {
 	eng := engine(t)
 	for _, args := range [][]string{{"nope"}, {"add"}, {"logs", "a", "b"}, {"export", "k8s"}, {"config", "set", "domain"}, {"up", "--bogus"}} {

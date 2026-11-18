@@ -412,7 +412,8 @@ func (c *cli) learn(args []string) error {
 
 func (c *cli) ca(args []string) error {
 	fs := flag.NewFlagSet("ca", flag.ContinueOnError)
-	pem := fs.Bool("pem", false, "print only the CA certificate (PEM)")
+	pem := fs.Bool("pem", false, "print only the CA certificate (PEM): the lab CA, or the host CA with --host")
+	hostOnly := fs.Bool("host", false, "show only the host CA, which signs the *.localhost host access certificate")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -425,9 +426,24 @@ func (c *cli) ca(args []string) error {
 		return err
 	}
 	if *pem {
-		_, err := c.out.Write(res.CertPEM)
+		certPEM := res.CertPEM
+		if *hostOnly {
+			certPEM = res.Host.CertPEM
+		}
+		_, err := c.out.Write(certPEM)
 		return err
 	}
+	if !*hostOnly {
+		c.labCA(res)
+		fmt.Fprintln(c.out)
+	}
+	c.hostCA(res.Host)
+	return nil
+}
+
+// labCA prints the lab CA, root, and how to trust it.
+func (c *cli) labCA(res *core.CAResult) {
+	fmt.Fprintf(c.out, "Lab CA (%s): signs every service certificate inside labs\n\n", res.Name)
 	tw := c.table()
 	fmt.Fprintf(tw, "Subject\t%s\n", res.Subject)
 	fmt.Fprintf(tw, "Constrained to\t*.%s (cannot sign for any other domain)\n", res.Domain)
@@ -439,7 +455,28 @@ func (c *cli) ca(args []string) error {
 	fmt.Fprintln(c.out, "To trust it on the host anyway (optional):")
 	fmt.Fprintf(c.out, "  macOS: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain %q\n", res.CertPath)
 	fmt.Fprintf(c.out, "  Linux (Debian/Ubuntu): sudo cp %q /usr/local/share/ca-certificates/breadboard.crt && sudo update-ca-certificates\n", res.CertPath)
-	return nil
+}
+
+// hostCA prints the host CA and how to trust it and resolve its names.
+func (c *cli) hostCA(host *core.CAInfo) {
+	fmt.Fprintf(c.out, "Host CA (%s): signs only the host router's certificate, for browsers and\n", host.Name)
+	fmt.Fprintln(c.out, "other host clients reaching https://<service>.<experiment>.localhost:<port>")
+	fmt.Fprintln(c.out)
+	tw := c.table()
+	fmt.Fprintf(tw, "Subject\t%s\n", host.Subject)
+	fmt.Fprintf(tw, "Constrained to\t*.%s (cannot sign for any other domain, IP address, URI or email address)\n", host.Domain)
+	fmt.Fprintf(tw, "Valid\t%s to %s\n", host.NotBefore.Format(time.DateOnly), host.NotAfter.Format(time.DateOnly))
+	fmt.Fprintf(tw, "SHA-256\t%s\n", host.Fingerprint)
+	fmt.Fprintf(tw, "Certificate\t%s\n", host.CertPath)
+	tw.Flush()
+	fmt.Fprintln(c.out, "\nbb never adds it to your machine's trust store. To trust host access URLs (optional):")
+	fmt.Fprintf(c.out, "  macOS: security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db %q\n", host.CertPath)
+	fmt.Fprintf(c.out, "  Linux (Debian/Ubuntu): sudo cp %q /usr/local/share/ca-certificates/breadboard-host.crt && sudo update-ca-certificates\n", host.CertPath)
+	fmt.Fprintf(c.out, "  Linux (Fedora/Arch): sudo trust anchor --store %q\n", host.CertPath)
+	fmt.Fprintln(c.out, "  Firefox: it keeps its own store. Settings > Privacy & Security > Certificates > View Certificates >")
+	fmt.Fprintln(c.out, "    Authorities > Import, then trust it to identify websites.")
+	fmt.Fprintln(c.out, "\nBrowsers and curl resolve every *.localhost name to 127.0.0.1. Other clients may not: use an")
+	fmt.Fprintln(c.out, "override such as curl --resolve <name>:<port>:127.0.0.1, or add the name to /etc/hosts.")
 }
 
 func (c *cli) config(args []string) error {

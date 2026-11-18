@@ -53,7 +53,7 @@ func init() {
 		{"logs", "[service] [-f] [--tail n]", "Show or follow logs", (*cli).logs},
 		{"creds", "[service]", "Show generated credentials and connection strings", (*cli).creds},
 		{"learn", "<type>", "Show a service type's learning notes", (*cli).learn},
-		{"ca", "[--pem]", "Show the Breadboard CA and how to trust it", (*cli).ca},
+		{"ca", "[--host] [--pem]", "Show the Breadboard CAs and how to trust them", (*cli).ca},
 		{"config", "[get <key> | set <key> <value>]", "Show or change install settings", (*cli).config},
 		{"migrate", "", "Upgrade experiment.yaml to the current spec version", (*cli).migrate},
 		{"export", "compose [--out dir] [--secrets inline|dotenv]", "Write a standalone compose stack", (*cli).export},

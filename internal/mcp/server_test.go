@@ -48,6 +48,9 @@ func (f *fakeRuntime) Exec(_ context.Context, _, service string, _ []string) ([]
 func (*fakeRuntime) Containers(context.Context, string) ([]runtime.Container, error) {
 	return nil, nil
 }
+func (*fakeRuntime) StatsStream(context.Context) iter.Seq2[runtime.Sample, error] {
+	return func(func(runtime.Sample, error) bool) {}
+}
 func (*fakeRuntime) Stats(context.Context, []string) (map[string]runtime.Usage, error) {
 	return map[string]runtime.Usage{}, nil
 }

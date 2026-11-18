@@ -536,7 +536,7 @@ func (e *Engine) status(ctx context.Context, m *model.Model, hostPort int) ([]Se
 			running = append(running, c.ID)
 		}
 	}
-	usage, err := e.rt.Stats(ctx, running)
+	usage, err := e.usage(ctx, running)
 	if err != nil {
 		return nil, nil, err
 	}

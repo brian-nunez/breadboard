@@ -40,5 +40,11 @@ func (c *cli) serve(args []string) error {
 			fmt.Fprintf(c.errOut, "bb: could not open a browser: %v\n", err)
 		}
 	}
+	// Every page and live view asks for status; one shared stats stream
+	// spares each a two-second docker stats sample.
+	// stop waits for the docker stats process to end, so bb never exits
+	// leaving it running.
+	stop := c.eng.StartStatsSampler(c.ctx)
+	defer stop()
 	return srv.Serve(c.ctx)
 }

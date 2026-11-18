@@ -49,6 +49,17 @@ type fakeRuntime struct {
 	imageUser map[string]runtime.ImageUser
 	// published is what PublishedPorts reports.
 	published []runtime.PublishedPort
+	// stream feeds StatsStream: each received batch is yielded, a
+	// received error ends that stream; statsCalls counts Stats calls and
+	// streams counts StatsStream calls.
+	stream     chan []runtime.Sample
+	streamErr  chan error
+	statsCalls int
+	streams    int
+	// streamExit delays a stream's return after ctx ends (the time docker
+	// takes to die); streamsEnded counts streams that returned.
+	streamExit   time.Duration
+	streamsEnded int
 }
 
 func newFake() *fakeRuntime {
@@ -169,11 +180,43 @@ func (f *fakeRuntime) Containers(ctx context.Context, experiment string) ([]runt
 }
 
 func (f *fakeRuntime) Stats(ctx context.Context, ids []string) (map[string]runtime.Usage, error) {
+	f.mu.Lock()
+	f.statsCalls++
+	f.mu.Unlock()
 	out := map[string]runtime.Usage{}
 	for _, id := range ids {
 		out[id] = runtime.Usage{CPUPercent: 1.5, MemoryBytes: 64 << 20}
 	}
 	return out, nil
+}
+
+func (f *fakeRuntime) StatsStream(ctx context.Context) iter.Seq2[runtime.Sample, error] {
+	f.mu.Lock()
+	f.streams++
+	f.mu.Unlock()
+	return func(yield func(runtime.Sample, error) bool) {
+		defer func() {
+			f.mu.Lock()
+			f.streamsEnded++
+			f.mu.Unlock()
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				time.Sleep(f.streamExit)
+				return
+			case err := <-f.streamErr:
+				yield(runtime.Sample{}, err)
+				return
+			case batch := <-f.stream:
+				for _, s := range batch {
+					if !yield(s, nil) {
+						return
+					}
+				}
+			}
+		}
+	}
 }
 
 func (f *fakeRuntime) Logs(ctx context.Context, p runtime.Project, services []string, follow bool, tail int) iter.Seq2[runtime.LogLine, error] {

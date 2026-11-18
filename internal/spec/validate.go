@@ -23,6 +23,9 @@ type TypeInfo struct {
 	// HTTPS reports whether the main listener speaks HTTPS, so an Envoy
 	// sidecar can proxy HTTP to it.
 	HTTPS bool
+	// HTTPSListener reports whether any of the entry's listeners speaks
+	// HTTPS, so the host router can route to a service of the type.
+	HTTPSListener bool
 	// Env lists the variables an app using a service of the type receives
 	// (over a plaintext edge when plain is set). Nil means unknown.
 	Env func(service string, plain bool) []string
@@ -116,6 +119,10 @@ func Validate(s *Spec, types TypeLookup) error {
 
 	names := map[string]string{}
 	claim := func(name, path string) {
+		if name == HostRouterName {
+			add(Violation{Path: path, Message: fmt.Sprintf("name %s is reserved for the host router; choose another name", HostRouterName)})
+			return
+		}
 		if prev, ok := names[name]; ok {
 			add(Violation{Path: path, Message: fmt.Sprintf("name is already used by %s; services and apps share one namespace", prev)})
 			return
@@ -138,6 +145,7 @@ func Validate(s *Spec, types TypeLookup) error {
 			continue
 		}
 		validateProxy(s, types, svc, info, p, add)
+		validateServiceHost(svc, info, p, add)
 		for k, v := range svc.Config {
 			cp := join(join(p, "config"), k)
 			if info.Config == nil {
@@ -183,6 +191,7 @@ func Validate(s *Spec, types TypeLookup) error {
 		}
 		validateInstances(app, p, guarded[app.Name], add, claim)
 		validateSidecars(s, types, app, p, add)
+		validateAppHost(app, p, add)
 		if r := app.Register; r != nil {
 			rp := join(p, "register")
 			if r.Port != 0 {

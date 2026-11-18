@@ -265,6 +265,8 @@ func Types(id string) (spec.TypeInfo, bool) {
 		Plaintext: e.SupportsPlaintext(),
 		Registry:  e.Sidecar != nil,
 		HTTPS:     len(e.Listeners) > 0 && e.Listeners[0].Protocol == "https",
+
+		HTTPSListener: slices.ContainsFunc(e.Listeners, func(l Listener) bool { return l.Protocol == "https" }),
 	}
 	if len(e.Config) > 0 {
 		info.Config = e.CheckConfig

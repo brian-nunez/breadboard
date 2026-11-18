@@ -49,6 +49,9 @@ type Service struct {
 	// File is a user-owned native config, relative to experiment.yaml,
 	// that replaces a proxy's generated one.
 	File string
+	// Host makes the service reachable from the host through the lab's
+	// host router. Nil means it is not.
+	Host *Host
 }
 
 // Upstream is one backend of a proxy: an edge from the proxy to an app (all
@@ -120,6 +123,36 @@ type App struct {
 	Replicas int
 	// Sidecars share the app's network namespace and a directory with it.
 	Sidecars []Sidecar
+	// Host makes the app reachable from the host through the lab's host
+	// router. Nil means it is not.
+	Host *Host
+}
+
+// Host asks for host access: the target answers to
+// https://<name>.<experiment>.localhost:<port> through the lab's host
+// router (HostRouterName).
+type Host struct {
+	// Port is the app port the router reaches over TLS; zero means the
+	// app's TLS port (App.HostPort). Infra services take no port: the
+	// catalog's HTTPS listener decides.
+	Port int
+}
+
+// HostRouterName is the engine-owned service that routes host access. The
+// name is reserved in the service namespace.
+const HostRouterName = "bb-host"
+
+// HostPort is the port the host router reaches the app on over TLS:
+// host.port, else its Envoy inbound.port, else its register.port. False
+// when the app has no host access or declares none of them.
+func (a App) HostPort() (int, bool) {
+	if a.Host == nil {
+		return 0, false
+	}
+	if a.Host.Port != 0 {
+		return a.Host.Port, true
+	}
+	return a.TLSPort()
 }
 
 // Use is one entry of an app's uses list: an edge to an infra service.

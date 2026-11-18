@@ -126,6 +126,9 @@ func (d *Document) AddProxy(svc Service) error {
 	if svc.File != "" {
 		body.Content = append(body.Content, scalar("file"), scalar(svc.File))
 	}
+	if svc.Host != nil {
+		body.Content = append(body.Content, scalar("host"), hostNode(*svc.Host))
+	}
 	m := d.section("services")
 	m.Content = append(m.Content, scalar(svc.Name), body)
 	return nil
@@ -236,6 +239,9 @@ func (d *Document) AddApp(app App) error {
 		}
 		body.Content = append(body.Content, scalar("sidecars"), seq)
 	}
+	if app.Host != nil {
+		body.Content = append(body.Content, scalar("host"), hostNode(*app.Host))
+	}
 	m := d.section("apps")
 	m.Content = append(m.Content, scalar(app.Name), body)
 	return nil
@@ -316,6 +322,16 @@ func scalar(v string) *yaml.Node {
 
 func intScalar(v int) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(v)}
+}
+
+// hostNode writes host: true, or {port: <n>} when a port is set.
+func hostNode(h Host) *yaml.Node {
+	if h.Port == 0 {
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"}
+	}
+	n := mapping(scalar("port"), intScalar(h.Port))
+	n.Style = yaml.FlowStyle
+	return n
 }
 
 func mapping(kv ...*yaml.Node) *yaml.Node {

@@ -140,7 +140,7 @@ func (dec *decoder) service(name, path string, n *yaml.Node) Service {
 		dec.add(join(path, "type"), "is required")
 		return svc
 	}
-	f := dec.fields(path, n, nil, "type", "resources", "config", "upstreams", "file")
+	f := dec.fields(path, n, nil, "type", "resources", "config", "upstreams", "file", "host")
 	if v, ok := f["type"]; ok {
 		svc.Type = dec.str(join(path, "type"), v)
 	} else {
@@ -174,7 +174,31 @@ func (dec *decoder) service(name, path string, n *yaml.Node) Service {
 	if v, ok := f["file"]; ok {
 		svc.File = dec.str(join(path, "file"), v)
 	}
+	if v, ok := f["host"]; ok && !isNull(v) {
+		svc.Host = dec.host(join(path, "host"), v)
+	}
 	return svc
+}
+
+// host accepts true, false (no host access, as for transparent), or a
+// mapping with port. Validation refuses port on infra services.
+func (dec *decoder) host(path string, n *yaml.Node) *Host {
+	if n.Kind == yaml.ScalarNode {
+		switch n.Value {
+		case "true":
+			return &Host{}
+		case "false":
+			return nil
+		}
+		dec.add(path, "must be true, false, or a mapping with port")
+		return nil
+	}
+	f := dec.fields(path, n, nil, "port")
+	h := &Host{}
+	if v, ok := f["port"]; ok {
+		h.Port = dec.positive(join(path, "port"), v, "must be between 1 and 65535")
+	}
+	return h
 }
 
 // upstream decodes one upstreams entry: a target name (short form) or a
@@ -222,7 +246,7 @@ func (dec *decoder) app(name, path string, n *yaml.Node) App {
 		dec.add(join(path, "path"), "is required")
 		return app
 	}
-	f := dec.fields(path, n, nil, "path", "command", "uses", "ports", "health", "register", "resources", "replicas", "sidecars")
+	f := dec.fields(path, n, nil, "path", "command", "uses", "ports", "health", "register", "resources", "replicas", "sidecars", "host")
 	if v, ok := f["path"]; ok {
 		app.Path = dec.str(join(path, "path"), v)
 	} else {
@@ -295,6 +319,9 @@ func (dec *decoder) app(name, path string, n *yaml.Node) App {
 				app.Sidecars = append(app.Sidecars, dec.sidecar(fmt.Sprintf("%s[%d]", sp, i), item))
 			}
 		}
+	}
+	if v, ok := f["host"]; ok && !isNull(v) {
+		app.Host = dec.host(join(path, "host"), v)
 	}
 	return app
 }

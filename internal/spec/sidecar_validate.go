@@ -29,6 +29,10 @@ func validateInstances(app App, p string, guarded bool, add func(error), claim f
 		if !IsServiceOK(name) {
 			add(Violation{Path: path, Message: fmt.Sprintf("makes a service named %q, longer than 63 characters; shorten the names", name)})
 		}
+		if name == HostRouterName {
+			add(Violation{Path: path, Message: fmt.Sprintf("makes a service named %q, which is reserved for the host router; rename the app or sidecar", name)})
+			return
+		}
 		claim(name, path)
 	}
 	for _, inst := range app.Instances() {

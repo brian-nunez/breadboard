@@ -522,12 +522,21 @@ func TestTraefikConfigLoads(t *testing.T) {
 // encoded-characters warning (D-204) or one a later release adds.
 // Traefik's console log marks levels as ERR and WRN.
 func traefikLogProblem(logs string) bool {
-	for _, s := range []string{
-		"Error while building configuration", "aliasHeadersStrategy is not configured",
-		"can reject some encoded characters", "WRN", "ERR", "level=warn", "level=error",
-	} {
-		if strings.Contains(logs, s) {
-			return true
+	for line := range strings.Lines(logs) {
+		// The test container has no network, so a health check that runs
+		// before the logs are read fails to reach its upstream. That is
+		// not a configuration problem.
+		if strings.Contains(line, "Health check failed") {
+			continue
+		}
+
+		for _, s := range []string{
+			"Error while building configuration", "aliasHeadersStrategy is not configured",
+			"can reject some encoded characters", "WRN", "ERR", "level=warn", "level=error",
+		} {
+			if strings.Contains(line, s) {
+				return true
+			}
 		}
 	}
 

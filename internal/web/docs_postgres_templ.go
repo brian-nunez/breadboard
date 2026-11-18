@@ -1784,7 +1784,7 @@ func postgresInBreadboard() templ.Component {
 		templ_7745c5c3_Err = docList(
 			"Both are named app by default; config.database and config.user change them.",
 			"The role cannot be postgres. Apps connect as their own role, not the superuser, whose password is generated but never given to apps.",
-			"The script runs only on an empty volume. After changing config.user or config.database, run bb down --volumes so the next bb up creates them.",
+			"The script runs only on an empty volume. After changing config.user or config.database, run bb down so the next bb up creates them.",
 		).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -2006,7 +2006,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = docCodeWord("bb down").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = docCodeWord("bb down --keep-volumes").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2014,7 +2014,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = docCodeWord("bb down --volumes").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = docCodeWord("bb down").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

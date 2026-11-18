@@ -438,7 +438,7 @@ templ postgresInBreadboard() {
 	@docList(
 		"Both are named app by default; config.database and config.user change them.",
 		"The role cannot be postgres. Apps connect as their own role, not the superuser, whose password is generated but never given to apps.",
-		"The script runs only on an empty volume. After changing config.user or config.database, run bb down --volumes so the next bb up creates them.",
+		"The script runs only on an empty volume. After changing config.user or config.database, run bb down so the next bb up creates them.",
 	)
 	@docH2("tls", "TLS only, verify-full")
 	@docP() {
@@ -465,7 +465,7 @@ templ postgresInBreadboard() {
 	}
 	@docH2("tools", "Data and tools")
 	@docP() {
-		Data lives in a named volume mounted at @docCodeWord("/var/lib/postgresql"), so it survives @docCodeWord("bb down") and is deleted by @docCodeWord("bb down --volumes")&#46; The service's Tables tab in the dashboard lists every table in the app database with its exact row count and size. It runs psql inside the container as the superuser, over the local socket that pg_hba.conf trusts, and shows the command so you can open the same session:
+		Data lives in a named volume mounted at @docCodeWord("/var/lib/postgresql"), so it survives @docCodeWord("bb down --keep-volumes") and is deleted by @docCodeWord("bb down")&#46; The service's Tables tab in the dashboard lists every table in the app database with its exact row count and size. It runs psql inside the container as the superuser, over the local socket that pg_hba.conf trusts, and shows the command so you can open the same session:
 	}
 	@docTerminal("docker exec -it bb-<experiment>-postgres-1 psql -U postgres app")
 }

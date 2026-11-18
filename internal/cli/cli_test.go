@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
+	"iter"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/brian-nunez/breadboard/internal/core"
+	"github.com/brian-nunez/breadboard/internal/runtime"
 )
 
 func run(t *testing.T, eng *core.Engine, args ...string) (int, string, string) {
@@ -296,5 +299,93 @@ func TestAddApp(t *testing.T) {
 	}
 	if code, out, _ := run(t, eng, "help", "add"); code != 0 || !strings.Contains(out, "app <name> [--uses a,b] [--dir path]") {
 		t.Errorf("help add = %d %q", code, out)
+	}
+}
+
+// downRuntime is a Docker that runs nothing and records the volumes
+// argument of each Down.
+type downRuntime struct{ volumes []bool }
+
+func (*downRuntime) Available(context.Context) error           { return nil }
+func (*downRuntime) Up(context.Context, runtime.Project) error { return nil }
+func (r *downRuntime) Down(_ context.Context, _ runtime.Project, volumes bool) error {
+	r.volumes = append(r.volumes, volumes)
+	return nil
+}
+func (*downRuntime) RemoveOwned(context.Context, string, bool) error        { return nil }
+func (*downRuntime) Subnets(context.Context) ([]runtime.Network, error)     { return nil, nil }
+func (*downRuntime) Build(context.Context, runtime.Project, []string) error { return nil }
+func (*downRuntime) ImageUser(context.Context, runtime.Project, string) (runtime.ImageUser, error) {
+	return runtime.ImageUser{}, nil
+}
+func (*downRuntime) Owners(context.Context, string) ([]string, error) { return nil, nil }
+func (*downRuntime) PublishedPorts(context.Context) ([]runtime.PublishedPort, error) {
+	return nil, nil
+}
+func (*downRuntime) Exec(context.Context, string, string, []string) ([]byte, error) {
+	return nil, errors.New("not running")
+}
+func (*downRuntime) Containers(context.Context, string) ([]runtime.Container, error) {
+	return nil, nil
+}
+func (*downRuntime) Stats(context.Context, []string) (map[string]runtime.Usage, error) {
+	return map[string]runtime.Usage{}, nil
+}
+func (*downRuntime) StatsStream(context.Context) iter.Seq2[runtime.Sample, error] {
+	return func(func(runtime.Sample, error) bool) {}
+}
+func (*downRuntime) Logs(context.Context, runtime.Project, []string, bool, int) iter.Seq2[runtime.LogLine, error] {
+	return func(func(runtime.LogLine, error) bool) {}
+}
+
+func TestDownDeletesVolumesByDefault(t *testing.T) {
+	for _, tc := range []struct {
+		args    []string
+		volumes bool
+		out     string
+	}{
+		{nil, true, "its data volumes are deleted"},
+		{[]string{"--keep-volumes"}, false, "data volumes are kept"},
+		{[]string{"--volumes"}, true, "its data volumes are deleted"},
+	} {
+		os.Unsetenv("BB_DOMAIN")
+		rt := &downRuntime{}
+		eng, err := core.New(core.Options{Home: filepath.Join(t.TempDir(), "home"), Runtime: rt, Version: "v9.9.9"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		if code, out, errOut := run(t, eng, "-C", dir, "init", "lab"); code != 0 {
+			t.Fatalf("init: %d %q %q", code, out, errOut)
+		}
+		code, out, errOut := run(t, eng, append([]string{"-C", dir, "down"}, tc.args...)...)
+		if code != 0 || !strings.Contains(out, tc.out) {
+			t.Fatalf("bb down %v = %d %q %q, want %q", tc.args, code, out, errOut, tc.out)
+		}
+		if !slices.Equal(rt.volumes, []bool{tc.volumes}) {
+			t.Errorf("bb down %v: DownRequest.Volumes = %v, want %v", tc.args, rt.volumes, tc.volumes)
+		}
+	}
+}
+
+func TestDownRejectsKeepVolumesWithVolumes(t *testing.T) {
+	rt := &downRuntime{}
+	eng, err := core.New(core.Options{Home: filepath.Join(t.TempDir(), "home"), Runtime: rt, Version: "v9.9.9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := run(t, eng, "-C", t.TempDir(), "down", "--keep-volumes", "--volumes")
+	if code != 2 || !strings.Contains(errOut, "usage: bb down [--keep-volumes]") {
+		t.Fatalf("bb down --keep-volumes --volumes = %d %q, want usage error", code, errOut)
+	}
+	if len(rt.volumes) != 0 {
+		t.Errorf("Down ran with volumes %v", rt.volumes)
+	}
+}
+
+func TestDownHelpHidesVolumes(t *testing.T) {
+	code, out, _ := run(t, engine(t), "help", "down")
+	if code != 0 || !strings.Contains(out, "bb down [--keep-volumes]") || strings.Contains(out, "--volumes") {
+		t.Fatalf("help down = %d %q", code, out)
 	}
 }

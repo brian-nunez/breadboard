@@ -14,7 +14,7 @@ Every entry defines:
 | Secrets | Which secrets it needs and how they reach the server. |
 | Health check | Exercises the real protocol **over TLS with verification**, so "healthy" also proves the certificates work. |
 | Resources | Default `mem_limit` and `cpus`. |
-| Storage | Named volume for data; removed by `bb down --volumes`, including volumes of services removed from `experiment.yaml` since an earlier `bb up` (matched by the `breadboard.experiment-id` label). |
+| Storage | Named volume for data; removed by `bb down` (kept by `bb down --keep-volumes`), including volumes of services removed from `experiment.yaml` since an earlier `bb up` (matched by the `breadboard.experiment-id` label). |
 | Env contract | Variables injected into every app that `uses` it, named the way the ecosystem expects. |
 | Learning notes | Embedded markdown: what you got, key concepts, things to try, things to break. Shown by `bb learn` and in the UI. |
 | Explorer probes | (Phase 3) How the UI reads live state. |
@@ -54,7 +54,7 @@ Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/et
 
 - Official `postgres` image, `ssl=on`, and `pg_hba.conf` accepts only `hostssl` (plus `hostnossl` limited to the private segment's subnet when an edge asks for plaintext).
 - Gotcha: the key file must be `0600` and owned by the image's postgres uid. The entry's start script copies the mounted key with `install -m 0600 -o postgres` before handing over to the image's entrypoint; the learning notes explain it.
-- The app role and database are created by an init script on first start; changing `config.user` or `config.database` later needs `bb down --volumes`. Data lives in a named volume at `/var/lib/postgresql` (Postgres 18 layout).
+- The app role and database are created by an init script on first start; changing `config.user` or `config.database` later needs `bb down`. Data lives in a named volume at `/var/lib/postgresql` (Postgres 18 layout).
 - Secrets: superuser password; default database and app role from `config` (defaults `app`/`app`).
 - Health check: a TLS connection with `sslmode=verify-full` running `select 1`.
 - Env contract:

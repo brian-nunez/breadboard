@@ -109,9 +109,6 @@ func TestExplorerTabWhenTheServiceIsDown(t *testing.T) {
 func TestStarterPages(t *testing.T) {
 	s := newProject(t)
 	cookie := map[string]string{"Cookie": signIn(t, s)}
-	if body := s.get(t, "/", cookie).Body.String(); !strings.Contains(body, "Overview") || strings.Contains(body, "What do you want to build?") {
-		t.Error("with an experiment, / is not the dashboard")
-	}
 	list := s.get(t, "/starters", cookie).Body.String()
 	for id := range starterContents {
 		if !strings.Contains(list, `href="/starters/`+id+`"`) {

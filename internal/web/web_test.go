@@ -164,14 +164,99 @@ func TestOnlyLoopbackAddresses(t *testing.T) {
 func TestNoExperimentShowsHowToStart(t *testing.T) {
 	s := newServer(t)
 	cookie := map[string]string{"Cookie": signIn(t, s)}
-	if home := s.get(t, "/", cookie).Body.String(); !strings.Contains(home, "What do you want to build?") || !strings.Contains(home, "Skip to dashboard") {
-		t.Error("without an experiment, / is not the home page")
-	}
 	rec := s.get(t, "/dashboard", cookie)
 	body := rec.Body.String()
 	for _, want := range []string{"No experiment here yet", "bb init kafka-lab", "data-copy"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("empty overview lacks %q", want)
+		}
+	}
+}
+
+// / and /home are always the landing page of frame 01, with or without an
+// experiment; the dashboard overview is at /dashboard.
+func TestLandingPage(t *testing.T) {
+	for name, s := range map[string]*Server{"no experiment": newServer(t), "experiment": newProject(t)} {
+		cookie := map[string]string{"Cookie": signIn(t, s)}
+		for _, path := range []string{"/", "/home"} {
+			rec := s.get(t, path, cookie)
+			body := rec.Body.String()
+			if rec.Code != http.StatusOK {
+				t.Errorf("%s %s = %d", name, path, rec.Code)
+				continue
+			}
+			for _, want := range []string{"What do you want to build?", "Pick a scenario to see its architecture and how to run it.", `href="/docs/getting-started"`, "New here? Start with Getting started →", `href="/dashboard"`, "Skip to dashboard →", "data-search-shortcut", "data-search-open", "Browse all starters", "Open catalog →"} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s %s lacks %q", name, path, want)
+				}
+			}
+			if strings.Contains(body, "Read-only") || strings.Contains(body, `data-live="/live/overview"`) {
+				t.Errorf("%s %s is not only the landing page", name, path)
+			}
+			last := -1
+			for _, id := range suggestedStarters {
+				i := strings.Index(body, `href="/starters/`+id+`"`)
+				if i < last {
+					t.Errorf("%s %s: %s missing or out of order", name, path, id)
+				}
+				last = i
+			}
+			if n := strings.Count(body, `href="/starters/`); n != len(suggestedStarters) {
+				t.Errorf("%s %s links %d starters, want %d", name, path, n, len(suggestedStarters))
+			}
+			if i := strings.Index(body, "Browse all starters"); i < last {
+				t.Errorf("%s %s: browse card is not last", name, path)
+			}
+		}
+		dash := s.get(t, "/dashboard", cookie).Body.String()
+		if !strings.Contains(dash, "Overview") || strings.Contains(dash, "What do you want to build?") {
+			t.Errorf("%s /dashboard is not the overview", name)
+		}
+	}
+}
+
+// The landing page shows each suggestion's registry title, summary and tech.
+func TestLandingSuggestionsComeFromTheRegistry(t *testing.T) {
+	s := newServer(t)
+	cookie := map[string]string{"Cookie": signIn(t, s)}
+	body := s.get(t, "/", cookie).Body.String()
+	d := s.docsData(httptest.NewRequest(http.MethodGet, "/", nil))
+	for _, id := range suggestedStarters {
+		st, ok := d.Starters[id]
+		if !ok {
+			t.Fatalf("starter %s is not in the registry", id)
+		}
+		for _, want := range []string{cardTitle(st.Title), templEscape(st.Summary), techNames(st.Requires, d.Catalog)} {
+			if !strings.Contains(body, want) {
+				t.Errorf("card %s lacks %q", id, want)
+			}
+		}
+	}
+}
+
+func templEscape(s string) string {
+	return strings.NewReplacer("&", "&amp;", "'", "&#39;", "\"", "&#34;", "<", "&lt;", ">", "&gt;").Replace(s)
+}
+
+// Getting started is the sidebar's first link; no page says Read-only.
+func TestSidebarStartsWithGettingStarted(t *testing.T) {
+	s := newProject(t)
+	cookie := map[string]string{"Cookie": signIn(t, s)}
+	for _, path := range []string{"/dashboard", "/architecture", "/services/postgres"} {
+		body := s.get(t, path, cookie).Body.String()
+		aside := body[strings.Index(body, "<aside"):]
+		first := aside[strings.Index(aside, "<a "):]
+		first = first[:strings.Index(first, "</a>")]
+		if !strings.Contains(first, `href="/docs/getting-started"`) || !strings.Contains(first, "text-indigo-700") || !strings.HasSuffix(first, ">Getting started") {
+			t.Errorf("%s sidebar's first link = %s", path, first)
+		}
+		if n := strings.Count(aside[:strings.Index(aside, "</aside>")], `href="/docs/getting-started"`); n != 1 {
+			t.Errorf("%s sidebar links Getting started %d times", path, n)
+		}
+	}
+	for _, path := range []string{"/", "/home", "/dashboard", "/architecture", "/services/postgres", "/docs", "/docs/getting-started", "/starters", "/starters/kafka/producer-consumer"} {
+		if body := s.get(t, path, cookie).Body.String(); strings.Contains(body, "Read-only") {
+			t.Errorf("%s says Read-only", path)
 		}
 	}
 }

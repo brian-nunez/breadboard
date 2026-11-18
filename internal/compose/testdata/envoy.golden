@@ -355,8 +355,12 @@ static_resources:
                       '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
     - name: outbound_web
-      type: STRICT_DNS
-      dns_lookup_family: V4_ONLY
+      cluster_type:
+        name: envoy.clusters.dns
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+          dns_lookup_family: V4_ONLY
+          dns_refresh_rate: 5s
       connect_timeout: 2s
       lb_policy: LEAST_REQUEST
       load_assignment:
@@ -387,8 +391,12 @@ static_resources:
         max_ejection_percent: 10
         interval: 10s
     - name: outbound_s3
-      type: STRICT_DNS
-      dns_lookup_family: V4_ONLY
+      cluster_type:
+        name: envoy.clusters.dns
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster
+          dns_lookup_family: V4_ONLY
+          dns_refresh_rate: 5s
       connect_timeout: 2s
       lb_policy: ROUND_ROBIN
       load_assignment:
@@ -861,7 +869,7 @@ services:
       breadboard.service: caller-envoy
       breadboard.kind: sidecar
       breadboard.capture: off
-      breadboard.config-hash: 08abe28f6b09f94b
+      breadboard.config-hash: f7ca6f3c80b3c2b5
     mem_limit: 128m
     cpus: 0.25
     restart: unless-stopped

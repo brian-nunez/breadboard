@@ -45,6 +45,15 @@ const traefikStaticCode = `entryPoints:
     http:
       tls: {}
       aliasHeadersStrategy: delete
+      # Reject (400) a request path holding an encoded /, \, NUL, ;, %, ? or #.
+      encodedCharacters:
+        allowEncodedSlash: false
+        allowEncodedBackSlash: false
+        allowEncodedNullCharacter: false
+        allowEncodedSemicolon: false
+        allowEncodedPercent: false
+        allowEncodedQuestionMark: false
+        allowEncodedHash: false
   # TLS routed by SNI without decrypting: TCP routers with passthrough.
   passthrough:
     address: :9443
@@ -176,6 +185,7 @@ templ traefikAnatomy() {
 		"passthrough on 9443 is written only when an upstream is passthrough.",
 		"traefik on 127.0.0.1:8080 serves the API, the dashboard and /ping, which the container's health check (traefik healthcheck --ping) reads. api.insecure is safe here only because the entrypoint is loopback.",
 		"aliasHeadersStrategy: delete drops request headers whose names alias one Traefik manages (X_Forwarded_For for X-Forwarded-For), so a client cannot spoof them.",
+		"encodedCharacters with every option false answers 400 to a path holding an encoded slash, backslash, NUL, semicolon, percent sign, question mark or hash (%2F, %5C, %00, %3B, %25, %3F, %23). A backend that decodes such a path again could route it differently from Traefik's rules; Traefik allows them by default and warns at startup until an entrypoint denies one. Every entrypoint sets both.",
 	)
 	@docH2("tls", "tls.yml")
 	@docCode("tls.yml", traefikTLSCode)

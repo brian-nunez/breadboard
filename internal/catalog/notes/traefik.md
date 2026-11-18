@@ -23,6 +23,7 @@ The configuration is in `.bb/runtime/config/<name>/`, commented for copying:
 - **Servers are listed one by one.** Traefik does not turn one DNS name into several servers, so the generated service lists every replica (`<app>-1`, `<app>-2`, ...). Add a replica and its server appears when Breadboard regenerates the file.
 - **Load-balancing strategies.** `loadBalancer.strategy` is `wrr` (weighted round robin, the default). Traefik 3.7 also has `p2c` (power of two random choices, picking the one with fewer active requests), `hrw` (highest random weight: the same client sticks to the same server) and `leasttime` (favours the servers that answer fastest). Switch in your own copy with `file:`.
 - **Health checks.** Every app server gets `GET /` every 2 seconds; a 2xx or 3xx answer keeps it in. A failing server leaves the rotation until it passes again. Infra upstreams have one server and no check: a check that failed would only turn a working route into a 503.
+- **Encoded characters in the path.** Every entrypoint sets `http.encodedCharacters` with all seven options `false`, so a path holding an encoded `/`, `\`, NUL, `;`, `%`, `?` or `#` (`%2F`, `%5C`, `%00`, `%3B`, `%25`, `%3F`, `%23`) gets a 400 before any router sees it. A backend that decodes the path again could otherwise act on a different path than the one Traefik routed (a split view). The query string is not checked.
 - **The API and dashboard.** They listen on the `traefik` entrypoint at `127.0.0.1:8080` only, next to `/ping`, which the container's health check (`traefik healthcheck --ping`) reads.
 
 ## Try this
@@ -39,4 +40,5 @@ The configuration is in `.bb/runtime/config/<name>/`, commented for copying:
 - Make your app answer `/` with a 404: the health check fails every server and Traefik answers 503. Point `healthCheck.path` at an endpoint that returns 200.
 - Set a `serversTransport`'s `serverName` to another app's name in your copy: the backend's certificate no longer matches, so the handshake fails and requests get an error instead of an answer.
 - Try to reach a terminated app's plaintext port from any container but Traefik: it is not on that network.
+- Request `$<NAME>_URL/api%2F..%2Fadmin`: Traefik answers 400 and your app never sees the request. The policy is in `traefik.yml`, which stays Breadboard's.
 - Send passthrough traffic with an SNI no router claims: Traefik closes the connection.

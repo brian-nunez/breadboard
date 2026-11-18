@@ -39,11 +39,31 @@ entryPoints:
       # Drop request headers whose names alias a header Traefik manages
       # (X_Forwarded_For for X-Forwarded-For), so clients cannot spoof them.
       aliasHeadersStrategy: delete
+      # Reject (400) a request path holding an encoded /, \, NUL, ;, %, ?
+      # or #. A backend that decodes the path again could route it apart
+      # from Traefik's rules (a split view), e.g. /api%2F..%2Fadmin. Traefik
+      # allows them by default and warns at startup until one is denied.
+      encodedCharacters:
+        allowEncodedSlash: false
+        allowEncodedBackSlash: false
+        allowEncodedNullCharacter: false
+        allowEncodedSemicolon: false
+        allowEncodedPercent: false
+        allowEncodedQuestionMark: false
+        allowEncodedHash: false
   # Loopback only: the API, the dashboard and /ping.
   traefik:
     address: 127.0.0.1:8080
     http:
       aliasHeadersStrategy: delete
+      encodedCharacters:
+        allowEncodedSlash: false
+        allowEncodedBackSlash: false
+        allowEncodedNullCharacter: false
+        allowEncodedSemicolon: false
+        allowEncodedPercent: false
+        allowEncodedQuestionMark: false
+        allowEncodedHash: false
 # The file provider only; Traefik never sees the Docker socket. Every
 # file in the directory is loaded and watched for changes.
 providers:
@@ -339,7 +359,7 @@ services:
       breadboard.experiment-id: 0123456789abcdef
       breadboard.service: bb-host
       breadboard.kind: infra
-      breadboard.config-hash: a45e71a48d8e5f61
+      breadboard.config-hash: c8b9a5ccef17aabb
     mem_limit: 128m
     cpus: 0.25
     restart: unless-stopped

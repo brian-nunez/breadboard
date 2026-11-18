@@ -388,6 +388,10 @@ func TestTraefikConfigLoads(t *testing.T) {
 		if out, err := run(e.Server(haproxyServer()).Health.Test[1:]...); err != nil {
 			t.Errorf("health check: %v\n%s", err, out)
 		}
+		// An encoded slash in the path is refused before routing (D-204).
+		if out, _ := run("wget", "-qO-", "--no-check-certificate", "https://127.0.0.1:8443/api%2F..%2Fadmin"); !strings.Contains(out, "400") {
+			t.Errorf("a path with an encoded slash was not refused:\n%s", out)
+		}
 	})
 	// A route named like the first route's fallback: every router still
 	// has its own key (review M2).
@@ -424,6 +428,20 @@ func TestTraefikConfigLoads(t *testing.T) {
 			t.Errorf("a proxy without upstreams answered:\n%s", out)
 		}
 	})
+}
+
+// traefikLogProblem reports whether Traefik's log holds a configuration
+// error or any warning: the aliasHeadersStrategy warning (D-179), the
+// encoded-characters warning (D-204) or one a later release adds.
+// Traefik's console log marks levels as ERR and WRN.
+func traefikLogProblem(logs string) bool {
+	for _, s := range []string{"Error while building configuration", "aliasHeadersStrategy is not configured",
+		"can reject some encoded characters", "WRN", "ERR", "level=warn", "level=error"} {
+		if strings.Contains(logs, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // runTraefik starts Traefik on s's generated files, waits until the API
@@ -467,7 +485,7 @@ func runTraefik(t *testing.T, s Server, router string) (func(...string) (string,
 		}
 	}
 	logs, _ := exec.Command("docker", "logs", name).CombinedOutput()
-	if strings.Contains(string(logs), "Error while building configuration") || strings.Contains(string(logs), "aliasHeadersStrategy is not configured") {
+	if traefikLogProblem(string(logs)) {
 		t.Errorf("Traefik logged configuration problems:\n%s", logs)
 	}
 	return run, api

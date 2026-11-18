@@ -96,6 +96,22 @@ func traefikStaticConfig(s Server) []byte {
 	return encodeYAMLDoc(header, traefikStaticDoc(s, "this service's certificate"))
 }
 
+// traefikEncodedCharacters denies every encoded character Traefik v3.7 can
+// filter in a request path, on each entry point (D-204). Traefik allows all
+// seven by default since v3.6.7 and logs a startup warning until an entry
+// point denies one.
+func traefikEncodedCharacters() ymap {
+	return ym(
+		"allowEncodedSlash", false,
+		"allowEncodedBackSlash", false,
+		"allowEncodedNullCharacter", false,
+		"allowEncodedSemicolon", false,
+		"allowEncodedPercent", false,
+		"allowEncodedQuestionMark", false,
+		"allowEncodedHash", false,
+	)
+}
+
 // traefikStaticDoc is the static configuration's document; cert names the
 // certificate the HTTPS entrypoint presents, for its comment.
 func traefikStaticDoc(s Server, cert string) ymap {
@@ -107,6 +123,8 @@ func traefikStaticDoc(s Server, cert string) ymap {
 				"tls", ym(),
 				ycomment("Drop request headers whose names alias a header Traefik manages\n(X_Forwarded_For for X-Forwarded-For), so clients cannot spoof them."),
 				"aliasHeadersStrategy", "delete",
+				ycomment("Reject (400) a request path holding an encoded /, \\, NUL, ;, %, ?\nor #. A backend that decodes the path again could route it apart\nfrom Traefik's rules (a split view), e.g. /api%2F..%2Fadmin. Traefik\nallows them by default and warns at startup until one is denied."),
+				"encodedCharacters", traefikEncodedCharacters(),
 			),
 		),
 	)
@@ -114,13 +132,13 @@ func traefikStaticDoc(s Server, cert string) ymap {
 		entrypoints = append(entrypoints, yfield{
 			key:     traefikPassEntry,
 			comment: "TLS routed by SNI without decrypting: TCP routers with passthrough.",
-			value:   ym("address", fmt.Sprintf(":%d", ProxyPassthroughPort), "http", ym("aliasHeadersStrategy", "delete")),
+			value:   ym("address", fmt.Sprintf(":%d", ProxyPassthroughPort), "http", ym("aliasHeadersStrategy", "delete", "encodedCharacters", traefikEncodedCharacters())),
 		})
 	}
 	entrypoints = append(entrypoints, yfield{
 		key:     traefikAPIEntry,
 		comment: "Loopback only: the API, the dashboard and /ping.",
-		value:   ym("address", fmt.Sprintf("127.0.0.1:%d", TraefikAPIPort), "http", ym("aliasHeadersStrategy", "delete")),
+		value:   ym("address", fmt.Sprintf("127.0.0.1:%d", TraefikAPIPort), "http", ym("aliasHeadersStrategy", "delete", "encodedCharacters", traefikEncodedCharacters())),
 	})
 	doc := ym(
 		"global", ym("checkNewVersion", false, "sendAnonymousUsage", false),

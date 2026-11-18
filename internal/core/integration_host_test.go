@@ -292,7 +292,12 @@ func TestIntegrationHostRouterLoads(t *testing.T) {
 	if health, err := dockerMay("exec", id, "traefik", "healthcheck", "--configFile=/etc/bb/config/traefik.yml", "--ping"); err != nil {
 		t.Errorf("health check: %v\n%s", err, health)
 	}
-	if logs, _ := dockerMay("logs", id); strings.Contains(logs, "Error while building configuration") || strings.Contains(strings.ToLower(logs), "level=error") || strings.Contains(logs, " ERR ") {
-		t.Errorf("Traefik logged an error:\n%s", logs)
+	// No error and no warning, the encoded-characters warning (D-204) and
+	// the aliasHeadersStrategy one (D-179) included. Traefik's console log
+	// marks levels as ERR and WRN.
+	if logs, _ := dockerMay("logs", id); strings.Contains(logs, "Error while building configuration") ||
+		strings.Contains(strings.ToLower(logs), "level=error") || strings.Contains(strings.ToLower(logs), "level=warn") ||
+		strings.Contains(logs, "ERR") || strings.Contains(logs, "WRN") || strings.Contains(logs, "can reject some encoded characters") {
+		t.Errorf("Traefik logged an error or a warning:\n%s", logs)
 	}
 }

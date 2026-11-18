@@ -38,6 +38,29 @@ type addOut struct {
 	Type string `json:"type"`
 }
 
+type addAppIn struct {
+	Dir  string   `json:"dir,omitempty" jsonschema:"directory of the experiment, inside the one bb mcp was started in; empty means that directory"`
+	Name string   `json:"name" jsonschema:"app name, a lowercase DNS label not yet used in experiment.yaml; also the binary and command; the Go module is example.com/<name>"`
+	Uses []string `json:"uses,omitempty" jsonschema:"infra services the app connects to; leave it out for every infra service in experiment.yaml, or pass [] for none"`
+	Path string   `json:"path,omitempty" jsonschema:"directory for the code, relative to experiment.yaml; empty means ./<name>. It must not exist or must be empty"`
+}
+
+type appUse struct {
+	Service   string   `json:"service"`
+	Type      string   `json:"type"`
+	Title     string   `json:"title"`
+	Plaintext bool     `json:"plaintext,omitempty"`
+	Env       []envVar `json:"env" jsonschema:"the variables the app receives from this service, as bb up injects them; secret values are never returned"`
+}
+
+type addAppOut struct {
+	Name    string   `json:"name"`
+	Dir     string   `json:"dir" jsonschema:"where the code lives, relative to the project"`
+	Command []string `json:"command"`
+	Files   []string `json:"files" jsonschema:"files written, relative to the project"`
+	Uses    []appUse `json:"uses"`
+}
+
 type removeIn struct {
 	Dir  string `json:"dir,omitempty" jsonschema:"directory of the experiment, inside the one bb mcp was started in; empty means that directory"`
 	Name string `json:"name" jsonschema:"service or app to remove from experiment.yaml"`
@@ -124,6 +147,29 @@ func (s *Server) addSpecTools() {
 			return addOut{}, err
 		}
 		return addOut{Name: res.Name, Type: res.Type}, nil
+	})
+
+	add(s, writeTool, false, &sdk.Tool{
+		Name:        "add_app",
+		Description: "Write a minimal, runnable Go program for the user's own code into a new directory and add it to experiment.yaml as an app (path, command, uses). main.go maps every variable each used service gives the app, blank-imports each service's official client library, checks the variables in init, and has an empty main, so up reports the app as exited until the user's code keeps running. Never writes into a directory that has files. Run up afterwards. Same as bb add app.",
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in addAppIn) (addAppOut, error) {
+		dir, err := s.dir(in.Dir)
+		if err != nil {
+			return addAppOut{}, err
+		}
+		res, err := s.eng.AddApp(ctx, core.AddAppRequest{Dir: dir, Name: in.Name, Uses: in.Uses, Path: in.Path})
+		if err != nil {
+			return addAppOut{}, err
+		}
+		out := addAppOut{Name: res.Name, Dir: res.Dir, Command: res.Command, Files: orEmpty(res.Files), Uses: []appUse{}}
+		for _, u := range res.Uses {
+			au := appUse{Service: u.Service, Type: u.Type, Title: u.Title, Plaintext: u.Plaintext, Env: []envVar{}}
+			for _, v := range u.Env {
+				au.Env = append(au.Env, envVarView(v))
+			}
+			out.Uses = append(out.Uses, au)
+		}
+		return out, nil
 	})
 
 	add(s, destructiveTool, false, &sdk.Tool{

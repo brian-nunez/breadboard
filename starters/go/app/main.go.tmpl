@@ -1,0 +1,82 @@
+// Command {{.Name}} is your own program in the Breadboard lab {{.Experiment}}.
+// bb add app wrote it once; from now on it is yours to change.
+//
+// # What your lab gives this app
+//
+{{- if .Uses}}
+// bb up starts this program with environment variables for every service in
+// its uses (experiment.yaml): addresses, credentials and CA files. Your code
+// reads them with os.Getenv and never hard-codes one. Variables marked secret
+// hold a generated password or key; bb creds shows every value.
+{{- range .Uses}}
+//
+// {{.Service}} ({{.Title}}): {{.Summary}}
+//
+{{- range .Vars}}
+//	{{.Pad}}  {{.Help}}{{if .Secret}} (secret){{else if .Value}}: {{.Value}}{{end}}
+{{- end}}
+{{- end}}
+{{- else}}
+// No services yet. Add one with bb add <type> (bb catalog lists them), list
+// it under this app's uses in experiment.yaml, and run bb up: the app then
+// receives its variables. README.md walks through it.
+{{- end}}
+//
+// TLS: every connection in the lab is TLS, verified against the lab CA.
+// SSL_CERT_FILE points at the lab's trust bundle, and Go's crypto/tls reads
+// it, so clients verify servers with no certificate code.
+//
+// Serving TLS yourself: BB_FQDN is this app's address, and TLS_CERT_FILE and
+// TLS_KEY_FILE are its certificate and key, issued for that name.
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+{{- if .Imports}}
+
+	// Official client libraries for the services above. The _ keeps each
+	// in the build until you use it; drop the _ when you do.
+{{- range .Imports}}
+	_ "{{.Path}}" // {{.For}}
+{{- end}}
+{{- end}}
+)
+
+// init runs before main and stops the program at once, with one clear
+// message, if a variable the app expects is missing.
+func init() {
+{{- if .Uses}}
+	requireEnv(
+{{- range .Uses}}
+		// {{.Service}} ({{.Title}})
+		{{range $i, $v := .Vars}}{{if $i}} {{end}}"{{$v.Name}}",{{end}}
+{{- end}}
+	)
+{{- else}}
+	// Add a service's variables here when you add it to uses.
+	requireEnv()
+{{- end}}
+}
+
+// requireEnv exits with one message listing every name in names that is
+// unset or empty. bb up sets them all from uses in experiment.yaml, so a
+// missing one means uses changed without bb up, or the program runs outside
+// Breadboard without them.
+func requireEnv(names ...string) {
+	var missing []string
+	for _, name := range names {
+		if os.Getenv(name) == "" {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		fmt.Fprintf(os.Stderr, "{{.Name}} cannot start: missing environment variables: %s\n"+
+			"bb up sets them from uses in experiment.yaml, and bb creds shows their values.\n", strings.Join(missing, ", "))
+		os.Exit(1)
+	}
+}
+
+func main() {
+}

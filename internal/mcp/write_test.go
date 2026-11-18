@@ -131,3 +131,73 @@ func TestCancellingUpStopsIt(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestAddApp(t *testing.T) {
+	h := newHarness(t, false)
+	h.mustCall(t, "init", map[string]any{"name": "lab"})
+	h.mustCall(t, "add_service", map[string]any{"type": "postgres"})
+	h.mustCall(t, "add_service", map[string]any{"type": "redis"})
+
+	out := h.mustCall(t, "add_app", map[string]any{"name": "shop"})
+	if out["dir"] != "./shop" || len(out["files"].([]any)) != 5 {
+		t.Fatalf("add_app = %v", out)
+	}
+	uses := out["uses"].([]any)
+	if len(uses) != 2 {
+		t.Fatalf("uses = %v", uses)
+	}
+	pg := uses[0].(map[string]any)
+	env := pg["env"].([]any)
+	first := env[0].(map[string]any)
+	if pg["service"] != "postgres" || first["name"] != "DATABASE_URL" || first["secret"] != true || first["value"] != "" {
+		t.Errorf("postgres use = %v", pg)
+	}
+	if _, err := os.Stat(filepath.Join(h.root, "shop", "main.go")); err != nil {
+		t.Fatal(err)
+	}
+
+	// uses: [] means none; a subset is honoured.
+	if out := h.mustCall(t, "add_app", map[string]any{"name": "solo", "uses": []string{}}); len(out["uses"].([]any)) != 0 {
+		t.Errorf("add_app uses [] = %v", out)
+	}
+	if out := h.mustCall(t, "add_app", map[string]any{"name": "cache", "uses": []string{"redis"}, "path": "apps/cache"}); out["dir"] != "./apps/cache" || len(out["uses"].([]any)) != 1 {
+		t.Errorf("add_app subset = %v", out)
+	}
+
+	// The same path rules as every tool: nothing outside the root.
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(h.root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"../elsewhere", "escape/web", outside} {
+		if _, errText := h.call(t, "add_app", map[string]any{"name": "web", "path": path}); errText == "" {
+			t.Errorf("add_app path %q: no error", path)
+		}
+	}
+	if _, errText := h.call(t, "add_app", map[string]any{"name": "web", "dir": outside}); !strings.Contains(errText, "outside") {
+		t.Errorf("add_app dir outside: %q", errText)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("add_app wrote outside the root: %v", entries)
+	}
+	// A symlink inside the root that points at .bb is refused as well.
+	if err := os.Symlink(".bb", filepath.Join(h.root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(h.root, "experiment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, errText := h.call(t, "add_app", map[string]any{"name": "inside", "path": "alias/inside"}); !strings.Contains(errText, "leads into .bb") {
+		t.Errorf("add_app path into .bb: %q", errText)
+	}
+	if _, err := os.Stat(filepath.Join(h.root, ".bb", "inside")); !os.IsNotExist(err) {
+		t.Error("add_app wrote into .bb")
+	}
+	if after, _ := os.ReadFile(filepath.Join(h.root, "experiment.yaml")); string(after) != string(before) {
+		t.Error("a refused add_app changed experiment.yaml")
+	}
+	if _, errText := h.call(t, "add_app", map[string]any{"name": "shop"}); !strings.Contains(errText, "already") {
+		t.Errorf("add_app existing name: %q", errText)
+	}
+}

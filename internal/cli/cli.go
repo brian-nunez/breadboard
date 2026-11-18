@@ -43,7 +43,7 @@ func init() {
 	commands = []command{
 		{"init", "[name]", "Create experiment.yaml and .bb/ here; create BB_HOME and the CA if missing", (*cli).initCmd},
 		{"catalog", "", "List infra service types", (*cli).catalog},
-		{"add", "<type> [--name n]", "Add an infra service to experiment.yaml", (*cli).add},
+		{"add", "<type> [--name n] | app <name> [--uses a,b] [--dir path]", "Add an infra service, or write your own app and add it, to experiment.yaml", (*cli).add},
 		{"remove", "<name>", "Remove a service or app from experiment.yaml", (*cli).remove},
 		{"starters", "", "List starters", (*cli).starters},
 		{"starter", "<id> [--dir path]", "Write a starter's code and add its apps", (*cli).starter},

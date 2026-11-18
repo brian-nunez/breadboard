@@ -55,11 +55,16 @@ type envoyDoc struct {
 			} `yaml:"default_filter_chain"`
 		} `yaml:"listeners"`
 		Clusters []struct {
-			Name     string         `yaml:"name"`
-			Type     string         `yaml:"type"`
-			LBPolicy string         `yaml:"lb_policy"`
-			Outlier  map[string]any `yaml:"outlier_detection"`
-			Load     struct {
+			Name        string `yaml:"name"`
+			Type        string `yaml:"type"`
+			ClusterType struct {
+				Name        string            `yaml:"name"`
+				TypedConfig map[string]string `yaml:"typed_config"`
+			} `yaml:"cluster_type"`
+			DNSLookupFamily string         `yaml:"dns_lookup_family"`
+			LBPolicy        string         `yaml:"lb_policy"`
+			Outlier         map[string]any `yaml:"outlier_detection"`
+			Load            struct {
 				Endpoints []struct {
 					LB []struct {
 						Endpoint struct {
@@ -160,7 +165,13 @@ func TestEnvoyInboundAndOutbound(t *testing.T) {
 	}
 	orders := doc.StaticResources.Clusters[clusters["outbound_orders"]]
 	tls := orders.TransportSocket.TypedConfig
-	if orders.Type != "STRICT_DNS" || orders.LBPolicy != "MAGLEV" || tls.SNI != "orders.bb.internal" ||
+	// The DNS cluster extension, not type STRICT_DNS with the cluster-level
+	// dns_* fields Envoy v1.40 deprecates (D-203).
+	if ct := orders.ClusterType; orders.Type != "" || orders.DNSLookupFamily != "" || ct.Name != "envoy.clusters.dns" ||
+		ct.TypedConfig["dns_lookup_family"] != "V4_ONLY" || ct.TypedConfig["dns_refresh_rate"] != "5s" {
+		t.Errorf("orders cluster discovery = type %q, dns_lookup_family %q, cluster_type %+v", orders.Type, orders.DNSLookupFamily, ct)
+	}
+	if orders.LBPolicy != "MAGLEV" || tls.SNI != "orders.bb.internal" ||
 		tls.Common.Validation.CA.Filename != catalog.CAFile || len(tls.Common.Validation.SANs) != 1 || tls.Common.Validation.SANs[0].Matcher.Exact != "orders.bb.internal" {
 		t.Errorf("orders cluster = %+v", orders)
 	}

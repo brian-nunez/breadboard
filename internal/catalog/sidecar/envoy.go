@@ -56,6 +56,7 @@ const (
 	typeTLSInspect  = "type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector"
 	typeDownTLS     = "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext"
 	typeUpTLS       = "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext"
+	typeDNSCluster  = "type.googleapis.com/envoy.extensions.clusters.dns.v3.DnsCluster"
 	typeStdoutLog   = "type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog"
 )
 
@@ -502,8 +503,10 @@ func targetRoute(t Target) (obj, error) {
 
 // targetCluster is a target's upstream: every address of its shared name,
 // over TLS verified against the lab CA for that name. Envoy re-resolves
-// the name every 5 seconds (its default), so replicas that start later
-// join the pool.
+// the name every 5 seconds, so replicas that start later join the pool.
+// Discovery uses the DNS cluster extension, like the infra Envoy (D-162,
+// D-203): Envoy v1.40 deprecates type STRICT_DNS with the cluster-level
+// dns_* fields in its favour.
 func targetCluster(t Target) (obj, error) {
 	lb, ok := envoyLBPolicies[t.Outbound.LB]
 	if !ok {
@@ -512,8 +515,14 @@ func targetCluster(t Target) (obj, error) {
 	name := envoyOutboundPrefix + t.Service
 	c := o(
 		"name", name,
-		"type", "STRICT_DNS",
-		"dns_lookup_family", "V4_ONLY",
+		"cluster_type", o(
+			"name", "envoy.clusters.dns",
+			"typed_config", o(
+				"@type", typeDNSCluster,
+				"dns_lookup_family", "V4_ONLY",
+				"dns_refresh_rate", "5s",
+			),
+		),
 		"connect_timeout", envoyUpstreamConnTimeout,
 		"lb_policy", lb,
 		"load_assignment", endpoints(name, t.FQDN, t.Port),

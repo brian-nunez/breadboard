@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Format, lint, vet and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+          install-only: true
+
+      - name: Format
+        run: make fmt-check
+
+      - name: Vet
+        run: make vet
+
+      - name: Lint
+        run: make lint
+
+      # Starter tests build every rendered starter, which downloads its modules.
+      - name: Test
+        run: make test
+
+      - name: Test release scripts
+        run: make test-scripts
+
+      # templ output and the compiled stylesheet are committed; regenerating them must change nothing.
+      - name: Generated web files
+        run: make web-check
+
+      - name: go.mod and go.sum are tidy
+        run: make tidy-check
+
+      - name: Build release binaries
+        run: make release
+
+      - name: Check for uncommitted changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --short
+            git diff
+            echo "::error::The build changed tracked files. Run make fmt, go mod tidy or scripts/web.sh generate and commit the result."
+            exit 1
+          fi
+
+  integration:
+    name: Integration tests (Docker)
+    # Real labs in Docker take several minutes, so they run when a change lands on main, before a release.
+    if: github.event_name != 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Docker
+        run: |
+          docker version
+          docker compose version
+
+      - name: Integration tests
+        run: make test-integration
+
+      - name: No lab left behind
+        if: always()
+        run: |
+          left=$(docker ps -aq --filter label=breadboard.experiment; docker network ls -q --filter label=breadboard.experiment; docker volume ls -q --filter label=breadboard.experiment)
+          if [ -n "$left" ]; then
+            echo "::error::Integration tests left labelled containers, networks or volumes behind."
+            docker ps -a --filter label=breadboard.experiment
+            exit 1
+          fi

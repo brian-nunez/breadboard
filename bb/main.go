@@ -14,10 +14,15 @@ import (
 	"github.com/brian-nunez/breadboard/internal/core"
 )
 
+// version is set by release builds (-ldflags "-X main.version=vX.Y.Z").
+// Empty, as after go install, the core reads the module version from the
+// build info instead.
+var version string
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
-	eng, err := core.New(core.Options{})
+	eng, err := core.New(core.Options{Version: version})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bb: %v\n", err)
 		stop()

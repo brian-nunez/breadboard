@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -474,20 +475,23 @@ func (e *Engine) applyStarter(ctx context.Context, st starters.Starter, render r
 		res.AddedApps = append(res.AddedApps, a.Name)
 	}
 	for _, sv := range st.Services {
-		file := ""
+		file, static := "", ""
 		if sv.File != "" {
 			file = "./" + path.Join(target, sv.File)
+		}
+		if sv.StaticFile != "" {
+			static = "./" + path.Join(target, sv.StaticFile)
 		}
 		if doc.HasName(sv.Name) {
 			// Same rule as apps (D-047): only this starter's service from an
 			// earlier apply to this directory is kept as the user left it.
-			if existing, ok := serviceNamed(p.spec, sv.Name); ok && starterOwnsService(p.spec, st, existing, sv.Type, file, res.Dir) {
+			if existing, ok := serviceNamed(p.spec, sv.Name); ok && starterOwnsService(p.spec, st, existing, sv.Type, file, static, res.Dir) {
 				res.ExistingServices = append(res.ExistingServices, sv.Name)
 				continue
 			}
 			return nil, fmt.Errorf("starter %s needs a service named %q, but experiment.yaml already uses that name for something else; rename it there, then apply the starter again: %w", st.ID, sv.Name, ErrExists)
 		}
-		svc := spec.Service{Name: sv.Name, Type: sv.Type, File: file}
+		svc := spec.Service{Name: sv.Name, Type: sv.Type, File: file, StaticFile: static, Config: maps.Clone(sv.Config)}
 		for _, u := range sv.Upstreams {
 			if !slices.ContainsFunc(st.Apps, func(a starters.App) bool { return a.Name == u.Service }) && slices.Contains(st.Requires, u.Service) {
 				u.Service = typeService(u.Service)
@@ -556,17 +560,20 @@ func serviceNamed(s *spec.Spec, name string) (spec.Service, bool) {
 }
 
 // starterOwnsService reports whether existing is the starter's proxy from
-// an earlier apply to dir: the same type, and either the file this apply
-// would set, an upstream to one of the starter's apps in dir, or a client
+// an earlier apply to dir: the same type, and either the file or
+// static_file this apply would set, an upstream to one of the starter's apps in dir, or a client
 // among the starter's apps in dir that the starter declares as using this
 // proxy. The last two keep a re-apply idempotent after the user points file
 // elsewhere: an app-backed proxy is recognised by its upstream, and a proxy
 // in front of infra (a shared PgBouncer) by its client.
-func starterOwnsService(s *spec.Spec, st starters.Starter, existing spec.Service, typ, file, dir string) bool {
+func starterOwnsService(s *spec.Spec, st starters.Starter, existing spec.Service, typ, file, static, dir string) bool {
 	if existing.Type != typ {
 		return false
 	}
 	if file != "" && existing.File != "" && path.Clean(existing.File) == path.Clean(file) {
+		return true
+	}
+	if static != "" && existing.StaticFile != "" && path.Clean(existing.StaticFile) == path.Clean(static) {
 		return true
 	}
 	starterAppInDir := func(name string) (spec.App, bool) {
@@ -690,6 +697,12 @@ type StarterService struct {
 	// File is the native config, relative to the starter's directory
 	// (one of Files); empty when the generated config is kept.
 	File string
+	// StaticFile is the static configuration merged into the proxy's
+	// generated one, relative to the starter's directory (one of Files);
+	// empty when there is none.
+	StaticFile string
+	// Config is the service's config as the starter writes it.
+	Config map[string]string
 }
 
 // StarterApp is an app the starter adds to experiment.yaml.
@@ -729,7 +742,7 @@ func (e *Engine) StarterDetails(ctx context.Context, req StarterDetailsRequest) 
 	}
 	for _, svc := range st.Services {
 		d.StarterInfo.Services = append(d.StarterInfo.Services, svc.Name)
-		d.Services = append(d.Services, StarterService{Name: svc.Name, Type: svc.Type, Upstreams: slices.Clone(svc.Upstreams), File: svc.File})
+		d.Services = append(d.Services, StarterService{Name: svc.Name, Type: svc.Type, Upstreams: slices.Clone(svc.Upstreams), File: svc.File, StaticFile: svc.StaticFile, Config: maps.Clone(svc.Config)})
 	}
 	for _, f := range files {
 		d.Files = append(d.Files, StarterFile{Path: f.Path, Data: f.Data})

@@ -105,6 +105,8 @@ type serviceDetailsOut struct {
 	Listeners   []listener   `json:"listeners"`
 	UsedBy      []string     `json:"used_by"`
 	Upstreams   []upstream   `json:"upstreams,omitempty" jsonschema:"a proxy's backends with their TLS mode and route"`
+	File        string       `json:"file,omitempty" jsonschema:"a proxy's own native config, relative to experiment.yaml, replacing the generated one"`
+	StaticFile  string       `json:"static_file,omitempty" jsonschema:"a proxy's static configuration, relative to experiment.yaml, merged into the generated one (traefik.yml)"`
 	Env         []envGroup   `json:"env" jsonschema:"secret values are empty; call creds for them"`
 	Certificate *certificate `json:"certificate,omitempty" jsonschema:"absent before the first up"`
 	Path        string       `json:"path,omitempty"`
@@ -360,6 +362,7 @@ func (s *Server) addExperimentTools() {
 			}),
 			UsedBy:    orEmpty(d.UsedBy),
 			Upstreams: mapSlice(d.Upstreams, upstreamView),
+			File:      d.File, StaticFile: d.StaticFile,
 			Env: mapSlice(d.Env, func(g core.EnvGroup) envGroup {
 				return envGroup{Service: g.Service, Title: g.Title, Plaintext: g.Plaintext, Reason: g.Reason, Sidecar: g.Sidecar, Vars: mapSlice(g.Vars, envVarView)}
 			}),

@@ -189,6 +189,9 @@ templ serviceOverview(p servicePage) {
 			if len(p.Details.Upstreams) > 0 {
 				@upstreamsCard(p)
 			}
+			if p.Details.File != "" || p.Details.StaticFile != "" {
+				@userConfigCard(p)
+			}
 			if p.Details.Kind == "app" && len(p.Details.Replicas) > 1 {
 				@replicasCard(p)
 			}
@@ -267,6 +270,31 @@ templ upstreamsCard(p servicePage) {
 			</tbody>
 		</table>
 		<div class="p-5 text-xs text-slate-500">Live state of each backend: the <a href={ templ.SafeURL("/services/" + p.Row.Name + "?tab=explore") } class="text-indigo-600 hover:text-indigo-800">{ explorerTabs[p.Details.Type] }</a> tab.</div>
+	}
+}
+
+// userConfigCard names a proxy's own config files from experiment.yaml:
+// file replaces the generated config, static_file extends the static one.
+templ userConfigCard(p servicePage) {
+	@card() {
+		<div class="px-6 pt-6 pb-4">
+			<h2 class="text-base font-semibold">Your config</h2>
+			<p class="mt-1 text-sm text-slate-600">Files next to <code class="font-mono text-[13px]">experiment.yaml</code>, copied in at every <code class="font-mono text-[13px]">bb up</code>. An edit recreates { p.Row.Name }.</p>
+		</div>
+		<dl class="divide-y divide-slate-200 border-t border-slate-200 text-sm">
+			if p.Details.File != "" {
+				<div class="px-6 py-3">
+					<dt class="font-mono text-[13px] text-slate-500">file</dt>
+					<dd class="mt-1"><code class="font-mono text-[13px]">{ p.Details.File }</code> <span class="text-slate-600">replaces the generated config.</span></dd>
+				</div>
+			}
+			if p.Details.StaticFile != "" {
+				<div class="px-6 py-3">
+					<dt class="font-mono text-[13px] text-slate-500">static_file</dt>
+					<dd class="mt-1"><code class="font-mono text-[13px]">{ p.Details.StaticFile }</code> <span class="text-slate-600">is merged into the generated static config (traefik.yml). Entry points, providers, the API, ping and global stay Breadboard's.</span></dd>
+				</div>
+			}
+		</dl>
 	}
 }
 

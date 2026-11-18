@@ -3,6 +3,8 @@ package spec
 import (
 	"bytes"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 
 	"go.yaml.in/yaml/v3"
@@ -103,14 +105,22 @@ func (d *Document) AddService(name, typ string, upstreams ...string) error {
 	return nil
 }
 
-// AddProxy appends a proxy service with its upstreams and file. An
-// upstream with only a service is written in the short form; the others
-// as mappings with the fields that are set. The name must be unused.
+// AddProxy appends a proxy service with its config (keys sorted),
+// upstreams, file and static_file. An upstream with only a service is
+// written in the short form; the others as mappings with the fields that
+// are set. The name must be unused.
 func (d *Document) AddProxy(svc Service) error {
 	if d.HasName(svc.Name) {
 		return fmt.Errorf("service %q: %w", svc.Name, errs.ErrExists)
 	}
 	body := mapping(scalar("type"), scalar(svc.Type))
+	if len(svc.Config) > 0 {
+		cfg := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		for _, k := range slices.Sorted(maps.Keys(svc.Config)) {
+			cfg.Content = append(cfg.Content, scalar(k), scalar(svc.Config[k]))
+		}
+		body.Content = append(body.Content, scalar("config"), cfg)
+	}
 	if len(svc.Upstreams) > 0 {
 		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
 		for _, u := range svc.Upstreams {
@@ -125,6 +135,9 @@ func (d *Document) AddProxy(svc Service) error {
 	}
 	if svc.File != "" {
 		body.Content = append(body.Content, scalar("file"), scalar(svc.File))
+	}
+	if svc.StaticFile != "" {
+		body.Content = append(body.Content, scalar("static_file"), scalar(svc.StaticFile))
 	}
 	if svc.Host != nil {
 		body.Content = append(body.Content, scalar("host"), hostNode(*svc.Host))

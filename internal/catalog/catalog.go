@@ -114,9 +114,19 @@ type Server struct {
 	// generated config file (Proxy.ConfigFile); nil without one. Render
 	// swaps it in, so entries need not handle it.
 	UserConfig []byte
+	// UserStatic is a proxy's static_file, merged into its generated
+	// static configuration (Proxy.StaticFile); nil without one. Render
+	// merges it, so entries need not handle it in Server.
+	UserStatic *UserFile
 	// HostTargets are what the host router serves; set only for the host
 	// router, which renders with HostRouter.
 	HostTargets []HostTarget
+}
+
+// UserFile is a user-owned file named in experiment.yaml.
+type UserFile struct {
+	Path string // as written in experiment.yaml
+	Data []byte
 }
 
 // Plain describes the private segment a plaintext listener lives on.
@@ -275,7 +285,7 @@ func Types(id string) (spec.TypeInfo, bool) {
 		info.Config = e.CheckConfig
 	}
 	if p := e.Proxy; p != nil {
-		info.Proxy = &spec.ProxyInfo{Modes: slices.Clone(p.Modes), HTTP: p.HTTP, Targets: slices.Clone(p.Targets), MinUpstreams: p.MinUpstreams, MaxUpstreams: p.MaxUpstreams}
+		info.Proxy = &spec.ProxyInfo{Modes: slices.Clone(p.Modes), HTTP: p.HTTP, Targets: slices.Clone(p.Targets), MinUpstreams: p.MinUpstreams, MaxUpstreams: p.MaxUpstreams, StaticFile: p.StaticFile != "" && p.MergeStatic != nil}
 	}
 	info.Env = func(service string, plain bool) []string {
 		// Every upstream mode, so a proxy reports each variable it may set.

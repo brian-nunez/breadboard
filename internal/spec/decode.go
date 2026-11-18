@@ -140,7 +140,7 @@ func (dec *decoder) service(name, path string, n *yaml.Node) Service {
 		dec.add(join(path, "type"), "is required")
 		return svc
 	}
-	f := dec.fields(path, n, nil, "type", "resources", "config", "upstreams", "file", "host")
+	f := dec.fields(path, n, nil, "type", "resources", "config", "upstreams", "file", "static_file", "host")
 	if v, ok := f["type"]; ok {
 		svc.Type = dec.str(join(path, "type"), v)
 	} else {
@@ -173,6 +173,9 @@ func (dec *decoder) service(name, path string, n *yaml.Node) Service {
 	}
 	if v, ok := f["file"]; ok {
 		svc.File = dec.str(join(path, "file"), v)
+	}
+	if v, ok := f["static_file"]; ok {
+		svc.StaticFile = dec.str(join(path, "static_file"), v)
 	}
 	if v, ok := f["host"]; ok && !isNull(v) {
 		svc.Host = dec.host(join(path, "host"), v)

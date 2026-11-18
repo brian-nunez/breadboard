@@ -49,6 +49,11 @@ type Service struct {
 	// File is a user-owned native config, relative to experiment.yaml,
 	// that replaces a proxy's generated one.
 	File string
+	// StaticFile is a user-owned YAML mapping of static configuration,
+	// relative to experiment.yaml, merged into a proxy's generated static
+	// configuration (Traefik's traefik.yml). Only proxy types whose
+	// ProxyInfo.StaticFile is set take it.
+	StaticFile string
 	// Host makes the service reachable from the host through the lab's
 	// host router. Nil means it is not.
 	Host *Host

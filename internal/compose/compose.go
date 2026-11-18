@@ -533,6 +533,16 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 		}
 		srv.UserConfig = data
 	}
+	if svc.StaticFile != "" {
+		if in.ReadFile == nil {
+			return nil, nil, fmt.Errorf("compose: %s: static_file %s cannot be read here", svc.Name, svc.StaticFile)
+		}
+		data, err := in.ReadFile(svc.StaticFile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("compose: %s: static_file: %w", svc.Name, err)
+		}
+		srv.UserStatic = &catalog.UserFile{Path: svc.StaticFile, Data: data}
+	}
 	var c catalog.Container
 	if svc.HostRouter {
 		c = catalog.HostRouter(srv)

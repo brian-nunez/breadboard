@@ -56,6 +56,7 @@ round 3: 3 requests, unexpected 0
 - **Ask by hand.** `docker exec bb-{{.Experiment}}-xform-client-1 sh -c 'wget -qS -O- --header "X-User-Id: admin" "$XFORM_EDGE_URL/api/orders/9"'`: the backend's echo shows `user-id=-`, and the response headers (`-S`) show `X-Gateway` and no `X-Powered-By`.
 - **Add a response header.** Add `Cache-Control: no-store` under `customResponseHeaders` and run `bb up`. `wget -S` by hand shows it on every `/api/` and `/legacy/` answer but not on the `/v0/` redirect: middlewares belong to routers, and the `v0` router does not list `gateway-headers`.
 - **Rewrite with a fixed path.** Replace `legacy-rewrite` with a `replacePath` middleware (`path: /orders/7`) and run `bb up`. Every legacy URL now lands on order 7, whatever the client asked for: `replacePath` swaps the whole path, `replacePathRegex` keeps what the group captured.
+- **Count requests per router.** Metrics are static configuration, so they go in a `static_file` rather than `dynamic.yml`. Write `metrics: {prometheus: {entryPoint: traefik, addRoutersLabels: true}}` to `traefik-static.yml` next to `experiment.yaml`, add `static_file: ./traefik-static.yml` under `xform-edge`, and run `bb up`. Then `docker exec bb-{{.Experiment}}-xform-edge-1 wget -qO- http://127.0.0.1:8080/metrics | grep traefik_router_requests_total` shows one counter per router and status code: `api` and `legacy` count 200s, `v0` only 301s.
 
 ## Break this
 

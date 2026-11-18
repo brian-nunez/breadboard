@@ -3,6 +3,7 @@ package web
 import (
 	"bufio"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -70,16 +71,19 @@ func (s *Server) starter(w http.ResponseWriter, r *http.Request) {
 	render(w, r, starterPage(v))
 }
 
-// starterConfigs pairs each proxy that ships a file with its content.
+// starterConfigs pairs each proxy that ships a file or static_file with
+// its content.
 func starterConfigs(d *core.StarterDetails) []starterConfig {
 	var out []starterConfig
 	for _, svc := range d.Services {
-		if svc.File == "" {
-			continue
-		}
-		for _, f := range d.Files {
-			if f.Path == svc.File {
-				out = append(out, starterConfig{Service: svc.Name, Type: svc.Type, Path: f.Path, Data: string(f.Data)})
+		for _, name := range []string{svc.File, svc.StaticFile} {
+			if name == "" {
+				continue
+			}
+			for _, f := range d.Files {
+				if f.Path == name {
+					out = append(out, starterConfig{Service: svc.Name, Type: svc.Type, Path: f.Path, Data: string(f.Data)})
+				}
 			}
 		}
 	}
@@ -117,9 +121,18 @@ func specAdditions(d *core.StarterDetails) string {
 	}
 	for _, svc := range d.Services {
 		fmt.Fprintf(&b, "  %s:\n    type: %s\n", svc.Name, svc.Type)
+		if len(svc.Config) > 0 {
+			b.WriteString("    config:\n")
+			for _, k := range slices.Sorted(maps.Keys(svc.Config)) {
+				fmt.Fprintf(&b, "      %s: %s\n", k, svc.Config[k])
+			}
+		}
 		writeUpstreams(&b, svc.Upstreams)
 		if svc.File != "" {
 			fmt.Fprintf(&b, "    file: ./%s/%s\n", d.Dir, svc.File)
+		}
+		if svc.StaticFile != "" {
+			fmt.Fprintf(&b, "    static_file: ./%s/%s\n", d.Dir, svc.StaticFile)
 		}
 	}
 	b.WriteString("apps:\n")

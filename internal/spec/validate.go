@@ -52,6 +52,9 @@ type ProxyInfo struct {
 	MinUpstreams int
 	// MaxUpstreams caps the number of upstreams; zero means no cap.
 	MaxUpstreams int
+	// StaticFile reports whether the type takes static_file: a YAML
+	// mapping merged into its generated static configuration.
+	StaticFile bool
 }
 
 // TypeLookup finds a catalog entry by id.

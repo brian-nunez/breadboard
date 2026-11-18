@@ -32,7 +32,8 @@
   <a href="#install"><b>Install</b></a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#starters">Starters</a> ·
-  <a href="#learning-guides">Learning guides</a>
+  <a href="#learning-guides">Learning guides</a> ·
+  <a href="https://breadboard.b8z.me/">Docs site</a>
 </p>
 
 <br>

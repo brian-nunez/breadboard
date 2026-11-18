@@ -24,13 +24,13 @@ func TestTransparentLabGetsStableAddresses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.dir, "probe", "Dockerfile"), []byte("FROM scratch AS dev\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h.rt.subnets = []runtime.Network{{Subnet: netip.MustParsePrefix("10.213.0.0/24"), ExperimentID: "someone-else"}}
+	h.rt.subnets = []runtime.Network{{Subnet: labBlock(0), ExperimentID: "someone-else"}}
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
 	ps, _ := state.Project{Dir: h.dir}.LoadState()
-	want := map[string]string{"postgres": "10.213.1.10", "web-1-pod": "10.213.1.11", "web-2-pod": "10.213.1.12", "web-3-pod": "10.213.1.13", "caller-pod": "10.213.1.14"}
-	if ps.Network != "10.213.1.0/24" || len(ps.Addresses) != len(want) {
+	want := map[string]string{"postgres": labAddr(1, 10), "web-1-pod": labAddr(1, 11), "web-2-pod": labAddr(1, 12), "web-3-pod": labAddr(1, 13), "caller-pod": labAddr(1, 14)}
+	if ps.Network != labBlock(1).String() || len(ps.Addresses) != len(want) {
 		t.Fatalf("network = %s, addresses = %v", ps.Network, ps.Addresses)
 	}
 	for k, v := range want {
@@ -39,14 +39,14 @@ func TestTransparentLabGetsStableAddresses(t *testing.T) {
 		}
 	}
 	compose := h.read(".bb/runtime/docker-compose.yml")
-	for _, s := range []string{"subnet: 10.213.1.0/24", "ip_range: 10.213.1.128/25", "ipv4_address: 10.213.1.14", "address_prefix: 10.213.1.11"} {
+	for _, s := range []string{"subnet: " + labAddr(1, 0) + "/24", "ip_range: " + labAddr(1, 128) + "/25", "ipv4_address: " + labAddr(1, 14), "address_prefix: " + labAddr(1, 11)} {
 		if !strings.Contains(compose+h.read(".bb/runtime/config/caller-envoy/envoy.yaml"), s) {
 			t.Errorf("rendered files lack %q", s)
 		}
 	}
 	// A service added before the others takes a new address; nobody moves.
 	h.writeSpec(strings.Replace(visibilitySpec, "services:\n", "services:\n  cache:\n    type: redis\n", 1))
-	h.rt.subnets = append(h.rt.subnets, runtime.Network{Subnet: netip.MustParsePrefix("10.213.1.0/24"), ExperimentID: ps.ExperimentID})
+	h.rt.subnets = append(h.rt.subnets, runtime.Network{Subnet: labBlock(1), ExperimentID: ps.ExperimentID})
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestTransparentLabGetsStableAddresses(t *testing.T) {
 			t.Errorf("after adding a service, %s moved to %s", k, ps.Addresses[k])
 		}
 	}
-	if ps.Network != "10.213.1.0/24" || ps.Addresses["cache"] != "10.213.1.15" {
+	if ps.Network != labBlock(1).String() || ps.Addresses["cache"] != labAddr(1, 15) {
 		t.Errorf("network = %s, cache = %s", ps.Network, ps.Addresses["cache"])
 	}
 	// Without a transparent pod: no fixed subnet or addresses.

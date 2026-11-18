@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -220,7 +219,7 @@ func TestPlaintextEdgeGetsAPrivateSubnet(t *testing.T) {
 	h.add("postgres")
 	spec := h.read("experiment.yaml") + "  pooler:\n    path: ./producer-consumer\n    uses:\n      - service: postgres\n        tls: {mode: off, reason: terminate TLS at a pooler}\n"
 	h.writeSpec(spec)
-	h.rt.subnets = []runtime.Network{{Subnet: netip.MustParsePrefix("10.213.0.0/24"), ExperimentID: "someone-else"}}
+	h.rt.subnets = []runtime.Network{{Subnet: labBlock(0), ExperimentID: "someone-else"}}
 	var warnings []string
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir, Events: func(e Event) {
 		if e.Kind == EventWarning {
@@ -230,31 +229,31 @@ func TestPlaintextEdgeGetsAPrivateSubnet(t *testing.T) {
 		t.Fatal(err)
 	}
 	ps, _ := state.Project{Dir: h.dir}.LoadState()
-	if ps.Segments["plain-postgres"] != "10.213.1.0/24" {
+	if ps.Segments["plain-postgres"] != labBlock(1).String() {
 		t.Fatalf("segments = %v, want the first free /24", ps.Segments)
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "pooler -> postgres") {
 		t.Errorf("warnings = %v", warnings)
 	}
 	// The allocation is stable while this experiment's own network holds it.
-	h.rt.subnets = append(h.rt.subnets, runtime.Network{Subnet: netip.MustParsePrefix("10.213.1.0/24"), ExperimentID: ps.ExperimentID})
+	h.rt.subnets = append(h.rt.subnets, runtime.Network{Subnet: labBlock(1), ExperimentID: ps.ExperimentID})
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
 	ps, _ = state.Project{Dir: h.dir}.LoadState()
-	if ps.Segments["plain-postgres"] != "10.213.1.0/24" {
+	if ps.Segments["plain-postgres"] != labBlock(1).String() {
 		t.Fatalf("segment moved to %v", ps.Segments)
 	}
 	// After a down, another experiment took the subnet: move to a free one.
 	h.rt.subnets = []runtime.Network{
-		{Subnet: netip.MustParsePrefix("10.213.0.0/24"), ExperimentID: "someone-else"},
-		{Subnet: netip.MustParsePrefix("10.213.1.0/24"), ExperimentID: "someone-else"},
+		{Subnet: labBlock(0), ExperimentID: "someone-else"},
+		{Subnet: labBlock(1), ExperimentID: "someone-else"},
 	}
 	if _, err := h.eng.Up(h.ctx(), UpRequest{Dir: h.dir}); err != nil {
 		t.Fatal(err)
 	}
 	ps, _ = state.Project{Dir: h.dir}.LoadState()
-	if ps.Segments["plain-postgres"] != "10.213.2.0/24" {
+	if ps.Segments["plain-postgres"] != labBlock(2).String() {
 		t.Fatalf("segment = %v, want a fresh subnet after a conflict", ps.Segments)
 	}
 	st, err := h.eng.Status(h.ctx(), StatusRequest{Dir: h.dir})
@@ -278,7 +277,7 @@ func TestUpChoosesAgainWhenASubnetIsTaken(t *testing.T) {
 	h.rt.onUp = func() error {
 		ups++
 		if ups == 1 {
-			h.rt.subnets = []runtime.Network{{Subnet: netip.MustParsePrefix("10.213.0.0/24"), ExperimentID: "someone-else"}}
+			h.rt.subnets = []runtime.Network{{Subnet: labBlock(0), ExperimentID: "someone-else"}}
 			return fmt.Errorf("%w: docker compose up: exit status 1", runtime.ErrSubnetTaken)
 		}
 		return nil
@@ -292,7 +291,7 @@ func TestUpChoosesAgainWhenASubnetIsTaken(t *testing.T) {
 		t.Fatal(err)
 	}
 	ps, _ := state.Project{Dir: h.dir}.LoadState()
-	if ups != 2 || ps.Segments["plain-postgres"] != "10.213.1.0/24" {
+	if ups != 2 || ps.Segments["plain-postgres"] != labBlock(1).String() {
 		t.Fatalf("ups = %d, segments = %v; want a second up on the next free /24", ups, ps.Segments)
 	}
 	if !slices.ContainsFunc(infos, func(m string) bool { return strings.Contains(m, "choosing again") }) {

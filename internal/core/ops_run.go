@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"maps"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -72,12 +74,17 @@ func (e *Engine) Up(ctx context.Context, req UpRequest) (*UpResult, error) {
 	// Subnets are chosen from the networks that exist now, and created by
 	// compose up later; another process can create a network on the same
 	// subnet in between. Docker then refuses ours, and choosing again sees
-	// the newcomer and avoids it (D-181).
+	// the newcomer and avoids it (D-181). The subnets a failed attempt chose
+	// are avoided too, in case the newcomer is not listed yet (D-202).
 	var pr *prepared
+	var avoid []netip.Prefix
 	for attempt := 1; ; attempt++ {
-		pr, err = e.start(ctx, p, ev)
+		pr, err = e.start(ctx, p, ev, avoid)
 		if !errors.Is(err, runtime.ErrSubnetTaken) || attempt == subnetAttempts {
 			break
+		}
+		if pr != nil {
+			avoid = slices.AppendSeq(avoid, maps.Values(pr.subnets))
 		}
 		ev.emit(Event{Kind: EventInfo, Message: "Another network took a chosen subnet; choosing again"})
 	}
@@ -112,9 +119,10 @@ func (e *Engine) Up(ctx context.Context, req UpRequest) (*UpResult, error) {
 const subnetAttempts = 5
 
 // start reconciles state, writes the runtime bundle and runs compose up.
-// The caller holds the project lock.
-func (e *Engine) start(ctx context.Context, p *project, ev EventSink) (*prepared, error) {
-	pr, err := e.prepare(ctx, p, ev, true)
+// The caller holds the project lock. When compose up fails, it returns
+// the prepared project with the error, so Up can avoid its subnets.
+func (e *Engine) start(ctx context.Context, p *project, ev EventSink, avoid []netip.Prefix) (*prepared, error) {
+	pr, err := e.prepare(ctx, p, ev, true, avoid)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +165,7 @@ func (e *Engine) start(ctx context.Context, p *project, ev EventSink) (*prepared
 	rp := runtimeProject(p.Project, p.spec.Name)
 	ev.step("Starting containers (app images build on first run)")
 	if err := e.rt.Up(ctx, rp); err != nil {
-		return nil, err
+		return pr, err
 	}
 	return pr, nil
 }

@@ -1,7 +1,6 @@
 package web
 
 import (
-	"html"
 	"strings"
 	"testing"
 )
@@ -23,7 +22,7 @@ func TestSidecarStarterPages(t *testing.T) {
 		"sidecar/log-shipper":           {"type: fluent-bit", "to: s3-compatible", "bucket: app-logs", "github.com/aws/aws-sdk-go-v2/service/s3"},
 		"sidecar/envoy-tls-termination": {"plain-web-envoy", "Read the guide"},
 	} {
-		body := html.UnescapeString(s.get(t, "/starters/"+id, cookie).Body.String())
+		body := plainText([]string{s.get(t, "/starters/"+id, cookie).Body.String()})
 		for _, want := range wants {
 			if !strings.Contains(body, want) {
 				t.Errorf("/starters/%s lacks %q", id, want)

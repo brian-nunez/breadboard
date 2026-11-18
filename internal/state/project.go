@@ -65,6 +65,10 @@ type ProjectState struct {
 	// service, an app instance, or a pod holder) to its fixed address in
 	// Network, so addresses survive bb up.
 	Addresses map[string]string `json:"addresses,omitempty"`
+	// HostPort is the 127.0.0.1 port the host router is published on,
+	// chosen by the first bb up with a host target and kept while it stays
+	// free, even after the last host target goes (D-190).
+	HostPort int `json:"hostPort,omitempty"`
 }
 
 // CertRecord describes an issued leaf certificate.
@@ -188,16 +192,29 @@ func (p Project) SaveSecrets(s *Secrets) error {
 	return saveJSON(p.path(secretsFile), SecretsFormat, s, 0o600)
 }
 
+// Names of a service's certificate pairs under certs/<service>/: its lab
+// leaf, and for the host router its host certificate (host.crt, host.key).
+const (
+	LeafCert = "tls"
+	HostCert = "host"
+)
+
 // ReadCert returns a service's stored certificate and key, or ok=false.
 func (p Project) ReadCert(service string) (certPEM, keyPEM []byte, ok bool, err error) {
-	certPEM, err = os.ReadFile(p.path(certsDir, service, "tls.crt"))
+	return p.ReadNamedCert(service, LeafCert)
+}
+
+// ReadNamedCert returns the pair <name>.crt and <name>.key stored for a
+// service, or ok=false.
+func (p Project) ReadNamedCert(service, name string) (certPEM, keyPEM []byte, ok bool, err error) {
+	certPEM, err = os.ReadFile(p.path(certsDir, service, name+".crt"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil, false, nil
 	}
 	if err != nil {
 		return nil, nil, false, err
 	}
-	keyPEM, err = os.ReadFile(p.path(certsDir, service, "tls.key"))
+	keyPEM, err = os.ReadFile(p.path(certsDir, service, name+".key"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil, false, nil
 	}
@@ -209,14 +226,31 @@ func (p Project) ReadCert(service string) (certPEM, keyPEM []byte, ok bool, err 
 
 // WriteCert stores a service's certificate (0644) and key (0600).
 func (p Project) WriteCert(service string, certPEM, keyPEM []byte) error {
+	return p.WriteNamedCert(service, LeafCert, certPEM, keyPEM)
+}
+
+// WriteNamedCert stores a service's pair <name>.crt (0644) and <name>.key
+// (0600).
+func (p Project) WriteNamedCert(service, name string, certPEM, keyPEM []byte) error {
 	dir := p.path(certsDir, service)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := WriteFile(filepath.Join(dir, "tls.key"), keyPEM, 0o600); err != nil {
+	if err := WriteFile(filepath.Join(dir, name+".key"), keyPEM, 0o600); err != nil {
 		return err
 	}
-	return WriteFile(filepath.Join(dir, "tls.crt"), certPEM, 0o644)
+	return WriteFile(filepath.Join(dir, name+".crt"), certPEM, 0o644)
+}
+
+// RemoveNamedCert deletes a service's pair <name>.crt and <name>.key, if
+// present, leaving its other files.
+func (p Project) RemoveNamedCert(service, name string) error {
+	for _, ext := range []string{".crt", ".key"} {
+		if err := os.Remove(p.path(certsDir, service, name+ext)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 // RemoveCert deletes a service's stored certificate, if any.

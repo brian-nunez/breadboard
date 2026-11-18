@@ -11,6 +11,7 @@ import (
 
 	"github.com/brian-nunez/breadboard/internal/catalog"
 	"github.com/brian-nunez/breadboard/internal/catalog/sidecar"
+	"github.com/brian-nunez/breadboard/internal/errs"
 	"github.com/brian-nunez/breadboard/internal/pki"
 	"github.com/brian-nunez/breadboard/internal/spec"
 )
@@ -69,6 +70,11 @@ type Service struct {
 	Upstreams []catalog.Upstream
 	// File is a proxy's user-owned config, relative to experiment.yaml.
 	File string
+	// HostRouter marks the engine-owned host router (spec.HostRouterName),
+	// an infra service of type traefik; HostTargets are what it serves,
+	// in route order (ADR-0017).
+	HostRouter  bool
+	HostTargets []catalog.HostTarget
 
 	// App only.
 	App *spec.App
@@ -153,6 +159,21 @@ type Segment struct {
 // SegmentFQDN is a service's alias on its private segment.
 func SegmentFQDN(service, domain string) string {
 	return fmt.Sprintf("%s.plain.%s", service, domain)
+}
+
+// HostName is a host name for a target or instance label:
+// <label>.<experiment>.localhost.
+func HostName(label, experiment string) string {
+	return label + "." + experiment + "." + pki.HostDomain
+}
+
+// HostRouter returns the lab's host router, if it has one.
+func (m *Model) HostRouter() (*Service, bool) {
+	i := slices.IndexFunc(m.Services, func(s *Service) bool { return s.HostRouter })
+	if i < 0 {
+		return nil, false
+	}
+	return m.Services[i], true
 }
 
 // Service returns a service by name.
@@ -278,7 +299,83 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 	}
 	logBuckets(m)
 	m.Segments = segments(m)
+	if err := hostRouter(m, s); err != nil {
+		return nil, err
+	}
 	return m, nil
+}
+
+// hostRouter adds the host router when any app or service has host: an
+// infra service of type traefik on the default network only, with no
+// dependencies, after every other service (D-186). Services come first,
+// then apps, each in spec order.
+func hostRouter(m *Model, s *spec.Spec) error {
+	var targets []catalog.HostTarget
+	for _, declared := range s.Services {
+		if declared.Host == nil {
+			continue
+		}
+		svc, _ := m.Service(declared.Name)
+		i := slices.IndexFunc(svc.Entry.Listeners, func(l catalog.Listener) bool { return l.Protocol == "https" })
+		if i < 0 {
+			return fmt.Errorf("resolve %s: host needs an HTTPS listener, and type %s has none", svc.Name, svc.Entry.ID)
+		}
+		targets = append(targets, catalog.HostTarget{
+			Target:     svc.Name,
+			Name:       HostName(svc.Name, m.Name),
+			ServerName: svc.FQDN,
+			Port:       svc.Entry.Listeners[i].Port,
+			Instances:  []catalog.HostInstance{{Service: svc.Name, FQDN: svc.FQDN}},
+		})
+	}
+	for _, app := range s.Apps {
+		if app.Host == nil {
+			continue
+		}
+		port, ok := app.HostPort()
+		if !ok {
+			return fmt.Errorf("resolve %s: host needs a TLS port", app.Name)
+		}
+		t := catalog.HostTarget{Target: app.Name, App: true, Name: HostName(app.Name, m.Name), ServerName: app.Name + "." + m.Domain, Port: port}
+		insts := m.Instances(app.Name)
+		for _, inst := range insts {
+			hi := catalog.HostInstance{Service: inst.Name, FQDN: inst.FQDN}
+			if len(insts) > 1 {
+				hi.Name = HostName(inst.Name, m.Name)
+			}
+			t.Instances = append(t.Instances, hi)
+		}
+		targets = append(targets, t)
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	// Host names and lab names must not overlap: a lab name would then be
+	// a *.localhost name the host CA vouches for (D-187).
+	own := m.Name + "." + pki.HostDomain
+	if m.Domain == own || strings.HasSuffix(m.Domain, "."+own) {
+		return fmt.Errorf("%w: host access needs a lab domain outside %s, and the domain is %s: change it with bb config set domain", errs.ErrValidation, own, m.Domain)
+	}
+	entry, ok := catalog.Lookup("traefik")
+	if !ok {
+		return fmt.Errorf("resolve %s: the catalog has no traefik", spec.HostRouterName)
+	}
+	name := spec.HostRouterName
+	fqdn := name + "." + m.Domain
+	m.Services = append(m.Services, &Service{
+		Name:        name,
+		Kind:        Infra,
+		FQDN:        fqdn,
+		Aliases:     []string{fqdn},
+		Identity:    pki.Identity(m.Domain, m.Name, name),
+		Resources:   entry.Resources,
+		Image:       entry.Image,
+		Entry:       entry,
+		Config:      entry.ResolveConfig(nil),
+		HostRouter:  true,
+		HostTargets: targets,
+	})
+	return nil
 }
 
 // upstreams resolves a proxy's upstreams into edges and the backends its

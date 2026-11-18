@@ -52,28 +52,35 @@ func traefik() *Entry {
 			Unit:       traefikService,
 		},
 		Server: func(s Server) Container {
-			static := ConfigDir + "/" + traefikStaticFile
-			return Container{
-				Command: []string{"traefik", "--configFile=" + static},
-				Files: []File{
-					{Name: traefikStaticFile, Data: traefikStaticConfig(s)},
-					{Name: traefikTLSFile, Mount: traefikDynamicDir + "/" + traefikTLSFile, Data: traefikTLSConfig(s)},
-					{Name: traefikConfigFile, Mount: traefikDynamicDir + "/" + traefikConfigFile, Data: traefikDynamicConfig(s)},
-				},
-				Health: Health{
-					// The image is Alpine without curl or openssl; Traefik's
-					// own client asks /ping on the loopback entrypoint the
-					// static config names.
-					Test:          []string{"CMD", "traefik", "healthcheck", "--configFile=" + static, "--ping"},
-					Interval:      10 * time.Second,
-					Timeout:       5 * time.Second,
-					Retries:       3,
-					StartPeriod:   30 * time.Second,
-					StartInterval: 1 * time.Second,
-				},
-			}
+			return traefikContainer(traefikStaticConfig(s), traefikTLSConfig(s), traefikDynamicConfig(s))
 		},
 		Client: ProxyClientEnv,
+	}
+}
+
+// traefikContainer runs Traefik on the three generated files: the static
+// config, the certificate store and the routes, both read by the file
+// provider from traefikDynamicDir.
+func traefikContainer(static, tls, dynamic []byte) Container {
+	staticPath := ConfigDir + "/" + traefikStaticFile
+	return Container{
+		Command: []string{"traefik", "--configFile=" + staticPath},
+		Files: []File{
+			{Name: traefikStaticFile, Data: static},
+			{Name: traefikTLSFile, Mount: traefikDynamicDir + "/" + traefikTLSFile, Data: tls},
+			{Name: traefikConfigFile, Mount: traefikDynamicDir + "/" + traefikConfigFile, Data: dynamic},
+		},
+		Health: Health{
+			// The image is Alpine without curl or openssl; Traefik's
+			// own client asks /ping on the loopback entrypoint the
+			// static config names.
+			Test:          []string{"CMD", "traefik", "healthcheck", "--configFile=" + staticPath, "--ping"},
+			Interval:      10 * time.Second,
+			Timeout:       5 * time.Second,
+			Retries:       3,
+			StartPeriod:   30 * time.Second,
+			StartInterval: 1 * time.Second,
+		},
 	}
 }
 
@@ -86,8 +93,14 @@ func traefikStaticConfig(s Server) []byte {
 		"listeners depend on it. Routing lives in the dynamic configuration",
 		fmt.Sprintf("in %s, which services.%s.file replaces.", traefikDynamicDir, s.Name),
 	}
+	return encodeYAMLDoc(header, traefikStaticDoc(s, "this service's certificate"))
+}
+
+// traefikStaticDoc is the static configuration's document; cert names the
+// certificate the HTTPS entrypoint presents, for its comment.
+func traefikStaticDoc(s Server, cert string) ymap {
 	entrypoints := ym(
-		ycomment(fmt.Sprintf("HTTPS with this service's certificate (the default certificate in\n%s/%s). Routers on it use TLS without saying so.", traefikDynamicDir, traefikTLSFile)),
+		ycomment(fmt.Sprintf("HTTPS with %s (the default certificate in\n%s/%s). Routers on it use TLS without saying so.", cert, traefikDynamicDir, traefikTLSFile)),
 		traefikEntrypoint, ym(
 			"address", fmt.Sprintf(":%d", ProxyHTTPSPort),
 			"http", ym(
@@ -121,7 +134,7 @@ func traefikStaticConfig(s Server) []byte {
 		"api", ym("insecure", true, "dashboard", true),
 		"ping", ym("entryPoint", traefikAPIEntry),
 	)
-	return encodeYAMLDoc(header, doc)
+	return doc
 }
 
 // traefikService is the Traefik service (HTTP, or TCP for passthrough)

@@ -41,6 +41,11 @@ type UpResult struct {
 	Experiment string
 	Services   []ServiceStatus
 	Warnings   []string
+	// HostURLs reach the lab's host targets from the host, in route order
+	// (each target, then its instances); HostPort is the 127.0.0.1 port
+	// they share. Empty and zero without a host target.
+	HostURLs []HostURL
+	HostPort int
 }
 
 // Up reconciles state, materializes the compose project into .bb/runtime/,
@@ -87,11 +92,19 @@ func (e *Engine) Up(ctx context.Context, req UpRequest) (*UpResult, error) {
 	if err := e.waitHealthy(ctx, pr.model, timeout, ev); err != nil {
 		return nil, err
 	}
-	statuses, warnings, err := e.status(ctx, pr.model)
+	statuses, warnings, err := e.status(ctx, pr.model, pr.hostPort)
 	if err != nil {
 		return nil, err
 	}
-	return &UpResult{Experiment: p.spec.Name, Services: statuses, Warnings: warnings}, nil
+	urls := hostURLs(pr.model, pr.hostPort)
+	for _, u := range urls {
+		to := u.Target
+		if u.Instance != "" {
+			to = u.Instance
+		}
+		ev.emit(Event{Kind: EventInfo, Service: spec.HostRouterName, Message: fmt.Sprintf("Host access: %s -> %s", u.URL, to)})
+	}
+	return &UpResult{Experiment: p.spec.Name, Services: statuses, Warnings: warnings, HostURLs: urls, HostPort: pr.hostPort}, nil
 }
 
 // subnetAttempts bounds how often Up chooses subnets again after Docker
@@ -101,7 +114,7 @@ const subnetAttempts = 5
 // start reconciles state, writes the runtime bundle and runs compose up.
 // The caller holds the project lock.
 func (e *Engine) start(ctx context.Context, p *project, ev EventSink) (*prepared, error) {
-	pr, err := e.prepare(ctx, p, ev)
+	pr, err := e.prepare(ctx, p, ev, true)
 	if err != nil {
 		return nil, err
 	}
@@ -424,6 +437,13 @@ type ServiceStatus struct {
 	Parent   string
 	Registry string
 	Sidecar  *SidecarInfo
+	// HostURLs reach the service from the host (ADR-0017): an app
+	// instance's app URL, then its own URL when the app has replicas; an
+	// infra target's URL. Empty without host access or before the first
+	// bb up records the port.
+	HostURLs []string
+	// HostRouter marks the lab's host router (bb-host).
+	HostRouter bool
 }
 
 // Edge is a connection from an app to a service, through an Envoy
@@ -455,6 +475,9 @@ type StatusResult struct {
 	Domain     string
 	Services   []ServiceStatus
 	Warnings   []string
+	// HostURLs and HostPort as in UpResult.
+	HostURLs []HostURL
+	HostPort int
 }
 
 // Status reports every service's state, health, and resource use, plus
@@ -475,14 +498,24 @@ func (e *Engine) Status(ctx context.Context, req StatusRequest) (*StatusResult, 
 	if err != nil {
 		return nil, err
 	}
-	statuses, warnings, err := e.status(ctx, m)
+	port := 0
+	if _, ok := m.HostRouter(); ok {
+		port = recordedHostPort(p)
+	}
+	statuses, warnings, err := e.status(ctx, m, port)
 	if err != nil {
 		return nil, err
 	}
-	return &StatusResult{Experiment: m.Name, Domain: m.Domain, Services: statuses, Warnings: warnings}, nil
+	res := &StatusResult{Experiment: m.Name, Domain: m.Domain, Services: statuses, Warnings: warnings, HostURLs: hostURLs(m, port)}
+	if len(res.HostURLs) > 0 {
+		res.HostPort = port
+	}
+	return res, nil
 }
 
-func (e *Engine) status(ctx context.Context, m *model.Model) ([]ServiceStatus, []string, error) {
+// status describes every service; hostPort is the host router's port, or
+// zero when unknown.
+func (e *Engine) status(ctx context.Context, m *model.Model, hostPort int) ([]ServiceStatus, []string, error) {
 	list, err := e.rt.Containers(ctx, m.Name)
 	if err != nil {
 		return nil, nil, err
@@ -522,6 +555,8 @@ func (e *Engine) status(ctx context.Context, m *model.Model) ([]ServiceStatus, [
 			Health:      health(pc, pok),
 			CPULimit:    svc.Resources.CPUs,
 			MemoryLimit: svc.Resources.Memory,
+			HostURLs:    serviceHostURLs(m, svc, hostPort),
+			HostRouter:  svc.HostRouter,
 		}
 		switch svc.Kind {
 		case model.Infra:

@@ -83,7 +83,19 @@ type Input struct {
 	ReadFile func(path string) ([]byte, error)
 	// Header is the comment written at the top of each compose file.
 	Header string
+	// HostCert is the host router's certificate from the host CA, and
+	// HostPort the 127.0.0.1 port its HTTPS entrypoint is published on.
+	// Both are set exactly when the model has a host router.
+	HostCert *Cert
+	HostPort int
 }
+
+// Paths of the host router's host certificate inside a bundle. Only the
+// router mounts them.
+const (
+	HostCertPath = "tls/bb-host/host.crt"
+	HostKeyPath  = "tls/bb-host/host.key"
+)
 
 // File is one generated file.
 type File struct {
@@ -194,6 +206,21 @@ func Render(in Input) (*Bundle, error) {
 		hash := sha256.New()
 		for _, part := range [][]byte{cert.Cert, cert.Key, in.CA, in.TrustBundle} {
 			hash.Write(part)
+		}
+		if svc.HostRouter {
+			if in.HostCert == nil || in.HostPort == 0 {
+				return nil, fmt.Errorf("compose: %s needs the host certificate and a host port", svc.Name)
+			}
+			// The host certificate is mounted in the router only, and is
+			// part of its config hash, so a reissue recreates it.
+			hash.Write(in.HostCert.Cert)
+			hash.Write(in.HostCert.Key)
+			add(HostCertPath, in.HostCert.Cert, 0o644)
+			add(HostKeyPath, in.HostCert.Key, 0o644)
+			mounts = append(mounts,
+				"./"+HostCertPath+":"+catalog.HostCertFile+":ro",
+				"./"+HostKeyPath+":"+catalog.HostKeyFile+":ro",
+			)
 		}
 		addHashed := func(p string, data []byte, mode os.FileMode) {
 			hash.Write([]byte(p))
@@ -492,6 +519,7 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 		}
 	}
 	srv.Upstreams = catalog.WithSecrets(svc.Upstreams, in.Secrets.Ref)
+	srv.HostTargets = svc.HostTargets
 	if svc.File != "" {
 		if in.ReadFile == nil {
 			return nil, nil, fmt.Errorf("compose: %s: file %s cannot be read here", svc.Name, svc.File)
@@ -505,9 +533,14 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 		}
 		srv.UserConfig = data
 	}
-	c, err := svc.Entry.Render(srv)
-	if err != nil {
-		return nil, nil, fmt.Errorf("compose: %w", err)
+	var c catalog.Container
+	if svc.HostRouter {
+		c = catalog.HostRouter(srv)
+	} else {
+		var err error
+		if c, err = svc.Entry.Render(srv); err != nil {
+			return nil, nil, fmt.Errorf("compose: %w", err)
+		}
 	}
 	def := mapping(str("image"), str(svc.Entry.Image))
 	if len(c.Entrypoint) > 0 {
@@ -523,6 +556,10 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 		mounts = append([]string{svc.Name + "-data:" + svc.Entry.DataPath}, mounts...)
 	}
 	def.Content = append(def.Content, str("healthcheck"), healthcheck(c.Health))
+	if svc.HostRouter {
+		// Loopback only, like every published port (D-190).
+		def.Content = append(def.Content, str("ports"), seq(str(fmt.Sprintf("127.0.0.1:%d:%d", in.HostPort, catalog.HostRouterPort))))
+	}
 	return def, mounts, nil
 }
 

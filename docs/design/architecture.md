@@ -111,7 +111,8 @@ Created by `bb init` next to `experiment.yaml`, directory mode `0700`.
                       subnets, addresses, the host router's port (hostPort)
   secrets.json        generated secrets (0600)
   certs/<service>/    leaf certificate and key per service (key 0600); certs/bb-host/
-                      also holds host.crt and host.key, the router's host certificate
+                      also holds host.crt and host.key, the router's host certificate,
+                      recorded in state.json under bb-host/host with issuer host
   runtime/            the generated compose project: docker-compose.yml, ca.pem,
                       trust-bundle.pem, tls/<service>/, config/<service>/
   lock                advisory file lock
@@ -147,7 +148,7 @@ Every file Breadboard owns carries a format version, and every format only moves
 - Replicas: an app with `replicas: N` renders services `<app>-1` … `<app>-N` (ADR-0016), each with the aliases `<app>-<n>.<domain>` and `<app>.<domain>`.
 - Proxies (Phase 5): a proxy is an infra service with no data volume and no `depends_on` on its upstreams; it finds them through Docker's DNS at runtime. Its generated config (or the user's `file`, copied in at each render) is under `config/<proxy>/`. An app behind a terminating proxy runs as a pod: its holder joins `plain-<app>` with a static address per replica (the segment's `ip_range` is the upper half), and `<instance>-netinit` installs the plaintext guard (D-121). An existing network whose addressing changed (an app segment without its `ip_range`, like the default network's subnet) is recreated by `bb up`: containers stop, volumes stay.
 
-- Host access (Phase 5 wave E, ADR-0017): a lab with a `host` target gets the service `bb-host`, Traefik on the catalog pin, an infra service of type `traefik` marked as the host router. Its `8443` is published on `127.0.0.1:<hostPort>`. The port comes from 44300–44999, starting at `44300 + FNV-1a-32(experiment) mod 700` and wrapping, first free on `127.0.0.1` and not published by a container; it is recorded in `.bb/state.json` and kept while free (D-190). Its generated config routes ``Host(`<name>`)`` for each host name to every instance of the target and re-encrypts against the lab CA (D-189). `bb up` prints the URLs, `Status` and `ServiceDetails` carry `HostURLs`, and `bb export compose` includes the router. A lab without a `host` target renders exactly as before.
+- Host access (Phase 5 wave E, ADR-0017): a lab with a `host` target gets the service `bb-host`, Traefik on the catalog pin, an infra service of type `traefik` marked as the host router. Its `8443` is published on `127.0.0.1:<hostPort>`. The port comes from 44300–44999, starting at `44300 + FNV-1a-32(experiment) mod 700` and wrapping, first free on `127.0.0.1` and not published by a container; it is recorded in `.bb/state.json` and kept while free (D-190). Its generated config routes ``Host(`<name>`)`` for each host name to every instance of the target and re-encrypts against the lab CA (D-189). Routers, services and transports are keyed `target-<target>` and `instance-<instance>` (D-197); the host certificate is mounted at `/etc/bb/host/` in the router only. Only `bb up` probes and records the port; a port another program or lab took since is replaced with a warning, and an export uses the recorded or start port without probing (D-198). `bb up` prints the URLs (`UpResult.HostURLs`), `Status` and `ServiceDetails` carry `HostURLs` and mark the router row with `HostRouter` (D-199), and `bb export compose` includes the router. A lab without a `host` target renders exactly as before.
 
 ### Pods
 

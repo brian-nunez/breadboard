@@ -115,3 +115,45 @@ func TestProjectArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePublishedPorts(t *testing.T) {
+	data := []byte(`[
+  {"Config": {"Labels": {"breadboard.experiment-id": "abc", "breadboard.service": "bb-host"}}, "State": {"Running": true},
+   "HostConfig": {"PortBindings": {"8443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "44312"}]}}},
+  {"Config": {"Labels": null}, "State": {"Running": false},
+   "HostConfig": {"PortBindings": {"80/tcp": [{"HostIp": "", "HostPort": "44400-44401"}], "53/udp": [{"HostIp": "", "HostPort": ""}]}}},
+  {"Config": {"Labels": {}}, "HostConfig": {"PortBindings": null}}
+]`)
+	got, err := parsePublishedPorts(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]PublishedPort{
+		44312: {HostIP: "127.0.0.1", HostPort: 44312, ExperimentID: "abc", Service: "bb-host", Running: true},
+		44400: {HostPort: 44400},
+		44401: {HostPort: 44401},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ports = %+v", got)
+	}
+	for _, p := range got {
+		if want[p.HostPort] != p {
+			t.Errorf("port %d = %+v, want %+v", p.HostPort, p, want[p.HostPort])
+		}
+	}
+}
+
+func TestOnlyMissingContainers(t *testing.T) {
+	for stderr, want := range map[string]bool{
+		"Error: No such object: 0123abc\n":                         true,
+		"Error response from daemon: No such container: 0123abc\n": true,
+		"Error: No such object: a\nError: No such container: b":    true,
+		"":                               false,
+		"permission denied":              false,
+		"Error: No such object: a\nboom": false,
+	} {
+		if got := onlyMissingContainers(stderr); got != want {
+			t.Errorf("%q: %v, want %v", stderr, got, want)
+		}
+	}
+}

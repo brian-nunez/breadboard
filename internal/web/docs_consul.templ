@@ -20,7 +20,7 @@ func init() {
 			{"Health check configuration reference", "https://developer.hashicorp.com/consul/docs/reference/service/health-check"},
 			{"Consul Go API client (api)", "https://pkg.go.dev/github.com/hashicorp/consul/api"},
 		},
-		Starters: []string{"consul/service-discovery", "consul/self-registration"},
+		Starters: []string{"consul/service-discovery", "consul/self-registration", stDiscovery.URL},
 		Guides: []guide{
 			{
 				Slug: "basic-usage", Title: "Finding services by name", Summary: "Ask Consul for the healthy instances of a service.",
@@ -370,6 +370,10 @@ templ consulHealthChecks() {
 		"Within one check interval the check turns critical, and the caller logs no healthy greeter instances.",
 		"Start the greeter again and the next passing check brings it back.",
 	)
+	@docP() {
+		The same health drives a load balancer that reads the catalog: Traefik leaves out instances whose checks are critical, so a failing check takes a replica out of its routes too.
+	}
+	@docStarters(stDiscovery)
 	@docH2("deregister", "Removing dead registrations")
 	@docP() {
 		A failing check hides an instance; it does not remove it. @docCodeWord("DeregisterCriticalServiceAfter") on a service's check tells Consul to deregister the service, with all its checks, once the check has been critical for that long. The minimum is one minute, and the process that reaps critical services runs every 30 seconds, so removal can take a little longer than the setting. The self-registration starter sets it to @docCodeWord("1m"); the sidecar does not need it, because the agent deregisters the app when it leaves.

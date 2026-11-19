@@ -1,0 +1,43 @@
+// Command ct-backend runs as three replicas behind Traefik, and contains no
+// Consul or Traefik code. Its entry in experiment.yaml does the wiring:
+//
+//	register:
+//	  port: 8443
+//	  tags:
+//	    - traefik.enable=true
+//	    - traefik.http.routers.ct-backend.rule=PathPrefix(`/`)
+//	    - traefik.http.services.ct-backend.loadbalancer.server.scheme=https
+//
+// register gives each replica a Consul agent (ct-backend-1-agent, ...) in
+// its network namespace. The agent registers the replica as service
+// ct-backend with its own address (ct-backend-1.<domain>), port 8443, the
+// tags, and a health check: a verified TLS handshake every 5 seconds.
+//
+// The tags are written for Traefik. ct-edge reads Consul's catalog every 5
+// seconds and routes only services tagged traefik.enable=true. The router
+// tag gives the route its rule (on port 8443, with Traefik's certificate),
+// and the scheme tag makes Traefik reach each replica over HTTPS, verified
+// against the lab CA. Add a replica and its agent registers it; Traefik's
+// config never changes.
+//
+// Each request is answered with the name of the instance that served it, so
+// the client can count which replicas Traefik found.
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+)
+
+func main() {
+	name := os.Getenv("BB_SERVICE") // ct-backend-1, -2, ...
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, name)
+	})
+	// Traefik re-encrypts: it connects over TLS and verifies this certificate
+	// against the lab CA. The paths come from the environment.
+	log.Printf("%s serving TLS on :8443", name)
+	log.Fatal(http.ListenAndServeTLS(":8443", os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"), nil))
+}

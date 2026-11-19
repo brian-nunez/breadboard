@@ -100,7 +100,7 @@ func TestDocsStarterLinksAreKnown(t *testing.T) {
 		}
 	}
 
-	for _, l := range []link{stRoundRobin, stLeastConn, stP2C, stHashing, stSticky, stCanary, stBlueGreen, stHealth, stL4L7, stTLSModes, stMirroring, stDraining, stPoolModes, stPoolSidecar, stPathHost, stTransform, stVersioning, stRateLimit, stBreaking, stRetries, stJWT, stFwdAuth, stBFF, stGRPC, stSidecarCB} {
+	for _, l := range []link{stRoundRobin, stLeastConn, stP2C, stHashing, stSticky, stCanary, stBlueGreen, stHealth, stDiscovery, stL4L7, stTLSModes, stMirroring, stDraining, stPoolModes, stPoolSidecar, stPathHost, stTransform, stVersioning, stRateLimit, stBreaking, stRetries, stJWT, stFwdAuth, stBFF, stGRPC, stSidecarCB} {
 		check("docStarters", l.URL)
 
 		if strings.Count(l.URL, "/") != 1 {

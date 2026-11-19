@@ -30,6 +30,7 @@ var (
 	stCanary      = link{"A 90/10 weighted canary, then shifting the weights, on Traefik.", "lb/weighted-canary"}
 	stBlueGreen   = link{"Cutting over from blue to green without a failed request, on NGINX.", "lb/blue-green"}
 	stHealth      = link{"Active checks on HAProxy and passive outlier detection on Envoy, timed.", "lb/health-checks"}
+	stDiscovery   = link{"Backends that register in Consul, and Traefik following them there: a failing Consul check removes a replica, with no proxy config.", "lb/consul-traefik"}
 	stL4L7        = link{"mode tcp against mode http: what each can see and route on, on HAProxy.", "proxy/l4-vs-l7"}
 	stTLSModes    = link{"Re-encrypt, terminate and passthrough side by side, and whose certificate the client sees.", "proxy/tls-modes"}
 	stMirroring   = link{"Shadow traffic to v2 with its responses discarded, on Envoy.", "proxy/request-mirroring"}
@@ -57,7 +58,7 @@ func init() {
 		},
 		Starters: []string{
 			stRoundRobin.URL, stLeastConn.URL, stP2C.URL, stHashing.URL, stSticky.URL, stCanary.URL, stBlueGreen.URL,
-			stHealth.URL, stL4L7.URL, stTLSModes.URL, stMirroring.URL, stDraining.URL, stPoolModes.URL,
+			stHealth.URL, stDiscovery.URL, stL4L7.URL, stTLSModes.URL, stMirroring.URL, stDraining.URL, stPoolModes.URL,
 		},
 		Guides: []guide{
 			{
@@ -377,7 +378,7 @@ templ lbHealth() {
 		They probe @docCodeWord("/") because Breadboard cannot know your app's health endpoint. In your own copy of the config, set with @docCodeWord("file:"), point the check at a real endpoint and narrow the statuses it accepts.
 	}
 	@docH2("try", "Try it")
-	@docStarters(stHealth, stRoundRobin)
+	@docStarters(stHealth, stRoundRobin, stDiscovery)
 }
 
 templ lbHealthDiagram() {

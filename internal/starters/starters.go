@@ -417,6 +417,31 @@ var all = []Starter{
 		},
 	},
 	{
+		ID:       "lb/consul-traefik",
+		Title:    "Service discovery with Consul and Traefik",
+		Summary:  "Backends register in Consul through their sidecar agents; Traefik discovers every healthy replica there and balances across them, with no Traefik config to edit when replicas change.",
+		Language: "go",
+		Template: "go/lb/consul-traefik",
+		Dir:      "consul-traefik",
+		Requires: []string{"consul"},
+		Apps: []App{
+			// The tags tell Traefik to route this service, by which rule,
+			// and to reach the replicas over HTTPS.
+			{Name: "ct-backend", Command: []string{"ct-backend"}, Uses: []string{"consul"}, Replicas: 3, Register: &spec.Register{Port: 8443, Tags: []string{
+				"traefik.enable=true",
+				"traefik.http.routers.ct-backend.rule=PathPrefix(`/`)",
+				"traefik.http.services.ct-backend.loadbalancer.server.scheme=https",
+			}}},
+			{Name: "ct-client", Command: []string{"ct-client"}, Uses: []string{"ct-edge"}},
+		},
+		Services: []Service{{
+			Name: "ct-edge",
+			Type: "traefik",
+			// No upstreams and no file: the routes come from Consul.
+			Config: map[string]string{"consul_catalog": "consul"},
+		}},
+	},
+	{
 		ID:       "proxy/l4-vs-l7",
 		Title:    "Layer 4 vs layer 7 proxying",
 		Summary:  "One HAProxy, two listeners: mode http routes each request by path or header; mode tcp picks a server per connection and cannot see paths.",

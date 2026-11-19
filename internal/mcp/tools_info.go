@@ -78,9 +78,10 @@ type starterApp struct {
 }
 
 type register struct {
-	Name  string `json:"name,omitempty"`
-	Port  int    `json:"port"`
-	Check string `json:"check,omitempty"`
+	Name  string   `json:"name,omitempty"`
+	Port  int      `json:"port"`
+	Check string   `json:"check,omitempty"`
+	Tags  []string `json:"tags,omitempty" jsonschema:"tags registered with every replica, read by registry consumers such as Traefik"`
 }
 
 type starterService struct {
@@ -233,7 +234,7 @@ func (s *Server) addInfoTools() {
 			Apps: mapSlice(res.Apps, func(a core.StarterApp) starterApp {
 				out := starterApp{Name: a.Name, Command: orEmpty(a.Command), Uses: orEmpty(a.Uses)}
 				if a.Register != nil {
-					out.Register = &register{Name: a.Register.Name, Port: a.Register.Port, Check: a.Register.Check}
+					out.Register = &register{Name: a.Register.Name, Port: a.Register.Port, Check: a.Register.Check, Tags: a.Register.Tags}
 				}
 
 				return out

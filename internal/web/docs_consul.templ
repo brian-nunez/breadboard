@@ -283,7 +283,7 @@ templ consulRegistration() {
 	}
 	@docH2("sidecar", "With a sidecar (recommended)")
 	@docP() {
-		Add @docCodeWord("register") to the app in @docCodeWord("experiment.yaml")&#46; @docCodeWord("port") is the port the app serves TLS on. Optional @docCodeWord("name") sets the registered service name (default: the app's name) and @docCodeWord("check") sets an HTTPS health check path. The app must also have the Consul service in @docCodeWord("uses")&#46;
+		Add @docCodeWord("register") to the app in @docCodeWord("experiment.yaml")&#46; @docCodeWord("port") is the port the app serves TLS on. Optional @docCodeWord("name") sets the registered service name (default: the app's name), @docCodeWord("check") sets an HTTPS health check path, and @docCodeWord("tags") lists tags registered with every instance, which a registry consumer such as Traefik reads to select and configure the service. The app must also have the Consul service in @docCodeWord("uses")&#46;
 	}
 	@docCode("experiment.yaml", consulRegisterYAML)
 	@docP() {

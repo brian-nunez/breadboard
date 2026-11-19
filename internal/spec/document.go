@@ -290,6 +290,10 @@ func (d *Document) AddApp(app App) error {
 			r.Content = append(r.Content, scalar("check"), scalar(app.Register.Check))
 		}
 
+		if len(app.Register.Tags) > 0 {
+			r.Content = append(r.Content, scalar("tags"), flowSeq(app.Register.Tags...))
+		}
+
 		body.Content = append(body.Content, scalar("register"), r)
 	}
 

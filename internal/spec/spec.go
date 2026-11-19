@@ -193,6 +193,9 @@ type Register struct {
 	Name  string // service name in the registry; empty means the app's name
 	Port  int    // the port the app serves on
 	Check string // path of an HTTPS health check; empty means a TCP check
+	// Tags are registered with the service, so a registry consumer (such
+	// as Traefik) can select and configure it.
+	Tags []string
 }
 
 // DefaultHealthPort is the port of an app's HTTP health check when

@@ -2,6 +2,7 @@ package compose
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/netip"
@@ -535,6 +536,52 @@ func TestReplicasRenderNamedInstances(t *testing.T) {
 	}
 
 	golden(t, "replicas", b)
+}
+
+// Each replica's agent registers that replica: its own name, the
+// registered port and the app's tags, under the app's service name.
+func TestRegisterReplicasEachRegisterTheirInstance(t *testing.T) {
+	tags := []string{"traefik.enable=true", "traefik.http.routers.api.rule=PathPrefix(`/`)"}
+	s := &spec.Spec{
+		Version: 1, Name: "lab",
+		Services: []spec.Service{{Name: "consul", Type: "consul"}},
+		Apps: []spec.App{{
+			Name: "api", Path: "./api", Command: []string{"api"}, Replicas: 3,
+			Uses: uses("consul"), Register: &spec.Register{Port: 8443, Tags: tags},
+		}},
+	}
+	b := render(t, s, secrets.Dotenv)
+	checkCompose(t, b)
+
+	for _, n := range []string{"1", "2", "3"} {
+		f, ok := b.File("config/api-" + n + "-agent/consul.json")
+		if !ok {
+			t.Fatalf("no config for api-%s-agent", n)
+		}
+
+		var cfg struct {
+			NodeName string `json:"node_name"`
+			Services []struct {
+				ID      string   `json:"id"`
+				Name    string   `json:"name"`
+				Address string   `json:"address"`
+				Port    int      `json:"port"`
+				Tags    []string `json:"tags"`
+			} `json:"services"`
+		}
+		if err := json.Unmarshal(f.Data, &cfg); err != nil {
+			t.Fatal(err)
+		}
+
+		if cfg.NodeName != "api-"+n || len(cfg.Services) != 1 {
+			t.Fatalf("api-%s-agent = %+v", n, cfg)
+		}
+
+		svc := cfg.Services[0]
+		if svc.ID != "api" || svc.Name != "api" || svc.Address != "api-"+n+".bb.internal" || svc.Port != 8443 || !slices.Equal(svc.Tags, tags) {
+			t.Errorf("api-%s-agent registers %+v", n, svc)
+		}
+	}
 }
 
 // fakeSidecar stands in for a sidecar type in pod rendering tests: it

@@ -164,6 +164,7 @@ type Sidecar struct {
 	Service string
 	Port    int
 	Check   string // HTTPS check path; empty means a TCP check
+	Tags    []string
 }
 
 // Container is a rendered service definition.

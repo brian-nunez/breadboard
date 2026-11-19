@@ -1,6 +1,7 @@
 package model
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 
@@ -115,11 +116,11 @@ func TestRegisterAddsASidecar(t *testing.T) {
 		t.Errorf("sidecar = %+v", sc)
 	}
 
-	if *sc.Register != (spec.Register{Name: "greeter", Port: 8443}) {
+	if !reflect.DeepEqual(*sc.Register, spec.Register{Name: "greeter", Port: 8443}) {
 		t.Errorf("register defaults = %+v", sc.Register)
 	}
 
-	if n, _ := m.Service("named-agent"); *n.Register != (spec.Register{Name: "hello", Port: 9000, Check: "/healthz"}) {
+	if n, _ := m.Service("named-agent"); !reflect.DeepEqual(*n.Register, spec.Register{Name: "hello", Port: 9000, Check: "/healthz"}) {
 		t.Errorf("explicit register = %+v", n.Register)
 	}
 

@@ -452,6 +452,7 @@ apps:
     register:
       port: 8443
       check: /healthz
+      tags: [traefik.enable=true, v1]
 `
 
 	s, err := load(t, ok)
@@ -459,7 +460,7 @@ apps:
 		t.Fatal(err)
 	}
 
-	if r := s.Apps[0].Register; r == nil || *r != (Register{Port: 8443, Check: "/healthz"}) {
+	if r := s.Apps[0].Register; r == nil || r.Port != 8443 || r.Check != "/healthz" || !slices.Equal(r.Tags, []string{"traefik.enable=true", "v1"}) {
 		t.Fatalf("register = %+v", r)
 	}
 
@@ -470,6 +471,15 @@ apps:
 
 	if _, err := missing.Decode(); !slices.Equal(paths(t, err), []string{"apps.g.register.port"}) {
 		t.Fatalf("decode violations = %v", paths(t, err))
+	}
+
+	notList, err := Parse([]byte("version: 1\nname: lab\napps:\n  g:\n    path: ./g\n    register: {port: 8443, tags: a}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := notList.Decode(); err == nil || !strings.Contains(err.Error(), "apps.g.register.tags: must be a list of strings") {
+		t.Fatalf("tags that are not a list = %v", err)
 	}
 
 	bad := `version: 1
@@ -494,12 +504,20 @@ apps:
     register: {port: 443}
   web-agent:
     path: ./d
+  badtags:
+    path: ./e
+    uses: [consul]
+    register: {port: 8443, tags: [a, "", " b", "c ", a]}
 `
 	_, err = load(t, bad)
 
 	want := []string{
 		"apps.badfields.register.check",
 		"apps.badfields.register.name",
+		"apps.badtags.register.tags[1]",
+		"apps.badtags.register.tags[2]",
+		"apps.badtags.register.tags[3]",
+		"apps.badtags.register.tags[4]",
 		"apps.noregistry.register",
 		"apps.noregistry.register.port",
 		"apps.web-agent",
@@ -508,20 +526,32 @@ apps:
 		t.Fatalf("violation paths:\n got %v\nwant %v", got, want)
 	}
 
+	for _, msg := range []string{
+		"apps.badtags.register.tags[1]: must not be empty",
+		"apps.badtags.register.tags[2]: must not start or end with whitespace",
+		"apps.badtags.register.tags[3]: must not start or end with whitespace",
+		"apps.badtags.register.tags[4]: a is listed more than once",
+	} {
+		if !strings.Contains(err.Error(), msg) {
+			t.Errorf("violations lack %q:\n%v", msg, err)
+		}
+	}
+
 	// AddApp writes register so it round-trips.
 	d := New("lab")
 	if err := d.AddService("consul", "consul"); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := d.AddApp(App{Name: "greeter", Path: "./g", Uses: []Use{{Service: "consul"}}, Register: &Register{Port: 8443}}); err != nil {
+	tags := []string{"traefik.enable=true", "traefik.http.routers.greeter.rule=PathPrefix(`/`)"}
+	if err := d.AddApp(App{Name: "greeter", Path: "./g", Uses: []Use{{Service: "consul"}}, Register: &Register{Port: 8443, Tags: tags}}); err != nil {
 		t.Fatal(err)
 	}
 
 	out, _ := d.Bytes()
 
 	s, err = load(t, string(out))
-	if err != nil || s.Apps[0].Register == nil || s.Apps[0].Register.Port != 8443 {
+	if err != nil || s.Apps[0].Register == nil || s.Apps[0].Register.Port != 8443 || !slices.Equal(s.Apps[0].Register.Tags, tags) {
 		t.Fatalf("round trip = %+v %v\n%s", s, err, out)
 	}
 }

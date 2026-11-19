@@ -126,6 +126,7 @@ type Register struct {
 	Service         string // the registered service name
 	Port            int
 	Check           string // HTTPS check path; empty means a TCP check
+	Tags            []string
 }
 
 // Output is a rendered sidecar.
@@ -238,6 +239,7 @@ func consulAgent() *Type {
 				Service:  r.Service,
 				Port:     r.Port,
 				Check:    r.Check,
+				Tags:     r.Tags,
 			})
 			if in.Transparent {
 				// The rules exempt this reserved user, not the image's own.

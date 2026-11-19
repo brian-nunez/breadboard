@@ -978,6 +978,7 @@ func sidecarInput(m *model.Model, inst, sc *model.Service, uses []sidecar.Use, r
 			Service:         sc.Register.Name,
 			Port:            sc.Register.Port,
 			Check:           sc.Register.Check,
+			Tags:            sc.Register.Tags,
 		}
 	}
 

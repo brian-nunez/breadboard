@@ -234,6 +234,23 @@ func Validate(s *Spec, types TypeLookup) error {
 				add(check(func(s string) bool { return strings.HasPrefix(s, "/") }, join(rp, "check"), "must start with /")(r.Check))
 			}
 
+			seenTags := map[string]bool{}
+
+			for i, tag := range r.Tags {
+				tp := fmt.Sprintf("%s.tags[%d]", rp, i)
+
+				switch {
+				case tag == "":
+					add(Violation{Path: tp, Message: "must not be empty"})
+				case strings.TrimSpace(tag) != tag:
+					add(Violation{Path: tp, Message: "must not start or end with whitespace"})
+				case seenTags[tag]:
+					add(Violation{Path: tp, Message: fmt.Sprintf("%s is listed more than once", tag)})
+				}
+
+				seenTags[tag] = true
+			}
+
 			registry := slices.ContainsFunc(app.Uses, func(u Use) bool {
 				svc, ok := s.Service(u.Service)
 				if !ok {

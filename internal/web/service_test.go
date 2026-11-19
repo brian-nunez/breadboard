@@ -159,6 +159,20 @@ func TestStarterPages(t *testing.T) {
 	if sd := plainText([]string{s.get(t, "/starters/consul/service-discovery", cookie).Body.String()}); !strings.Contains(sd, "register: {port: 8443}") {
 		t.Error("service-discovery page lacks the register line")
 	}
+	// The graph shows how discovery works: the backend registers in Consul,
+	// Traefik discovers in Consul and routes to the backend.
+	ct := s.get(t, "/starters/lb/consul-traefik", cookie).Body.String()
+	for _, label := range []string{">registers<", ">discovers<", ">routes to<"} {
+		if !strings.Contains(ct, label) {
+			t.Errorf("consul-traefik graph lacks the edge label %s", label)
+		}
+	}
+
+	for _, want := range []string{"consul_catalog: consul", "tags: [traefik.enable=true, ", "Registered by its agent, routed by its tags"} {
+		if !strings.Contains(plainText([]string{ct}), want) {
+			t.Errorf("consul-traefik page lacks %q", want)
+		}
+	}
 
 	if rec := s.get(t, "/starters/kafka/nope", cookie); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown starter = %d", rec.Code)

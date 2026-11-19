@@ -39,6 +39,7 @@ var (
 	stCanary      = link{"A 90/10 weighted canary, then shifting the weights, on Traefik.", "lb/weighted-canary"}
 	stBlueGreen   = link{"Cutting over from blue to green without a failed request, on NGINX.", "lb/blue-green"}
 	stHealth      = link{"Active checks on HAProxy and passive outlier detection on Envoy, timed.", "lb/health-checks"}
+	stDiscovery   = link{"Backends that register in Consul, and Traefik following them there: a failing Consul check removes a replica, with no proxy config.", "lb/consul-traefik"}
 	stL4L7        = link{"mode tcp against mode http: what each can see and route on, on HAProxy.", "proxy/l4-vs-l7"}
 	stTLSModes    = link{"Re-encrypt, terminate and passthrough side by side, and whose certificate the client sees.", "proxy/tls-modes"}
 	stMirroring   = link{"Shadow traffic to v2 with its responses discarded, on Envoy.", "proxy/request-mirroring"}
@@ -66,7 +67,7 @@ func init() {
 		},
 		Starters: []string{
 			stRoundRobin.URL, stLeastConn.URL, stP2C.URL, stHashing.URL, stSticky.URL, stCanary.URL, stBlueGreen.URL,
-			stHealth.URL, stL4L7.URL, stTLSModes.URL, stMirroring.URL, stDraining.URL, stPoolModes.URL,
+			stHealth.URL, stDiscovery.URL, stL4L7.URL, stTLSModes.URL, stMirroring.URL, stDraining.URL, stPoolModes.URL,
 		},
 		Guides: []guide{
 			{
@@ -225,7 +226,7 @@ func lbDiagram() templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 121, Col: 27}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 122, Col: 27}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -238,7 +239,7 @@ func lbDiagram() templ.Component {
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 25)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 122, Col: 32}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 123, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 			if templ_7745c5c3_Err != nil {
@@ -251,7 +252,7 @@ func lbDiagram() templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 122, Col: 90}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 123, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -264,7 +265,7 @@ func lbDiagram() templ.Component {
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 20)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 123, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 124, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 			if templ_7745c5c3_Err != nil {
@@ -288,7 +289,7 @@ func lbDiagram() templ.Component {
 				var templ_7745c5c3_Var10 string
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 134, Col: 29}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 135, Col: 29}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 				if templ_7745c5c3_Err != nil {
@@ -301,7 +302,7 @@ func lbDiagram() templ.Component {
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 22)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 135, Col: 54}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 136, Col: 54}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 				if templ_7745c5c3_Err != nil {
@@ -319,7 +320,7 @@ func lbDiagram() templ.Component {
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 137, Col: 29}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 138, Col: 29}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 				if templ_7745c5c3_Err != nil {
@@ -337,7 +338,7 @@ func lbDiagram() templ.Component {
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 27)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 139, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 140, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 			if templ_7745c5c3_Err != nil {
@@ -350,7 +351,7 @@ func lbDiagram() templ.Component {
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 139, Col: 112}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 140, Col: 112}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
@@ -1014,7 +1015,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 270, Col: 27}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 271, Col: 27}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 			if templ_7745c5c3_Err != nil {
@@ -1027,7 +1028,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 25)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 271, Col: 32}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 272, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 			if templ_7745c5c3_Err != nil {
@@ -1040,7 +1041,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 271, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 272, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -1053,7 +1054,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 25)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 272, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 273, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 			if templ_7745c5c3_Err != nil {
@@ -1066,7 +1067,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 272, Col: 106}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 273, Col: 106}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -1079,7 +1080,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 4))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 272, Col: 123}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 273, Col: 123}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
@@ -1092,7 +1093,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var38 string
 			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 7))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 272, Col: 140}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 273, Col: 140}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 			if templ_7745c5c3_Err != nil {
@@ -1115,7 +1116,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 276, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 277, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 			if templ_7745c5c3_Err != nil {
@@ -1128,7 +1129,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 25)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 277, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 278, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 			if templ_7745c5c3_Err != nil {
@@ -1141,7 +1142,7 @@ func lbStrategiesDiagram() templ.Component {
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 277, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 278, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -1159,7 +1160,7 @@ func lbStrategiesDiagram() templ.Component {
 				var templ_7745c5c3_Var42 string
 				templ_7745c5c3_Var42, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(420 + j*16)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 279, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 280, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 				if templ_7745c5c3_Err != nil {
@@ -1172,7 +1173,7 @@ func lbStrategiesDiagram() templ.Component {
 				var templ_7745c5c3_Var43 string
 				templ_7745c5c3_Var43, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 12)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 279, Col: 49}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 280, Col: 49}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 				if templ_7745c5c3_Err != nil {
@@ -1569,7 +1570,7 @@ func lbHealth() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docStarters(stHealth, stRoundRobin).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docStarters(stHealth, stRoundRobin, stDiscovery).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1606,7 +1607,7 @@ func lbHealthDiagram() templ.Component {
 			var templ_7745c5c3_Var54 string
 			templ_7745c5c3_Var54, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 392, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 393, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 			if templ_7745c5c3_Err != nil {
@@ -1619,7 +1620,7 @@ func lbHealthDiagram() templ.Component {
 			var templ_7745c5c3_Var55 string
 			templ_7745c5c3_Var55, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 27)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 393, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 394, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 			if templ_7745c5c3_Err != nil {
@@ -1632,7 +1633,7 @@ func lbHealthDiagram() templ.Component {
 			var templ_7745c5c3_Var56 string
 			templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 393, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 394, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 			if templ_7745c5c3_Err != nil {
@@ -1645,7 +1646,7 @@ func lbHealthDiagram() templ.Component {
 			var templ_7745c5c3_Var57 string
 			templ_7745c5c3_Var57, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 22)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 394, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 395, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 			if templ_7745c5c3_Err != nil {
@@ -2473,7 +2474,7 @@ func lbTLSDiagram() templ.Component {
 			var templ_7745c5c3_Var78 string
 			templ_7745c5c3_Var78, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 26)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 586, Col: 32}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 587, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
 			if templ_7745c5c3_Err != nil {
@@ -2486,7 +2487,7 @@ func lbTLSDiagram() templ.Component {
 			var templ_7745c5c3_Var79 string
 			templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinStringErrs(lbTLSRows[i])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 586, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 587, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
 			if templ_7745c5c3_Err != nil {
@@ -2499,7 +2500,7 @@ func lbTLSDiagram() templ.Component {
 			var templ_7745c5c3_Var80 string
 			templ_7745c5c3_Var80, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 587, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 588, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var80)
 			if templ_7745c5c3_Err != nil {
@@ -2512,7 +2513,7 @@ func lbTLSDiagram() templ.Component {
 			var templ_7745c5c3_Var81 string
 			templ_7745c5c3_Var81, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 25)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 588, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 589, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var81)
 			if templ_7745c5c3_Err != nil {
@@ -2525,7 +2526,7 @@ func lbTLSDiagram() templ.Component {
 			var templ_7745c5c3_Var82 string
 			templ_7745c5c3_Var82, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 589, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 590, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var82)
 			if templ_7745c5c3_Err != nil {
@@ -2538,7 +2539,7 @@ func lbTLSDiagram() templ.Component {
 			var templ_7745c5c3_Var83 string
 			templ_7745c5c3_Var83, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 25)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 590, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 591, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var83)
 			if templ_7745c5c3_Err != nil {
@@ -2551,7 +2552,7 @@ func lbTLSDiagram() templ.Component {
 			var templ_7745c5c3_Var84 string
 			templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.JoinStringErrs(lbTLSPorts[i])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 590, Col: 117}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 591, Col: 117}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var84))
 			if templ_7745c5c3_Err != nil {
@@ -2564,7 +2565,7 @@ func lbTLSDiagram() templ.Component {
 			var templ_7745c5c3_Var85 string
 			templ_7745c5c3_Var85, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 591, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 592, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85)
 			if templ_7745c5c3_Err != nil {
@@ -2577,7 +2578,7 @@ func lbTLSDiagram() templ.Component {
 			var templ_7745c5c3_Var86 string
 			templ_7745c5c3_Var86, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 25)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 592, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 593, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 			if templ_7745c5c3_Err != nil {
@@ -3012,7 +3013,7 @@ func lbDeployDiagram() templ.Component {
 			var templ_7745c5c3_Var98 string
 			templ_7745c5c3_Var98, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(20 + i*225)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 726, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 727, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
 			if templ_7745c5c3_Err != nil {
@@ -3025,7 +3026,7 @@ func lbDeployDiagram() templ.Component {
 			var templ_7745c5c3_Var99 string
 			templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 726, Col: 95}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 727, Col: 95}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var99))
 			if templ_7745c5c3_Err != nil {
@@ -3038,7 +3039,7 @@ func lbDeployDiagram() templ.Component {
 			var templ_7745c5c3_Var100 string
 			templ_7745c5c3_Var100, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(20 + i*225)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 727, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 728, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
 			if templ_7745c5c3_Err != nil {
@@ -3051,7 +3052,7 @@ func lbDeployDiagram() templ.Component {
 			var templ_7745c5c3_Var101 string
 			templ_7745c5c3_Var101, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(30 + i*225)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 728, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 729, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var101)
 			if templ_7745c5c3_Err != nil {
@@ -3064,7 +3065,7 @@ func lbDeployDiagram() templ.Component {
 			var templ_7745c5c3_Var102 string
 			templ_7745c5c3_Var102, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(130 + i*225)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 729, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 730, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var102)
 			if templ_7745c5c3_Err != nil {
@@ -3077,7 +3078,7 @@ func lbDeployDiagram() templ.Component {
 			var templ_7745c5c3_Var103 string
 			templ_7745c5c3_Var103, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(130 + i*225)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 730, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 731, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
 			if templ_7745c5c3_Err != nil {
@@ -3535,7 +3536,7 @@ func lbPoolDiagram() templ.Component {
 			var templ_7745c5c3_Var116 string
 			templ_7745c5c3_Var116, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 845, Col: 27}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 846, Col: 27}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var116)
 			if templ_7745c5c3_Err != nil {
@@ -3548,7 +3549,7 @@ func lbPoolDiagram() templ.Component {
 			var templ_7745c5c3_Var117 string
 			templ_7745c5c3_Var117, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 27)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 846, Col: 32}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 847, Col: 32}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var117)
 			if templ_7745c5c3_Err != nil {
@@ -3561,7 +3562,7 @@ func lbPoolDiagram() templ.Component {
 			var templ_7745c5c3_Var118 string
 			templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 846, Col: 100}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 847, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
 			if templ_7745c5c3_Err != nil {
@@ -3579,7 +3580,7 @@ func lbPoolDiagram() templ.Component {
 				var templ_7745c5c3_Var119 string
 				templ_7745c5c3_Var119, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(120 + j*14)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 848, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 849, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var119)
 				if templ_7745c5c3_Err != nil {
@@ -3592,7 +3593,7 @@ func lbPoolDiagram() templ.Component {
 				var templ_7745c5c3_Var120 string
 				templ_7745c5c3_Var120, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 12)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 848, Col: 49}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 849, Col: 49}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var120)
 				if templ_7745c5c3_Err != nil {
@@ -3610,7 +3611,7 @@ func lbPoolDiagram() templ.Component {
 			var templ_7745c5c3_Var121 string
 			templ_7745c5c3_Var121, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 22)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 850, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_lb.templ`, Line: 851, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var121)
 			if templ_7745c5c3_Err != nil {

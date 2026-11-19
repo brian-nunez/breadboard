@@ -214,6 +214,7 @@ List them with `bb starters` and apply one with `bb starter <id>`. Each one adds
 | `lb/weighted-canary` | A Traefik 90/10 canary, and shifting weights to roll v2 out or back. |
 | `lb/blue-green` | Cutting every request over from blue to green with an NGINX reload, without failing one. |
 | `lb/health-checks` | HAProxy active checks vs Envoy passive outlier detection: time to eject and to let back. |
+| `lb/consul-traefik` | Backends registering in Consul, and Traefik discovering and balancing them with no proxy config to edit. |
 
 **Proxies and pooling**
 

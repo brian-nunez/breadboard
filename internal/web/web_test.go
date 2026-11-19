@@ -238,6 +238,10 @@ func TestLandingPage(t *testing.T) {
 			if n := strings.Count(body, `href="/starters/`); n != len(suggestedStarters) {
 				t.Errorf("%s %s links %d starters, want %d", name, path, n, len(suggestedStarters))
 			}
+			// lb/consul-traefik took consul/service-discovery's card (D-227).
+			if !strings.Contains(body, `href="/starters/lb/consul-traefik"`) || strings.Contains(body, `href="/starters/consul/service-discovery"`) {
+				t.Errorf("%s %s: the fourth card is not lb/consul-traefik", name, path)
+			}
 
 			if i := strings.Index(body, "Browse all starters"); i < last {
 				t.Errorf("%s %s: browse card is not last", name, path)

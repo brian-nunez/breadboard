@@ -1,0 +1,36 @@
+# lb/consul-traefik
+
+**Service discovery with a load balancer**: backends announce themselves to a registry, and the load balancer reads the registry instead of a list of servers. Here the backends register in [Consul](https://developer.hashicorp.com/consul/docs) through a sidecar agent, and [Traefik](https://doc.traefik.io/traefik/v3.7/reference/install-configuration/providers/hashicorp/consul-catalog/) discovers them in Consul's catalog. Nobody edits Traefik's config when replicas come and go.
+
+- `cmd/ct-backend`: three replicas (`ct-backend-1`, `-2`, `-3`). Each serves TLS on 8443 and answers every request with its own name. It contains no Consul or Traefik code: its `register` entry in `experiment.yaml` does the wiring.
+- `cmd/ct-client`: calls `CT_EDGE_URL` (Traefik) once a second and logs, every 5 seconds, how many requests each replica answered, the status codes and the latency.
+- `ct-edge`: a Traefik service with `config: {consul_catalog: consul}`, no upstreams and no config file of yours: Breadboard generates its config, and the routes come from Consul.
+
+## How it works
+
+- **Backends register.** `register` on `ct-backend` gives each replica a Consul agent (`ct-backend-1-agent`, ...) in its network namespace. The agent registers the replica as service `ct-backend` with its own address (`ct-backend-1.{{.Domain}}`), port 8443, the tags in `register.tags`, and a health check: a verified TLS handshake every 5 seconds.
+- **Traefik discovers.** `consul_catalog: consul` adds Traefik's Consul catalog provider: it reads Consul's catalog over TLS, verified against the lab CA, every 5 seconds. With `exposedByDefault: false` it routes only services tagged `traefik.enable=true`, and leaves out instances whose checks are critical.
+- **Traefik routes.** The other tags are Traefik configuration. ``traefik.http.routers.ct-backend.rule=PathPrefix(`/`)`` makes a router for every request on 8443, and `traefik.http.services.ct-backend.loadbalancer.server.scheme=https` makes Traefik reach each replica over HTTPS (without it, Traefik would send plain HTTP to port 8443). Traefik verifies each replica's certificate against the lab CA and balances across the replicas with weighted round robin.
+- **No proxy edits.** Traefik's own files (in `.bb/runtime/config/ct-edge/`) name no backend. Scaling, failures and recoveries reach Traefik through Consul.
+
+```sh
+bb up
+bb logs ct-client -f
+```
+
+The client logs a line like `last 5s: 5 requests | ct-backend-1=2 (40%) ct-backend-2=2 (40%) ct-backend-3=1 (20%) | status 200=5 | p50 1ms p99 2ms`.
+
+## What to watch
+
+- `bb status`: `ct-edge` with `discovers in consul, routes to ct-backend`, and each replica's agent with `registers in consul`.
+- `bb serve`: the architecture page draws it: `ct-backend` registers in `consul`, `ct-edge` discovers in `consul`, and `ct-edge` routes to `ct-backend`. The **Traefik routes** tab of `ct-edge` shows router `ct-backend@consulcatalog` and each replica's server with its status; the **Catalog** tab of `consul` shows `ct-backend` with its instances and their checks.
+- MCP: `traefik_routes` with `service: ct-edge`, and `consul_catalog` with `service: consul`.
+
+## Try this
+
+- **Scale out.** Set `replicas: 5` on `ct-backend` in `experiment.yaml` and run `bb up`. The new replicas' agents register them, and within seconds `ct-backend-4` and `ct-backend-5` appear in the client's tally (five requests a window, so each window shows some of the five). Traefik was not recreated: `docker ps --filter name=bb-{{.Experiment}}-ct-edge` shows the same container, up since before the change.
+
+## Break this
+
+- **Stop a replica.** `docker stop bb-{{.Experiment}}-ct-backend-2-1`. Its agent shares its network namespace, so it goes silent with it; Consul marks the instance critical, and Traefik drops it on its next read of the catalog. The requests Traefik sends it until then fail with `502`; within about 10 seconds the tally no longer lists `ct-backend-2` and every request succeeds again. Bring it back with `docker start bb-{{.Experiment}}-ct-backend-2-1`, then `docker restart bb-{{.Experiment}}-ct-backend-2-agent-1`: the agent is still in the stopped container's network namespace, so it must start again to join the new one. Within seconds the replica is back in the tally.
+- **Stop Consul.** `docker stop bb-{{.Experiment}}-consul-1`. `bb logs ct-edge` shows an error on every read of the catalog, but Traefik keeps the routes it read last, so the tally does not change: the registry is not in the request path. What stops is change: stop a replica now and Traefik keeps sending it its share, which fails with `502` until Consul is back. Start it again with `docker start bb-{{.Experiment}}-consul-1`.

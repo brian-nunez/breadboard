@@ -276,6 +276,19 @@ var starterContents = map[string]starterContent{
 		Covers: []string{"Active health checks", "Passive health checks (outlier detection)", "Time to eject and time to recover", "max_ejection_percent"},
 		Guide:  "/docs/load-balancing/health-checks",
 	},
+	"lb/consul-traefik": {
+		Area:  "traefik",
+		About: "Three backends register in Consul through their sidecar agents, and Traefik discovers them in Consul's catalog: nobody lists the servers. Scale the backend or stop a replica, and Traefik's routes follow within seconds, while its own config never changes.",
+		Steps: []step{
+			{"The backends register", "register gives each replica a Consul agent that registers it as ct-backend, with its own address, port 8443, its tags and a TLS health check."},
+			{"Traefik discovers", "config consul_catalog points ct-edge at Consul; it reads the catalog every 5 seconds and keeps the services tagged traefik.enable=true."},
+			{"Traefik routes", "The router tag sets the rule, the scheme tag makes Traefik re-encrypt to each replica, verified against the lab CA."},
+			{"Replicas come and go", "Scale to 5 and the new replicas join the tally; stop one and its failing check removes it. ct-edge is never recreated."},
+		},
+		KeyFile: "cmd/ct-backend/main.go", KeyTitle: "Registered by its agent, routed by its tags",
+		Covers: []string{"Service registration", "Registry-driven load balancing", "Traefik's Consul catalog provider", "Health checks in the registry"},
+		Guide:  "/docs/traefik/in-breadboard",
+	},
 	"proxy/l4-vs-l7": {
 		Area:  "haproxy",
 		About: "One HAProxy serves the same backends on two listeners. On 8443 it runs in mode http and parses every request, so it routes by path or header and balances request by request. On 7443 it runs in mode tcp: it decrypts TLS but never parses HTTP, so it picks a server once per connection and cannot tell /api/ from /web/.",

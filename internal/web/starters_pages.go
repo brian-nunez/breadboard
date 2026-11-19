@@ -166,7 +166,10 @@ func specAdditions(d *core.StarterDetails) string {
 			fmt.Fprintf(&b, "    uses: [%s]\n", strings.Join(a.Uses, ", "))
 		}
 
-		if a.Register != nil {
+		switch {
+		case a.Register != nil && len(a.Register.Tags) > 0:
+			fmt.Fprintf(&b, "    register:\n      port: %d\n      tags: [%s]\n", a.Register.Port, strings.Join(a.Register.Tags, ", "))
+		case a.Register != nil:
 			fmt.Fprintf(&b, "    register: {port: %d}\n", a.Register.Port)
 		}
 

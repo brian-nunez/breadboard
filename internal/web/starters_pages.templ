@@ -8,7 +8,7 @@ import (
 )
 
 // suggestedStarters are the landing page's suggestions, in order.
-var suggestedStarters = []string{"kafka/producer-consumer", "kafka/sink-to-postgres", "redis/cache-invalidation", "consul/service-discovery", "s3/objects-basics"}
+var suggestedStarters = []string{"kafka/producer-consumer", "kafka/sink-to-postgres", "redis/cache-invalidation", "lb/consul-traefik", "s3/objects-basics"}
 
 // landingPage is the home page (frame 01): what to build, a few suggested
 // starters, or skip to the dashboard.
@@ -106,7 +106,7 @@ func starterOrder(d docsData) []string {
 	for id := range d.Starters {
 		ids = append(ids, id)
 	}
-	order := []string{"kafka/producer-consumer", "kafka/sink-to-postgres", "redis/cache-invalidation", "consul/service-discovery", "s3/objects-basics", "consul/self-registration",
+	order := []string{"kafka/producer-consumer", "kafka/sink-to-postgres", "redis/cache-invalidation", "consul/service-discovery", "s3/objects-basics", "consul/self-registration", "lb/consul-traefik",
 		"sidecar/envoy-ambassador", "sidecar/envoy-tls-termination", "sidecar/envoy-transparent", "sidecar/circuit-breaking", "sidecar/pgbouncer-pool", "sidecar/log-shipper"}
 	slices.SortStableFunc(ids, func(a, b string) int {
 		ia, ib := slices.Index(order, a), slices.Index(order, b)

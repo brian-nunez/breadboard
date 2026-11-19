@@ -6,9 +6,13 @@ import (
 	"time"
 )
 
+// consulHTTPSPort is the Consul API's HTTPS port, which Traefik's Consul
+// catalog provider reads too.
+const consulHTTPSPort = 8501
+
 func consul() *Entry {
 	const (
-		httpsPort = 8501
+		httpsPort = consulHTTPSPort
 		httpPort  = 8500
 	)
 

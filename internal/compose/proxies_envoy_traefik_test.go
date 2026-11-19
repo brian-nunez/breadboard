@@ -179,3 +179,132 @@ func TestTraefikStaticFileErrors(t *testing.T) {
 		t.Errorf("missing file: %v", err)
 	}
 }
+
+// consulCatalogLab is a Traefik that discovers its routes in Consul: no
+// upstreams, an app registered for Traefik and one that is not.
+func consulCatalogLab() *spec.Spec {
+	return &spec.Spec{
+		Version: 1, Name: "lab",
+		Services: []spec.Service{
+			{Name: "registry", Type: "consul"},
+			{Name: "edge", Type: "traefik", Config: map[string]string{"consul_catalog": "registry"}},
+		},
+		Apps: []spec.App{
+			{Name: "web", Path: "./web", Replicas: 2, Uses: uses("registry"), Register: &spec.Register{Port: 8443, Tags: []string{
+				"traefik.enable=true", "traefik.http.routers.web.rule=PathPrefix(`/`)",
+				"traefik.http.services.web.loadbalancer.server.scheme=https",
+			}}},
+			{Name: "hidden", Path: "./hidden", Uses: uses("registry"), Register: &spec.Register{Port: 8443}},
+			{Name: "client", Path: "./client", Uses: uses("edge")},
+		},
+	}
+}
+
+// With consul_catalog, Traefik reads Consul's catalog over verified TLS,
+// verifies the servers it finds against the lab CA, waits for Consul, and
+// has no catch-all router that would shadow the discovered routes.
+func TestTraefikConsulCatalogGolden(t *testing.T) {
+	b := renderWith(t, consulCatalogLab(), secrets.Inline, nil)
+	checkCompose(t, b)
+	golden(t, "traefik-consul-catalog", b)
+
+	static, _ := b.File("config/edge/traefik.yml")
+
+	var doc struct {
+		Providers struct {
+			File          map[string]any `yaml:"file"`
+			ConsulCatalog struct {
+				ExposedByDefault *bool  `yaml:"exposedByDefault"`
+				RefreshInterval  string `yaml:"refreshInterval"`
+				Endpoint         struct {
+					Address string            `yaml:"address"`
+					Scheme  string            `yaml:"scheme"`
+					TLS     map[string]string `yaml:"tls"`
+				} `yaml:"endpoint"`
+			} `yaml:"consulCatalog"`
+		} `yaml:"providers"`
+		ServersTransport struct {
+			RootCAs []string `yaml:"rootCAs"`
+		} `yaml:"serversTransport"`
+	}
+	if err := yaml.Unmarshal(static.Data, &doc); err != nil {
+		t.Fatal(err)
+	}
+
+	cc := doc.Providers.ConsulCatalog
+	if doc.Providers.File["directory"] != "/etc/bb/traefik" || cc.ExposedByDefault == nil || *cc.ExposedByDefault || cc.RefreshInterval != "5s" ||
+		cc.Endpoint.Address != "registry.bb.internal:8501" || cc.Endpoint.Scheme != "https" || cc.Endpoint.TLS["ca"] != "/etc/bb/ca.pem" {
+		t.Errorf("providers = %+v", doc.Providers)
+	}
+
+	if len(doc.ServersTransport.RootCAs) != 1 || doc.ServersTransport.RootCAs[0] != "/etc/bb/ca.pem" {
+		t.Errorf("serversTransport = %+v", doc.ServersTransport)
+	}
+
+	dyn, _ := b.File("config/edge/dynamic.yml")
+	if strings.Contains(string(dyn.Data), "no-upstream") || strings.Contains(string(dyn.Data), "routers") {
+		t.Errorf("dynamic.yml has a router of its own:\n%s", dyn.Data)
+	}
+
+	f, _ := b.File(ComposeFile)
+
+	var cd struct {
+		Services map[string]struct {
+			DependsOn map[string]struct {
+				Condition string `yaml:"condition"`
+			} `yaml:"depends_on"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(f.Data, &cd); err != nil {
+		t.Fatal(err)
+	}
+
+	if deps := cd.Services["edge"].DependsOn; len(deps) != 1 || deps["registry"].Condition != "service_healthy" {
+		t.Errorf("edge depends_on = %+v", deps)
+	}
+	// Without consul_catalog nothing of it is generated.
+	plain := consulCatalogLab()
+	plain.Services[1].Config = nil
+
+	gen := renderWith(t, plain, secrets.Inline, nil)
+	for _, name := range []string{"traefik.yml", "dynamic.yml"} {
+		g, _ := gen.File("config/edge/" + name)
+		for _, word := range []string{"consulCatalog", "serversTransport:", "registry"} {
+			if strings.Contains(string(g.Data), word) {
+				t.Errorf("%s without consul_catalog mentions %s:\n%s", name, word, g.Data)
+			}
+		}
+	}
+
+	if g, _ := gen.File("config/edge/dynamic.yml"); !strings.Contains(string(g.Data), "no-upstream") {
+		t.Errorf("without consul_catalog the catch-all router is gone:\n%s", g.Data)
+	}
+}
+
+// The global serversTransport verifies the servers from Consul, so a
+// static_file cannot set its own while consul_catalog is set.
+func TestTraefikConsulCatalogOwnsServersTransport(t *testing.T) {
+	s := consulCatalogLab()
+	s.Services[1].StaticFile = "edge/static.yml"
+
+	m, err := model.Resolve(s, "bb.internal")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	static := func(string) ([]byte, error) { return []byte("serversTransport:\n  insecureSkipVerify: true\n"), nil }
+
+	_, err = renderModelErr(m, secrets.Inline, static)
+	if err == nil || !strings.Contains(err.Error(), "line 1: serversTransport is Breadboard's while consul_catalog is set") {
+		t.Errorf("error = %v", err)
+	}
+
+	s.Services[1].Config = nil
+	if m, err = model.Resolve(s, "bb.internal"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := renderModelErr(m, secrets.Inline, static); err != nil {
+		t.Errorf("without consul_catalog a static_file sets serversTransport: %v", err)
+	}
+}

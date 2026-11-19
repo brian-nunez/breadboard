@@ -37,7 +37,7 @@ These words carry fixed meanings across the docs and the code.
 | **pod** | An app instance with sidecars: a namespace holder (`<app>-pod`) that owns the network, joined by the app and its sidecars, started in order. |
 | **starter** | A template that writes app code into the project and adds app services to `experiment.yaml`. |
 | **listener** | A port an infra service accepts connections on, with a TLS mode. |
-| **edge** | A directed connection from a client (app or infra service) to a listener. Derived from `uses`, Envoy outbound targets and proxy upstreams. TLS policy lives on edges. |
+| **edge** | A directed connection from a client (app or infra service) to a listener. Derived from `uses`, Envoy outbound targets, proxy upstreams and a Traefik's Consul catalog (`consul_catalog`). TLS policy lives on edges. |
 | **proxy** | An infra service whose catalog entry is a proxy type (HAProxy, …): it sits in front of its upstreams and decides TLS per hop. |
 | **upstream** | One backend of a proxy (an app with all its replicas, or an infra service) and the edge to it, with a TLS mode: re-encrypt, terminate or passthrough. |
 | **host router** | The lab's `bb-host` service: a Traefik container published on `127.0.0.1` that serves `https://<target>.<experiment>.localhost:<port>` with a certificate from the host CA and re-encrypts to the target. Only labs with a `host` target have one. |

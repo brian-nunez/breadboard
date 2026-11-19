@@ -78,6 +78,65 @@ func TestSidecarsRegisterWithTheirRegistry(t *testing.T) {
 	}
 }
 
+// A Traefik that discovers routes in Consul is drawn as a proxy: discovers
+// to Consul, routes to the app registered for it (behind it), and the
+// app's agent registers in Consul.
+func TestDiscoveryEdgesShowHowRoutesAreFound(t *testing.T) {
+	agent := svc("web-agent", "sidecar")
+	agent.Parent, agent.Registry = "web", "consul"
+
+	edge := svc("edge", "infra",
+		core.Edge{To: "consul", Port: 8501, TLS: true, Discovery: "registry"},
+		core.Edge{To: "web", Port: 8443, TLS: true, ToApp: true, Discovery: "route"},
+	)
+	rows := []row{svc("consul", "infra"), edge, svc("client", "app", core.Edge{To: "edge", Port: 8443, TLS: true}), svc("web", "app"), agent}
+
+	g := layout(rows, "")
+
+	var titles []string
+	for _, c := range g.Columns {
+		titles = append(titles, c.Title)
+	}
+
+	if strings.Join(titles, ",") != "YOUR CODE,PROXIES,BEHIND PROXIES,INFRASTRUCTURE" {
+		t.Errorf("columns = %v", titles)
+	}
+
+	labels := map[string]bool{}
+	for _, e := range g.Edges {
+		labels[e.Label] = true
+	}
+
+	for _, want := range []string{"discovers", "routes to", "registers", "TLS :8443"} {
+		if !labels[want] {
+			t.Errorf("no %q edge in %+v", want, g.Edges)
+		}
+	}
+	// discovers passes beneath the app behind the proxy, label included,
+	// instead of running behind its card.
+	var web node
+
+	for _, n := range g.Nodes {
+		if n.Name == "web" {
+			web = n
+		}
+	}
+
+	for _, e := range g.Edges {
+		if e.Label == "discovers" && (e.LabelY <= web.Y+web.H || e.LabelY+11 > g.Height) {
+			t.Errorf("discovers label at y %d: web card ends at %d, graph height %d", e.LabelY, web.Y+web.H, g.Height)
+		}
+	}
+
+	if got := inbound(rows, svc("consul", "infra")); strings.Join(got, ",") != "edge,web-agent" {
+		t.Errorf("consul used by %v", got)
+	}
+
+	if got := inbound(rows, svc("web", "app")); strings.Join(got, ",") != "edge" {
+		t.Errorf("web used by %v", got)
+	}
+}
+
 func TestSelectedNodeFallsBackToTheFirstApp(t *testing.T) {
 	d := dashboardData{Services: []row{svc("kafka", "infra"), svc("producer", "app")}}
 	for want, got := range map[string]string{"kafka": "kafka", "nope": "producer", "": "producer"} {

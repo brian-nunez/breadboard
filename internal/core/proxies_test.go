@@ -100,6 +100,49 @@ func TestStatusShowsProxyUpstreams(t *testing.T) {
 	}
 }
 
+// Status lists a Consul-routed Traefik's discovery edges, and the registry
+// and the app it routes to see it among their users.
+func TestStatusShowsDiscoveryEdges(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.writeSpec(`version: 1
+name: lab
+services:
+  consul:
+    type: consul
+  edge:
+    type: traefik
+    config: {consul_catalog: consul}
+apps:
+  web:
+    path: ./probe
+    replicas: 2
+    uses: [consul]
+    register: {port: 8443, tags: [traefik.enable=true]}
+`)
+
+	res, err := h.eng.Status(h.ctx(), StatusRequest{Dir: h.dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []Edge{{To: "consul", Port: 8501, TLS: true, Discovery: "registry"}, {To: "web", Port: 8443, TLS: true, ToApp: true, Discovery: "route"}}
+	if got := rowsByName(res.Services)["edge"].Uses; !slices.Equal(got, want) {
+		t.Errorf("edge uses = %+v", got)
+	}
+
+	for name, users := range map[string][]string{"consul": {"edge", "web", "web-1-agent", "web-2-agent"}, "web-1": {"edge"}} {
+		d, err := h.eng.ServiceDetails(h.ctx(), ServiceDetailsRequest{Dir: h.dir, Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !slices.Equal(d.UsedBy, users) {
+			t.Errorf("%s used by %v, want %v", name, d.UsedBy, users)
+		}
+	}
+}
+
 // A proxy's details show the passthrough listener and variable only when
 // an upstream is passthrough.
 func TestProxyDetailsShowLiveListeners(t *testing.T) {

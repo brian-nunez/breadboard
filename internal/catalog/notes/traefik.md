@@ -2,7 +2,7 @@
 
 ## What you got
 
-Traefik 3.7 in front of the upstreams you list under `services.<name>.upstreams`, configured by files only: the file provider reads `/etc/bb/traefik`, and Traefik never sees the Docker socket. Clients connect to `https://<name>.bb.internal:8443` (your app receives it as `<NAME>_URL`) and Traefik presents its own certificate from the lab CA. With one upstream every request goes there; with several, `/<route>/` reaches each one with the prefix stripped, and the first upstream also takes everything else. Each upstream hop has its own TLS mode:
+Traefik 3.7 in front of the upstreams you list under `services.<name>.upstreams`, configured by files: the file provider reads `/etc/bb/traefik`, and Traefik never sees the Docker socket. With `config: {consul_catalog: <consul service>}` it also routes the services registered in that Consul with the tag `traefik.enable=true` (see Key concepts). Clients connect to `https://<name>.bb.internal:8443` (your app receives it as `<NAME>_URL`) and Traefik presents its own certificate from the lab CA. With one upstream every request goes there; with several, `/<route>/` reaches each one with the prefix stripped, and the first upstream also takes everything else. Each upstream hop has its own TLS mode:
 
 - **Re-encrypt** (`tls: {mode: on}`, the default): Traefik decrypts, then opens a new TLS connection to the backend through a `serversTransport` that sets SNI to the backend's name and verifies its certificate against the lab CA.
 - **Terminate** (`tls: {mode: off, reason: ...}`): Traefik decrypts and sends plaintext HTTP to the backend over a private network shared only with it. An app behind a terminating hop binds `BB_PLAIN_LISTEN_ADDR`, so nothing else can reach its plaintext port.
@@ -10,7 +10,7 @@ Traefik 3.7 in front of the upstreams you list under `services.<name>.upstreams`
 
 The configuration is in `.bb/runtime/config/<name>/`, commented for copying:
 
-- `traefik.yml` is the static (install) configuration: entrypoints, the file provider, `ping` and the API. Breadboard owns it. `static_file:` adds your own sections to it (metrics, tracing, plugins, a global `serversTransport`); `log` and `accessLog` from your file replace Breadboard's, and `entryPoints`, `providers`, `api`, `ping` and `global` are refused.
+- `traefik.yml` is the static (install) configuration: entrypoints, the file provider (and the Consul catalog provider with `consul_catalog`), `ping` and the API. Breadboard owns it. `static_file:` adds your own sections to it (metrics, tracing, plugins, a global `serversTransport` unless `consul_catalog` is set); `log` and `accessLog` from your file replace Breadboard's, and `entryPoints`, `providers`, `api`, `ping` and `global` are refused.
 - `dynamic.yml` is the routing: routers, middlewares, services and transports. `file:` replaces this one.
 - `tls.yml` is the certificate store and the minimum TLS version. It stays when you own `dynamic.yml`.
 
@@ -24,6 +24,7 @@ The configuration is in `.bb/runtime/config/<name>/`, commented for copying:
 - **Load-balancing strategies.** `loadBalancer.strategy` is `wrr` (weighted round robin, the default). Traefik 3.7 also has `p2c` (power of two random choices, picking the one with fewer active requests), `hrw` (highest random weight: the same client sticks to the same server) and `leasttime` (favours the servers that answer fastest). Switch in your own copy with `file:`.
 - **Health checks.** Every app server gets `GET /` every 2 seconds; a 2xx or 3xx answer keeps it in. A failing server leaves the rotation until it passes again. Infra upstreams have one server and no check: a check that failed would only turn a working route into a 503.
 - **Encoded characters in the path.** Every entrypoint sets `http.encodedCharacters` with all seven options `false`, so a path holding an encoded `/`, `\`, NUL, `;`, `%`, `?` or `#` (`%2F`, `%5C`, `%00`, `%3B`, `%25`, `%3F`, `%23`) gets a 400 before any router sees it. A backend that decodes the path again could otherwise act on a different path than the one Traefik routed (a split view). The query string is not checked.
+- **Routes from Consul.** With `consul_catalog`, Traefik reads the Consul catalog over TLS every 5 seconds and routes each service registered with the tag `traefik.enable=true` to its healthy instances. The rest of the route comes from the service's tags, set in the app's `register.tags`: ``traefik.http.routers.<name>.rule=PathPrefix(`/`)`` (it answers on `websecure`, port 8443) and `traefik.http.services.<name>.loadbalancer.server.scheme=https` (without it Traefik speaks plain HTTP to the TLS port). A replica that is added or fails its Consul check joins or leaves the routes without any change to Traefik's files.
 - **The API and dashboard.** They listen on the `traefik` entrypoint at `127.0.0.1:8080` only, next to `/ping`, which the container's health check (`traefik healthcheck --ping`) reads.
 
 ## Try this

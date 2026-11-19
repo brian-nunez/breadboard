@@ -500,6 +500,16 @@ templ connectionCard(p servicePage) {
 						{ strings.Join(p.Details.UsedBy, ", ") }
 					}
 				}
+				if registries := discovered(p.Row.Uses, "registry"); len(registries) > 0 {
+					@kv("Discovers") {
+						{ strings.Join(registries, ", ") }
+					}
+				}
+				if routes := discovered(p.Row.Uses, "route"); len(routes) > 0 {
+					@kv("Routes to") {
+						{ strings.Join(routes, ", ") }
+					}
+				}
 				if p.Details.HostRouter {
 					@kv("On the host") {
 						<span class="font-mono text-[13px]">{ hostRouterListen(p.Dash) }</span>
@@ -523,6 +533,18 @@ templ connectionCard(p servicePage) {
 			}
 		</div>
 	}
+}
+
+// discovered lists the targets of a proxy's discovery edges of one kind:
+// the registry it discovers routes in, or the apps it routes to from there.
+func discovered(uses []core.Edge, kind string) []string {
+	var out []string
+	for _, e := range uses {
+		if e.Discovery == kind {
+			out = append(out, e.To)
+		}
+	}
+	return out
 }
 
 func listenerSummary(l core.Listener) string {

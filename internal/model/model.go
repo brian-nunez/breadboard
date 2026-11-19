@@ -132,7 +132,8 @@ func (s *Service) Group() string {
 
 // Edge is a directed connection from an app (by its name in
 // experiment.yaml) to an infra listener, through an Envoy sidecar to
-// another app or an infra service, or from a proxy to one of its upstreams.
+// another app or an infra service, or from a proxy to one of its upstreams,
+// to the registry it discovers routes in, or to an app it finds there.
 type Edge struct {
 	From     string
 	To       string
@@ -148,7 +149,17 @@ type Edge struct {
 	// Mode is set on a proxy's upstream edges: spec.TLSOn (re-encrypt),
 	// spec.TLSOff (terminate) or spec.TLSPassthrough. From is the proxy.
 	Mode string
+	// Discovery is set on the edges of a proxy that discovers routes in a
+	// service registry (D-225): DiscoveryRegistry to the registry, and
+	// DiscoveryRoute to each app registered there for the proxy.
+	Discovery string
 }
+
+// Discovery values.
+const (
+	DiscoveryRegistry = "registry"
+	DiscoveryRoute    = "route"
+)
 
 // Segment is a private network shared by a plaintext listener and its clients.
 type Segment struct {
@@ -321,6 +332,8 @@ func Resolve(s *spec.Spec, domain string) (*Model, error) {
 			return nil, err
 		}
 	}
+
+	discovery(m)
 
 	logBuckets(m)
 
@@ -497,6 +510,36 @@ func upstreams(m *Model, s *spec.Spec, declared spec.Service) error {
 	}
 
 	return nil
+}
+
+// discovery adds the edges of a Traefik that discovers routes in a Consul
+// catalog (config consul_catalog): one to the registry, and one to every
+// app that registers there with the tag traefik.enable=true. Traefik finds
+// those routes at runtime; the edges show where they come from.
+func discovery(m *Model) {
+	for _, proxy := range m.Services {
+		registry, ok := m.Service(proxy.Config[catalog.TraefikConsulCatalog])
+		if proxy.Kind != Infra || !ok {
+			continue
+		}
+
+		l := registry.Entry.Listeners[0]
+		m.Edges = append(m.Edges, Edge{From: proxy.Name, To: registry.Name, Listener: l.Name, Port: l.Port, TLS: true, Discovery: DiscoveryRegistry})
+
+		routed := map[string]bool{}
+
+		for _, agent := range m.Services {
+			if agent.Register == nil || agent.Registry != registry.Name || !slices.Contains(agent.Register.Tags, catalog.TraefikEnableTag) {
+				continue
+			}
+
+			inst, _ := m.Service(agent.Parent)
+			if app := inst.Group(); !routed[app] {
+				routed[app] = true
+				m.Edges = append(m.Edges, Edge{From: proxy.Name, To: app, Listener: "tls", Port: agent.Register.Port, TLS: true, ToApp: true, Discovery: DiscoveryRoute})
+			}
+		}
+	}
 }
 
 // logBuckets adds every Fluent Bit sidecar's bucket to its S3 compatible

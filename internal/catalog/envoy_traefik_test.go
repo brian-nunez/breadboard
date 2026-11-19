@@ -14,6 +14,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/brian-nunez/breadboard/internal/pki"
+	"github.com/brian-nunez/breadboard/internal/spec"
 )
 
 func TestEnvoyConfigShapes(t *testing.T) {
@@ -731,5 +732,79 @@ func TestStaticFileSupport(t *testing.T) {
 	e, _ := Lookup("haproxy")
 	if _, err := e.Render(Server{Name: "edge", UserStatic: &UserFile{Path: "./s.yml", Data: []byte("{}")}}); err == nil || !strings.Contains(err.Error(), "takes no static_file") {
 		t.Errorf("haproxy with a static_file: %v", err)
+	}
+}
+
+// consul_catalog is a Traefik option only, and names a consul service of
+// the same experiment.
+func TestTraefikConsulCatalogOption(t *testing.T) {
+	head := "version: 1\nname: lab\nservices:\n  registry:\n    type: consul\n  cache:\n    type: redis\n  edge:\n    type: traefik\n"
+	for config, want := range map[string]string{
+		"    config: {consul_catalog: registry}\n": "",
+		"    config: {consul_catalog: missing}\n":  `services.edge.config.consul_catalog: must name a service of type consul in experiment.yaml, and "missing" is not one`,
+		"    config: {consul_catalog: cache}\n":    `services.edge.config.consul_catalog: must name a service of type consul in experiment.yaml, and "cache" is not one`,
+		"    config: {consul_catalog: ''}\n":       `services.edge.config.consul_catalog: must name a service of type consul in experiment.yaml, and "" is not one`,
+		"    config: {consul: registry}\n":         "services.edge.config.consul: unknown option for traefik (known: [consul_catalog])",
+	} {
+		doc, err := spec.Parse([]byte(head + config))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		s, err := doc.Decode()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = spec.Validate(s, Types)
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%q: %v", config, err)
+		case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+			t.Errorf("%q: error = %v, want %q", config, err, want)
+		}
+	}
+
+	for _, id := range []string{"haproxy", "envoy", "nginx", "pgbouncer", "consul"} {
+		if info, _ := Types(id); info.ConfigServices[TraefikConsulCatalog] != "" {
+			t.Errorf("%s takes consul_catalog", id)
+		}
+	}
+}
+
+// Without consul_catalog Traefik's generated files are unchanged; with it,
+// traefik.yml adds the Consul catalog provider and the lab CA for servers,
+// and dynamic.yml routes nothing of its own when there is no upstream.
+func TestTraefikConsulCatalogConfig(t *testing.T) {
+	s := Server{Name: "edge", Domain: "bb.internal", Config: map[string]string{TraefikConsulCatalog: "registry"}}
+
+	static := string(traefikStaticConfig(s))
+	for _, want := range []string{
+		"  consulCatalog:\n    exposedByDefault: false\n    refreshInterval: 5s\n    endpoint:\n      address: registry.bb.internal:8501\n      scheme: https\n      tls:\n        ca: /etc/bb/ca.pem\n",
+		"serversTransport:\n  rootCAs:\n    - /etc/bb/ca.pem\n",
+		"  file:\n    directory: /etc/bb/traefik\n",
+	} {
+		if !strings.Contains(static, want) {
+			t.Errorf("static config lacks %q:\n%s", want, static)
+		}
+	}
+
+	dyn := string(traefikDynamicConfig(s))
+	if strings.Contains(dyn, "no-upstream") || strings.Contains(dyn, "http:") || !strings.Contains(dyn, "routes what registry's catalog declares") {
+		t.Errorf("dynamic config:\n%s", dyn)
+	}
+
+	var doc any
+	if err := yaml.Unmarshal([]byte(dyn), &doc); err != nil {
+		t.Fatalf("not YAML: %v", err)
+	}
+
+	off := Server{Name: "edge", Domain: "bb.internal", Config: map[string]string{TraefikConsulCatalog: ""}}
+	if got, want := traefikStaticConfig(off), traefikStaticConfig(Server{Name: "edge", Domain: "bb.internal"}); !bytes.Equal(got, want) {
+		t.Errorf("an empty consul_catalog changes traefik.yml:\n%s", got)
+	}
+
+	if dyn := string(traefikDynamicConfig(off)); !strings.Contains(dyn, "no-upstream") {
+		t.Errorf("without consul_catalog the catch-all router is gone:\n%s", dyn)
 	}
 }

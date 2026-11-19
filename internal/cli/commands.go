@@ -473,8 +473,16 @@ func serviceRows(services []core.ServiceStatus) [][]string {
 
 // edgeText is one edge in the USES column. A proxy's upstream edges carry
 // their mode and target port: web (TLS :8443), api (terminate :8080,
-// PLAINTEXT), payments (passthrough :8443).
+// PLAINTEXT), payments (passthrough :8443). A proxy's discovery edges
+// read like the registration agent's: discovers in consul, routes to web.
 func edgeText(e core.Edge) string {
+	switch e.Discovery {
+	case "registry":
+		return "discovers in " + e.To
+	case "route":
+		return "routes to " + e.To
+	}
+
 	to := e.To
 	if e.Via != "" {
 		to += " (via " + e.Via + ")"

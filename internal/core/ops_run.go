@@ -541,6 +541,10 @@ type Edge struct {
 	// Mode is set on a proxy's upstream edges (Phase 5): on (re-encrypt,
 	// TLS), off (terminate; plaintext on a private segment) or passthrough.
 	Mode string
+	// Discovery is set on the edges of a proxy that discovers routes in a
+	// service registry: registry (to the registry) or route (to an app
+	// registered there for the proxy).
+	Discovery string
 }
 
 // StatusRequest asks for the experiment's state.
@@ -690,10 +694,10 @@ func (e *Engine) status(ctx context.Context, m *model.Model, hostPort int) ([]Se
 			}
 		}
 
-		if svc.Kind == model.App || len(svc.Upstreams) > 0 {
-			// An app's edges, or a proxy's upstream edges.
+		if svc.Kind != model.Sidecar {
+			// An app's edges, or a proxy's upstream and discovery edges.
 			for _, edge := range m.EdgesFrom(svc.Group()) {
-				s.Uses = append(s.Uses, Edge{To: edge.To, Port: edge.Port, TLS: edge.TLS, Reason: edge.Reason, Via: edge.Via, ToApp: edge.ToApp, Mode: edge.Mode})
+				s.Uses = append(s.Uses, Edge{To: edge.To, Port: edge.Port, TLS: edge.TLS, Reason: edge.Reason, Via: edge.Via, ToApp: edge.ToApp, Mode: edge.Mode, Discovery: edge.Discovery})
 			}
 		}
 

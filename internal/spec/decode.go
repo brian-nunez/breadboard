@@ -357,7 +357,7 @@ func (dec *decoder) app(name, path string, n *yaml.Node) App {
 
 	if v, ok := f["register"]; ok && !isNull(v) {
 		rp := join(path, "register")
-		rf := dec.fields(rp, v, nil, "name", "port", "check")
+		rf := dec.fields(rp, v, nil, "name", "port", "check", "tags")
 
 		r := &Register{}
 		if p, ok := rf["name"]; ok {
@@ -372,6 +372,10 @@ func (dec *decoder) app(name, path string, n *yaml.Node) App {
 
 		if p, ok := rf["check"]; ok {
 			r.Check = dec.str(join(rp, "check"), p)
+		}
+
+		if p, ok := rf["tags"]; ok && !isNull(p) {
+			r.Tags = dec.strings(join(rp, "tags"), p)
 		}
 
 		app.Register = r

@@ -104,6 +104,13 @@ func consul() *Entry {
 				check = map[string]any{"http": fmt.Sprintf("https://%s:%d%s", s.AppFQDN, s.Port, s.Check), "interval": "5s", "timeout": "2s"}
 			}
 
+			service := map[string]any{"id": s.Service, "name": s.Service, "address": s.AppFQDN, "port": s.Port, "check": check}
+			if len(s.Tags) > 0 {
+				// Registry consumers such as Traefik select and configure
+				// services by their tags.
+				service["tags"] = s.Tags
+			}
+
 			cfg := map[string]any{
 				"datacenter":                  "bb",
 				"node_name":                   s.App,
@@ -127,13 +134,7 @@ func consul() *Entry {
 					},
 					"internal_rpc": map[string]any{"verify_server_hostname": false},
 				},
-				"services": []map[string]any{{
-					"id":      s.Service,
-					"name":    s.Service,
-					"address": s.AppFQDN,
-					"port":    s.Port,
-					"check":   check,
-				}},
+				"services": []map[string]any{service},
 			}
 
 			data, err := json.MarshalIndent(cfg, "", "  ")

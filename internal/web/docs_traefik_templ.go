@@ -40,7 +40,7 @@ func init() {
 			},
 			{
 				Slug: "in-breadboard", Title: "Traefik in Breadboard", Summary: "The image, 8443 and 9443, upstreams and modes, file:, static_file:, the routes tab.",
-				Sections: []docSection{{"image", "Image and limits"}, {"upstreams", "Upstreams and routes"}, {"modes", "The three TLS modes"}, {"health", "Health checks"}, {"env", "What your app receives"}, {"see", "Seeing it work"}, {"own", "Owning the config"}},
+				Sections: []docSection{{"image", "Image and limits"}, {"upstreams", "Upstreams and routes"}, {"modes", "The three TLS modes"}, {"health", "Health checks"}, {"consul", "Routes from Consul"}, {"env", "What your app receives"}, {"see", "Seeing it work"}, {"own", "Owning the config"}},
 				Body:     traefikInBreadboard(),
 			},
 		},
@@ -262,7 +262,7 @@ func traefikIntro() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "Choose it when configuration changes often and should apply live, when routes should come from the platform rather than a file, or when you want certificates from Let's Encrypt with no extra tooling. Breadboard uses the file provider only and never gives Traefik the Docker socket, so every route is in a file you can read and own.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "Choose it when configuration changes often and should apply live, when routes should come from the platform rather than a file, or when you want certificates from Let's Encrypt with no extra tooling. Breadboard uses the file provider, plus the Consul catalog when a service asks for it, and never gives Traefik the Docker socket, so every route is in a file you can read and own or in Consul tags you set in experiment.yaml.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -419,7 +419,7 @@ func traefikAnatomy() templ.Component {
 			"A router's priority defaults to the length of its rule, so PathPrefix(`/v1/`) wins over PathPrefix(`/`) without any setting.",
 			"Router names are prefixed (route-<name>, default-<first>), so a route name never collides with another router.",
 			"stripPrefix removes /v1 before forwarding, and puts it in X-Forwarded-Prefix.",
-			"With one decrypted upstream there is a single route-<name> on PathPrefix(`/`); with none, router no-upstream points at a service without servers, which answers 503.",
+			"With one decrypted upstream there is a single route-<name> on PathPrefix(`/`); with none, router no-upstream points at a service without servers, which answers 503, unless consul_catalog is set: then no router is generated, so none shadows the routes from Consul.",
 		).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -590,7 +590,7 @@ func traefikInBreadboard() templ.Component {
 			"Image traefik:v3.7.19 (Alpine: wget and nc, no curl or openssl), 128m of memory and 0.25 CPU.",
 			"The container runs traefik --configFile=/etc/bb/config/traefik.yml. Logs and access logs go to stdout: bb logs <name>.",
 			"Entrypoints: websecure on 8443; passthrough on 9443, only when an upstream is passthrough; traefik on 127.0.0.1:8080 for the API, the dashboard and ping.",
-			"The file provider only. Traefik never sees the Docker socket, so it cannot discover containers on its own.",
+			"The file provider, and the Consul catalog with config.consul_catalog (see Routes from Consul). Traefik never sees the Docker socket, so it cannot discover containers on its own.",
 		).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -677,6 +677,63 @@ func traefikInBreadboard() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = docH2("consul", "Routes from Consul").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var13 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "A Traefik service can also take its routes from Consul instead of a file. Set ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("config: {consul_catalog: <consul service>}").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, ", name a ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("consul").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " service of the same experiment, and register the backends with tags. Each replica's agent registers its own address, so Traefik finds every replica and drops one whose Consul check fails, with no change to Traefik's files and no restart.")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var13), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docCode("experiment.yaml", traefikConsulCatalogSpec).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docList(
+			"traefik.yml gains providers.consulCatalog: the Consul API at https://<consul>.<domain>:8501, verified against the lab CA, read every 5 seconds, with exposedByDefault: false.",
+			"traefik.enable=true exposes a registered service; without it Traefik ignores the service.",
+			"The router tag sets the rule. With no entrypoints tag the router joins Traefik's default entrypoints, which leave out the loopback traefik one, so the route answers on websecure (8443) with Traefik's certificate.",
+			"loadbalancer.server.scheme=https is required: without it Traefik sends plain HTTP to port 8443. A global serversTransport verifies each replica's certificate against the lab CA, by the name in its URL (https://web-1.<domain>:8443).",
+			"With no upstreams, dynamic.yml routes nothing itself. The service starts once Consul is healthy.",
+			"The architecture graph shows it: web registers in consul, edge discovers in consul, and edge routes to web.",
+		).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		templ_7745c5c3_Err = docH2("env", "What your app receives").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -704,7 +761,7 @@ func traefikInBreadboard() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var13 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var14 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -716,7 +773,7 @@ func traefikInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "The generated files are in ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "The generated files are in ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -724,7 +781,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "&#46; Copy ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "&#46; Copy ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -732,7 +789,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " next to ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, " next to ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -740,7 +797,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, ", edit it, and set ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, ", edit it, and set ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -748,7 +805,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, " on the service. It replaces ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, " on the service. It replaces ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -756,7 +813,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, " only: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, " only: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -764,7 +821,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, " and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, " and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -772,13 +829,13 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, " stay generated, so the entrypoints, the certificate and the health check keep working.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " stay generated, so the entrypoints, the certificate and the health check keep working.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var13), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var14), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -795,7 +852,7 @@ func traefikInBreadboard() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var14 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var15 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -807,7 +864,7 @@ func traefikInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "Metrics, tracing, plugins and a global serversTransport are static configuration, which a dynamic file cannot set. Put them in a YAML file next to ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "Metrics, tracing, plugins and a global serversTransport are static configuration, which a dynamic file cannot set. Put them in a YAML file next to ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -815,7 +872,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, " and set ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, " and set ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -823,7 +880,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " on the service; Breadboard merges its sections into the generated ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " on the service; Breadboard merges its sections into the generated ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -831,7 +888,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, " at every ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, " at every ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -839,7 +896,7 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, ", and an edit recreates the service. It works with or without ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, ", and an edit recreates the service. It works with or without ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -847,13 +904,13 @@ func traefikInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var14), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var15), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -862,7 +919,7 @@ func traefikInBreadboard() templ.Component {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = docList(
-			"entryPoints, providers, api, ping and global are Breadboard's and are refused: the listeners, the file provider, the loopback API and the health check keep working.",
+			"entryPoints, providers, api, ping and global are Breadboard's and are refused: the listeners, the file provider, the loopback API and the health check keep working. With consul_catalog, serversTransport is Breadboard's too: it verifies the servers from Consul.",
 			"log and accessLog replace Breadboard's. bb logs <name> shows only what goes to stdout.",
 			"Every other section is added as given. Exporters and plugins reach whatever endpoint you name.",
 		).Render(ctx, templ_7745c5c3_Buffer)
@@ -876,6 +933,27 @@ func traefikInBreadboard() templ.Component {
 		return nil
 	})
 }
+
+const traefikConsulCatalogSpec = `services:
+  consul:
+    type: consul
+  edge:
+    type: traefik
+    config: {consul_catalog: consul}
+apps:
+  web:
+    path: ./web
+    replicas: 3
+    uses: [consul]
+    register:
+      port: 8443
+      tags:
+        - traefik.enable=true
+        - traefik.http.routers.web.rule=PathPrefix(` + "`/`" + `)
+        - traefik.http.services.web.loadbalancer.server.scheme=https
+  client:
+    path: ./client
+    uses: [edge]`
 
 const traefikStaticExample = `# Prometheus metrics on the loopback traefik entrypoint, beside the API.
 metrics:

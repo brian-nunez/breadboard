@@ -640,6 +640,13 @@ func infraService(in Input, svc *model.Service, mounts []string, add func(string
 		// Loopback only, like every published port (D-190).
 		def.Content = append(def.Content, str("ports"), seq(str(fmt.Sprintf("127.0.0.1:%d:%d", in.HostPort, catalog.HostRouterPort))))
 	}
+	// A proxy that discovers routes in a registry starts once the registry
+	// has a leader, so its first read of the catalog succeeds (D-225).
+	for _, e := range m.EdgesFrom(svc.Name) {
+		if e.Discovery == model.DiscoveryRegistry {
+			def.Content = append(def.Content, str("depends_on"), mapping(str(e.To), condition("service_healthy")))
+		}
+	}
 
 	return def, mounts, nil
 }

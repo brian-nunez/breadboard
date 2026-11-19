@@ -133,3 +133,46 @@ func TestRegisterAddsASidecar(t *testing.T) {
 		t.Error("register without a registry in uses resolved")
 	}
 }
+
+// A Traefik with consul_catalog gets a discovers edge to its registry and
+// a routes-to edge to each app registered there with traefik.enable=true,
+// once per app however many replicas it runs; an app registered without
+// the tag, or with another registry, gets none.
+func TestConsulCatalogDiscoveryEdges(t *testing.T) {
+	enable := &spec.Register{Port: 8443, Tags: []string{"traefik.enable=true"}}
+	s := &spec.Spec{
+		Version: 1, Name: "lab",
+		Services: []spec.Service{
+			{Name: "registry", Type: "consul"},
+			{Name: "other", Type: "consul"},
+			{Name: "edge", Type: "traefik", Config: map[string]string{"consul_catalog": "registry"}},
+			{Name: "plain-edge", Type: "traefik"},
+		},
+		Apps: []spec.App{
+			{Name: "web", Path: "./web", Replicas: 3, Uses: []spec.Use{{Service: "registry"}}, Register: enable},
+			{Name: "hidden", Path: "./hidden", Uses: []spec.Use{{Service: "registry"}}, Register: &spec.Register{Port: 8443, Tags: []string{"v1"}}},
+			{Name: "elsewhere", Path: "./elsewhere", Uses: []spec.Use{{Service: "other"}}, Register: enable},
+		},
+	}
+
+	m, err := Resolve(s, "bb.internal")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []Edge{
+		{From: "edge", To: "registry", Listener: "https", Port: 8501, TLS: true, Discovery: DiscoveryRegistry},
+		{From: "edge", To: "web", Listener: "tls", Port: 8443, TLS: true, ToApp: true, Discovery: DiscoveryRoute},
+	}
+	if got := m.EdgesFrom("edge"); !slices.Equal(got, want) {
+		t.Errorf("edge's edges:\n got %+v\nwant %+v", got, want)
+	}
+
+	if got := m.EdgesFrom("plain-edge"); len(got) != 0 {
+		t.Errorf("a Traefik without consul_catalog has edges: %+v", got)
+	}
+
+	if len(m.Segments) != 0 {
+		t.Errorf("discovery edges made segments: %+v", m.Segments)
+	}
+}

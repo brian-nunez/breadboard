@@ -234,6 +234,18 @@ func TestStatusRowsShowProxyUpstreamModes(t *testing.T) {
 	}
 }
 
+// A Traefik that discovers routes in Consul lists where they come from,
+// worded like the registration agent's row.
+func TestStatusRowsShowDiscoveryEdges(t *testing.T) {
+	rows := serviceRows([]core.ServiceStatus{{Name: "edge", Kind: "infra", Health: "healthy", Uses: []core.Edge{
+		{To: "consul", Port: 8501, TLS: true, Discovery: "registry"},
+		{To: "web", Port: 8443, TLS: true, ToApp: true, Discovery: "route"},
+	}}})
+	if got := rows[0][6]; got != "discovers in consul, routes to web" {
+		t.Errorf("edge uses = %q", got)
+	}
+}
+
 func TestPrintHostURLs(t *testing.T) {
 	var out strings.Builder
 

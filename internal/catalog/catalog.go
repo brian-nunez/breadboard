@@ -95,6 +95,9 @@ type ConfigOption struct {
 	Help    string
 	// Validate rejects a bad value with a message for the user.
 	Validate func(string) error
+	// Service is set when the value names another service of the
+	// experiment: the catalog type that service must have.
+	Service string
 }
 
 // Server is the input for rendering a service's container.
@@ -292,6 +295,16 @@ func Types(id string) (spec.TypeInfo, bool) {
 	}
 	if len(e.Config) > 0 {
 		info.Config = e.CheckConfig
+	}
+
+	for _, o := range e.Config {
+		if o.Service != "" {
+			if info.ConfigServices == nil {
+				info.ConfigServices = map[string]string{}
+			}
+
+			info.ConfigServices[o.Key] = o.Service
+		}
 	}
 
 	if p := e.Proxy; p != nil {

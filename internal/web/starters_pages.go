@@ -367,6 +367,17 @@ func starterRows(d *core.StarterDetails, cat map[string]core.CatalogEntry) []row
 
 			ups = append(ups, e)
 		}
+		// Routes from a Consul catalog: the registry, and every app that
+		// registers with the tag Traefik looks for.
+		if registry := svc.Config["consul_catalog"]; registry != "" {
+			ups = append(ups, core.Edge{To: registry, Port: catPort(registry), TLS: true, Discovery: "registry"})
+
+			for _, a := range d.Apps {
+				if a.Register != nil && slices.Contains(a.Register.Tags, "traefik.enable=true") {
+					ups = append(ups, core.Edge{To: a.Name, Port: a.Register.Port, TLS: true, ToApp: true, Discovery: "route"})
+				}
+			}
+		}
 
 		rows = append(rows, row{ServiceStatus: core.ServiceStatus{Name: svc.Name, Kind: "infra", Type: svc.Type, Health: core.HealthHealthy, Uses: ups}, TLS: true})
 	}

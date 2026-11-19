@@ -65,6 +65,10 @@ func traefikMergeStatic(s Server) ([]byte, error) {
 				errs = append(errs, fmt.Errorf("line %d: %s is Breadboard's and cannot be set here: %s", k.Line, k.Value, o.why))
 			}
 		}
+
+		if s.Config[TraefikConsulCatalog] != "" && strings.EqualFold(k.Value, "serversTransport") {
+			errs = append(errs, fmt.Errorf("line %d: %s is Breadboard's while %s is set: it verifies the servers from the Consul catalog against the lab CA", k.Line, k.Value, TraefikConsulCatalog))
+		}
 	}
 
 	if err := errors.Join(errs...); err != nil {

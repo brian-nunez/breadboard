@@ -75,13 +75,14 @@ type serviceStatus struct {
 }
 
 type edge struct {
-	To     string `json:"to"`
-	Port   int    `json:"port"`
-	TLS    bool   `json:"tls"`
-	Reason string `json:"reason,omitempty" jsonschema:"why TLS is off, when it is"`
-	Via    string `json:"via,omitempty" jsonschema:"the Envoy sidecar whose outbound listener carries the edge"`
-	ToApp  bool   `json:"to_app,omitempty" jsonschema:"the target is an app (every replica)"`
-	Mode   string `json:"mode,omitempty" jsonschema:"a proxy's upstream edge: on (re-encrypt), off (terminate, plaintext on a private segment) or passthrough"`
+	To        string `json:"to"`
+	Port      int    `json:"port"`
+	TLS       bool   `json:"tls"`
+	Reason    string `json:"reason,omitempty" jsonschema:"why TLS is off, when it is"`
+	Via       string `json:"via,omitempty" jsonschema:"the Envoy sidecar whose outbound listener carries the edge"`
+	ToApp     bool   `json:"to_app,omitempty" jsonschema:"the target is an app (every replica)"`
+	Mode      string `json:"mode,omitempty" jsonschema:"a proxy's upstream edge: on (re-encrypt), off (terminate, plaintext on a private segment) or passthrough"`
+	Discovery string `json:"discovery,omitempty" jsonschema:"a proxy's discovery edge: registry (it discovers routes in this Consul service, config consul_catalog) or route (it routes to this app, registered there with the tag traefik.enable=true)"`
 }
 
 type sidecarPort struct {
@@ -158,7 +159,7 @@ func hostURLView(u core.HostURL) hostURL {
 }
 
 func edgeView(e core.Edge) edge {
-	return edge{To: e.To, Port: e.Port, TLS: e.TLS, Reason: e.Reason, Via: e.Via, ToApp: e.ToApp, Mode: e.Mode}
+	return edge{To: e.To, Port: e.Port, TLS: e.TLS, Reason: e.Reason, Via: e.Via, ToApp: e.ToApp, Mode: e.Mode, Discovery: e.Discovery}
 }
 
 type envVar struct {

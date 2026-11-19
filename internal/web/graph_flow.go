@@ -23,14 +23,15 @@ const (
 	flowGap = 176
 )
 
-// hasProxies reports whether any service has upstream edges.
+// hasProxies reports whether any service has upstream or discovery edges.
 func hasProxies(rows []row) bool {
 	return slices.ContainsFunc(rows, isProxy)
 }
 
-// isProxy reports whether a row is a proxy with upstream edges.
+// isProxy reports whether a row is a proxy with upstream edges, or with
+// routes it discovers in a service registry.
 func isProxy(r row) bool {
-	return r.Kind == "infra" && slices.ContainsFunc(r.Uses, func(e core.Edge) bool { return e.Mode != "" })
+	return r.Kind == "infra" && slices.ContainsFunc(r.Uses, func(e core.Edge) bool { return e.Mode != "" || e.Discovery != "" })
 }
 
 func flowLayout(rows []row, selected string) graph {
@@ -196,6 +197,10 @@ func flowLayout(rows []row, selected string) graph {
 	placeCards(others, infraX)
 
 	// Edges: every app card's (its first instance's) and every proxy's.
+	// under is the bottom of the lowest label of an edge drawn beneath a
+	// column, which the graph's height must include.
+	var under int
+
 	from := slices.Clone(apps)
 	for _, p := range proxies {
 		from = append(from, pos[p.Name])
@@ -206,6 +211,15 @@ func flowLayout(rows []row, selected string) graph {
 			to, ok := pos[e.To]
 			if !ok {
 				continue
+			}
+
+			if e.Discovery == "registry" {
+				if ed, ok := underEdge(a, to, g.Nodes); ok {
+					g.Edges = append(g.Edges, ed)
+					under = max(under, ed.LabelY+11)
+
+					continue
+				}
 			}
 
 			g.Edges = append(g.Edges, flowEdge(a, to, e, clientX))
@@ -232,7 +246,48 @@ func flowLayout(rows []row, selected string) graph {
 		g.Height = max(g.Height, n.Y+n.H+podPad+graphPad)
 	}
 
+	if under > 0 {
+		g.Height = max(g.Height, under+graphPad)
+	}
+
 	return g
+}
+
+// underEdge draws a proxy's edge to the registry it discovers routes in
+// beneath the columns between them, when there are cards in the way (the
+// apps it routes to), so it neither runs behind them nor shares a label
+// spot with the routes-to edge. ok is false when nothing is in the way.
+func underEdge(from, to node, nodes []node) (edge, bool) {
+	low := 0
+
+	for _, n := range nodes {
+		if n.X > from.X && n.X < to.X {
+			low = max(low, n.Y+n.H+podPad)
+		}
+	}
+
+	if low == 0 {
+		return edge{}, false
+	}
+
+	x1, y1 := from.CX(), from.CY()
+
+	x2, y2 := to.X-6, to.CY()
+	if to.Pod() {
+		x2 -= podPad
+	}
+	// A cubic's midpoint is (y1 + 6*yc + y2) / 8 when both controls are at
+	// yc: put it, and the label, 16 below the lowest card in the way.
+	bottom := low + 16
+	yc := (8*bottom - y1 - y2) / 6
+
+	return edge{
+		Path:       fmt.Sprintf("M%d %d C%d %d, %d %d, %d %d", x1, y1, x1+sideBend, yc, x2-sideBend, yc, x2, y2),
+		LabelX:     (x1 + x2) / 2,
+		LabelY:     bottom,
+		Label:      edgeText(core.Edge{Discovery: "registry"}),
+		fixedLabel: true,
+	}, true
 }
 
 // box is a label's or card's rectangle.
@@ -402,8 +457,17 @@ func flowEdge(from, to node, e core.Edge, firstX int) edge {
 
 // edgeText labels an edge: TLS :port or plaintext :port, and for a
 // proxy's upstream its mode: TLS :port (re-encrypt), terminate :port
-// (a plaintext hop on a private segment), passthrough :port.
+// (a plaintext hop on a private segment), passthrough :port. A proxy's
+// discovery edges say what they are: discovers (in a service registry)
+// and routes to (an app registered there for it).
 func edgeText(e core.Edge) string {
+	switch e.Discovery {
+	case "registry":
+		return "discovers"
+	case "route":
+		return "routes to"
+	}
+
 	switch e.Mode {
 	case "":
 		return edgeLabel(e.TLS, e.Port)

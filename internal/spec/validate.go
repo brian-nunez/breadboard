@@ -16,6 +16,9 @@ import (
 type TypeInfo struct {
 	// Config validates one config key and value. Nil means the type takes no config.
 	Config func(key, value string) error
+	// ConfigServices maps the config keys whose value names another
+	// service of the experiment to the catalog type it must have.
+	ConfigServices map[string]string
 	// Plaintext reports whether the entry can enable a plaintext listener for an edge.
 	Plaintext bool
 	// Registry reports whether apps using this type can set register.
@@ -172,6 +175,14 @@ func Validate(s *Spec, types TypeLookup) error {
 
 			if err := info.Config(k, v); err != nil {
 				add(Violation{Path: cp, Message: err.Error()})
+
+				continue
+			}
+
+			if want, ok := info.ConfigServices[k]; ok {
+				if target, ok := s.Service(v); !ok || target.Type != want {
+					add(Violation{Path: cp, Message: fmt.Sprintf("must name a service of type %s in experiment.yaml, and %q is not one", want, v)})
+				}
 			}
 		}
 	}

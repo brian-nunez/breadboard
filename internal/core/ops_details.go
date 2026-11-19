@@ -217,8 +217,9 @@ func (e *Engine) ServiceDetails(ctx context.Context, req ServiceDetailsRequest) 
 		if other.Kind == model.App && other.Instance > 1 {
 			continue // an app is listed once, by its first instance's group
 		}
-		// Apps that use it, and proxies with it as an upstream.
-		uses := (other.Kind == model.App || len(other.Upstreams) > 0) && slices.ContainsFunc(m.EdgesFrom(other.Group()), func(e model.Edge) bool {
+		// Apps that use it, and proxies with it as an upstream, or that
+		// discover routes in it or route to it from there.
+		uses := other.Kind != model.Sidecar && slices.ContainsFunc(m.EdgesFrom(other.Group()), func(e model.Edge) bool {
 			return e.To == svc.Name || e.To == svc.Group()
 		})
 		if uses {

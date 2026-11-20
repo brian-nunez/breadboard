@@ -475,6 +475,7 @@ func camelIdentifier(s string) string {
 
 		if upperNext {
 			b.WriteRune(unicode.ToUpper(r))
+
 			upperNext = false
 		} else {
 			b.WriteRune(unicode.ToLower(r))

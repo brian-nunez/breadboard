@@ -304,14 +304,10 @@ func TestAddApp(t *testing.T) {
 	for _, want := range []string{
 		"Added app shop in ./shop", "wrote shop/main.go", "wrote shop/Dockerfile",
 		"postgres", "Postgres", "DATABASE_URL (secret), PGHOST", "REDIS_URL (secret)",
-		"bb up", "bb creds", "./shop/main.go is empty", "bb up shows it exited",
+		"bb up", "bb logs shop", "bb creds", "Write your experiment in ./shop/main.go",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("add app output lacks %q:\n%s", want, out)
-		}
-
-		if strings.Contains(out, "bb logs") {
-			t.Errorf("add app output points at bb logs, but the empty program logs nothing:\n%s", out)
 		}
 	}
 

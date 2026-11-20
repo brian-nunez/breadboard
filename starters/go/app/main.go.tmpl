@@ -31,22 +31,50 @@
 package main
 
 import (
+	"context"
+{{- if .NeedKafka}}
+	"crypto/tls"
+{{- end}}
 	"fmt"
+	"log"
+{{- if .NeedHTTP}}
+	"net/http"
+{{- end}}
 	"os"
+	"os/signal"
 	"strings"
-{{- if .Imports}}
+	"syscall"
+{{- if .NeedHTTP}}
+	"time"
+{{- end}}
+{{- if or .NeedPostgres .NeedRedis .NeedKafka .NeedS3 .NeedConsul}}
 
-	// Official client libraries for the services above. The _ keeps each
-	// in the build until you use it; drop the _ when you do.
-{{- range .Imports}}
-	_ "{{.Path}}" // {{.For}}
+{{- if .NeedS3}}
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+{{- end}}
+{{- if .NeedConsul}}
+	consulapi "github.com/hashicorp/consul/api"
+{{- end}}
+{{- if .NeedPostgres}}
+	"github.com/jackc/pgx/v5/pgxpool"
+{{- end}}
+{{- if .NeedRedis}}
+	"github.com/redis/go-redis/v9"
+{{- end}}
+{{- if .NeedKafka}}
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
 {{- end}}
 {{- end}}
 )
 
-// init runs before main and stops the program at once, with one clear
-// message, if a variable the app expects is missing.
-func init() {
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 {{- if .Uses}}
 	requireEnv(
 {{- range .Uses}}
@@ -58,7 +86,52 @@ func init() {
 	// Add a service's variables here when you add it to uses.
 	requireEnv()
 {{- end}}
+{{- if .NeedHTTP}}
+
+	httpClient := newHTTPClient()
+	_ = httpClient
+{{- end}}
+{{- range .Wires}}
+{{- if eq .Kind "postgres"}}
+
+	{{.Var}} := newPostgres(ctx, "{{index .Env "url"}}")
+	defer {{.Var}}.Close()
+{{- else if eq .Kind "redis"}}
+
+	{{.Var}} := newRedis(ctx, "{{index .Env "url"}}")
+	defer {{.Var}}.Close()
+{{- else if eq .Kind "kafka"}}
+
+	{{.Var}} := newKafkaProducer(ctx, "{{index .Env "brokers"}}", "{{index .Env "proto"}}", "events")
+	defer {{.Var}}.Close()
+
+	{{.Var2}} := newKafkaConsumer(ctx, "{{index .Env "brokers"}}", "{{index .Env "proto"}}", "events", "{{$.Name}}-group")
+	defer {{.Var2}}.Close()
+{{- else if eq .Kind "s3"}}
+
+	{{.Var}} := newS3(ctx, "{{index .Env "endpoint"}}", "{{index .Env "region"}}", "{{index .Env "key"}}", "{{index .Env "secret"}}")
+	_ = {{.Var}}
+{{- else if eq .Kind "consul"}}
+
+	{{.Var}} := newConsul("{{index .Env "addr"}}", "{{index .Env "ca"}}")
+	_ = {{.Var}}
+{{- else if eq .Kind "http"}}
+
+	{{.Var}} := os.Getenv("{{index .Env "url"}}")
+	_ = {{.Var}}
+{{- end}}
+{{- end}}
+
+	// Your experiment goes here.
+{{- if .Uses}}
+	log.Println("{{.Name}}: connected and ready (edit main.go and run bb up)")
+{{- else}}
+	log.Println("{{.Name}}: ready (edit main.go and run bb up)")
+{{- end}}
+	<-ctx.Done()
 }
+
+// --- Wiring -----------------------------------------------------------------
 
 // requireEnv exits with one message listing every name in names that is
 // unset or empty. bb up sets them all from uses in experiment.yaml, so a
@@ -77,6 +150,123 @@ func requireEnv(names ...string) {
 		os.Exit(1)
 	}
 }
+{{- if .NeedPostgres}}
 
-func main() {
+func newPostgres(ctx context.Context, urlEnv string) *pgxpool.Pool {
+	pool, err := pgxpool.New(ctx, os.Getenv(urlEnv))
+	if err != nil {
+		log.Fatalf("postgres (%s): %v", urlEnv, err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		log.Fatalf("postgres (%s) ping: %v", urlEnv, err)
+	}
+	return pool
 }
+{{- end}}
+{{- if .NeedRedis}}
+
+func newRedis(ctx context.Context, urlEnv string) *redis.Client {
+	opts, err := redis.ParseURL(os.Getenv(urlEnv))
+	if err != nil {
+		log.Fatalf("redis (%s): %v", urlEnv, err)
+	}
+	client := redis.NewClient(opts)
+	if err := client.Ping(ctx).Err(); err != nil {
+		log.Fatalf("redis (%s) ping: %v", urlEnv, err)
+	}
+	return client
+}
+{{- end}}
+{{- if .NeedKafka}}
+
+func newKafkaProducer(ctx context.Context, brokersEnv, protoEnv, topic string) *kgo.Client {
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(strings.Split(os.Getenv(brokersEnv), ",")...),
+		kgo.DefaultProduceTopic(topic),
+	}
+	if os.Getenv(protoEnv) == "SSL" {
+		opts = append(opts, kgo.DialTLSConfig(new(tls.Config)))
+	}
+	client, err := kgo.NewClient(opts...)
+	if err != nil {
+		log.Fatalf("kafka producer (%s): %v", brokersEnv, err)
+	}
+	if err := client.Ping(ctx); err != nil {
+		log.Fatalf("kafka producer (%s) ping: %v", brokersEnv, err)
+	}
+	// The broker does not auto-create topics, so ensure the demo topic exists
+	// (3 partitions, 1 replica). If it already exists, nothing changes.
+	_, _ = kadm.NewClient(client).CreateTopic(ctx, 3, 1, nil, topic)
+	return client
+}
+
+func newKafkaConsumer(ctx context.Context, brokersEnv, protoEnv, topic, group string) *kgo.Client {
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(strings.Split(os.Getenv(brokersEnv), ",")...),
+		kgo.ConsumerGroup(group),
+		kgo.ConsumeTopics(topic),
+		// Start from the oldest record, and reset there if an offset falls out of range.
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+	}
+	if os.Getenv(protoEnv) == "SSL" {
+		opts = append(opts, kgo.DialTLSConfig(new(tls.Config)))
+	}
+	client, err := kgo.NewClient(opts...)
+	if err != nil {
+		log.Fatalf("kafka consumer (%s): %v", brokersEnv, err)
+	}
+	if err := client.Ping(ctx); err != nil {
+		log.Fatalf("kafka consumer (%s) ping: %v", brokersEnv, err)
+	}
+	return client
+}
+{{- end}}
+{{- if .NeedS3}}
+
+func newS3(ctx context.Context, endpointEnv, regionEnv, keyEnv, secretEnv string) *s3.Client {
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(os.Getenv(regionEnv)),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+			os.Getenv(keyEnv), os.Getenv(secretEnv), "",
+		)),
+	)
+	if err != nil {
+		log.Fatalf("s3 (%s): %v", endpointEnv, err)
+	}
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(os.Getenv(endpointEnv))
+		o.UsePathStyle = true
+	})
+	if _, err := client.ListBuckets(ctx, &s3.ListBucketsInput{}); err != nil {
+		log.Fatalf("s3 (%s) check: %v", endpointEnv, err)
+	}
+	return client
+}
+{{- end}}
+{{- if .NeedConsul}}
+
+func newConsul(addrEnv, caEnv string) *consulapi.Client {
+	cfg := consulapi.DefaultConfig()
+	cfg.Address = os.Getenv(addrEnv)
+	cfg.Scheme = "http"
+	if caEnv != "" {
+		cfg.TLSConfig.CAFile = os.Getenv(caEnv)
+	}
+	client, err := consulapi.NewClient(cfg)
+	if err != nil {
+		log.Fatalf("consul (%s): %v", addrEnv, err)
+	}
+	if _, err := client.Status().Leader(); err != nil {
+		log.Fatalf("consul (%s) check: %v", addrEnv, err)
+	}
+	return client
+}
+{{- end}}
+{{- if .NeedHTTP}}
+
+func newHTTPClient() *http.Client {
+	// Go's default TLS transport reads SSL_CERT_FILE, so requests to any
+	// HTTPS proxy or service in the lab verify against the lab CA.
+	return &http.Client{Timeout: 10 * time.Second}
+}
+{{- end}}

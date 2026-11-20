@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   check:
-    name: Format, lint, vet and test
+    name: Format, lint, vet, security and test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -25,11 +25,14 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v9
+      - name: Cache pinned tools
+        uses: actions/cache@v5
         with:
-          version: v2.15.0
-          install-only: true
+          path: .tools
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/tools.sh', 'scripts/web.sh') }}
+
+      - name: Install pinned tools
+        run: make tools
 
       - name: Format
         run: make fmt-check
@@ -40,11 +43,17 @@ jobs:
       - name: Lint
         run: make lint
 
+      - name: Vulnerability scan
+        run: make vuln
+
+      - name: Dead code check
+        run: make deadcode
+
       # Starter tests build every rendered starter, which downloads its modules.
-      - name: Test
+      - name: Test (with race detector)
         run: make test
 
-      - name: Test release scripts
+      - name: Test scripts
         run: make test-scripts
 
       # templ output and the compiled stylesheet are committed; regenerating them must change nothing.

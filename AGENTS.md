@@ -58,3 +58,5 @@ Decisions costly to reverse get a MADR record in [`docs/adr/`](docs/adr/README.m
 
 - Generated files are never edited by hand: `*_templ.go`, the compiled Tailwind stylesheet, and `docs/design/ui/breadboard-ui.figcraft` and `renders/`. Change the source and regenerate.
 - An accepted ADR changes only its `status`; a changed decision gets a new ADR that supersedes it.
+- Deterministic guardrails (`.golangci.yml`, `Makefile`, `.github/`, `scripts/`, `internal/core/boundary_test.go`, `internal/designdocs/`, `AGENTS.md`) are protected by `.github/workflows/guardrails.yml` and `CODEOWNERS`. Never silence a linter with `//nolint` or loosen a boundary to make CI pass; fix the underlying code instead.
+- Run `make check` locally before opening a PR; `scripts/tools.sh` pins the exact tool versions CI runs.

@@ -1,0 +1,77 @@
+name: Guardrail audit
+
+# Sounds an alarm whenever a pull request edits deterministic guardrails
+# (linters, formatters, boundary tests, CI workflows, build scripts, CODEOWNERS,
+# AGENTS.md) or adds lint/test bypasses (//nolint, t.Skip). Requires explicit
+# human review and the `guardrail-approved` label to pass.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: guardrails-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Guardrail audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check guardrail changes
+        id: check
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'guardrail-approved') }}
+        run: |
+          set +e
+          report=$(GUARDRAIL_APPROVED=false bash scripts/guardrail-check.sh --base "$BASE_SHA" --head "$HEAD_SHA" --markdown)
+          status=$?
+          set -e
+
+          echo "triggered=$([ "$status" -ne 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          {
+            echo "report<<GUARDRAIL_EOF"
+            echo "$report"
+            echo "GUARDRAIL_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "$report"
+
+      - name: Post or update PR alarm comment
+        if: steps.check.outputs.triggered == 'true'
+        uses: actions/github-script@v8
+        env:
+          REPORT: ${{ steps.check.outputs.report }}
+        with:
+          script: |
+            const marker = '<!-- guardrail-alarm -->';
+            const body = process.env.REPORT;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Require maintainer approval for guardrail changes
+        if: steps.check.outputs.triggered == 'true' && !contains(github.event.pull_request.labels.*.name, 'guardrail-approved')
+        run: |
+          echo "::error::Deterministic guardrail change or bypass detected. Review the rationale in the PR comment and apply the 'guardrail-approved' label to proceed."
+          exit 1

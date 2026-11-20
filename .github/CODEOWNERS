@@ -1,2 +1,12 @@
 # Default owner for everything.
 *       @brian-nunez
+
+# Deterministic guardrails, build/CI pipelines, boundary tests, and agent rules
+# require explicit maintainer review before merging.
+/.golangci.yml                 @brian-nunez
+/Makefile                      @brian-nunez
+/.github/                      @brian-nunez
+/scripts/                      @brian-nunez
+/internal/core/boundary_test.go @brian-nunez
+/internal/designdocs/          @brian-nunez
+/AGENTS.md                     @brian-nunez

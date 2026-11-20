@@ -503,7 +503,7 @@ func TestEnvoyClusterNamesMatchTheGeneratedConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{envoyOutboundPrefix + "web", envoyAppCluster, envoyPassthrough, envoyInboundPassCluster} {
+	for _, name := range []string{envoyOutboundPrefix + "web", envoyAppCluster, envoyPassthrough, envoyInboundOrigDstCluster} {
 		if !strings.Contains(string(data), "- name: "+name+"\n") {
 			t.Errorf("no cluster %q in the generated Envoy configuration", name)
 		}

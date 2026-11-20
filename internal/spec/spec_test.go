@@ -2,7 +2,6 @@ package spec
 
 import (
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -22,11 +21,11 @@ func types(id string) (TypeInfo, bool) {
 	case "postgres":
 		return TypeInfo{Plaintext: true, Config: func(k, v string) error {
 			if k != "database" {
-				return fmt.Errorf("unknown option")
+				return errors.New("unknown option")
 			}
 
 			if v == "" {
-				return fmt.Errorf("must not be empty")
+				return errors.New("must not be empty")
 			}
 
 			return nil

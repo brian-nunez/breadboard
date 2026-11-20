@@ -34,20 +34,21 @@ func ym(kv ...any) ymap {
 
 	var pending ycomment
 
-	for i := 0; i < len(kv); i++ {
-		if c, ok := kv[i].(ycomment); ok {
+	for len(kv) > 0 {
+		if c, ok := kv[0].(ycomment); ok {
 			pending = c
+			kv = kv[1:]
 
 			continue
 		}
 
-		if i+1 >= len(kv) {
+		if len(kv) < 2 {
 			panic("catalog: ym: a key without a value")
 		}
 
-		out = append(out, yfield{key: kv[i].(string), value: kv[i+1], comment: string(pending)})
+		out = append(out, yfield{key: kv[0].(string), value: kv[1], comment: string(pending)})
 		pending = ""
-		i++
+		kv = kv[2:]
 	}
 
 	return out

@@ -33,7 +33,7 @@ func TestTransparentLabGetsStableAddresses(t *testing.T) {
 
 	ps, _ := state.Project{Dir: h.dir}.LoadState()
 
-	want := map[string]string{"postgres": labAddr(1, 10), "web-1-pod": labAddr(1, 11), "web-2-pod": labAddr(1, 12), "web-3-pod": labAddr(1, 13), "caller-pod": labAddr(1, 14)}
+	want := map[string]string{"postgres": labAddr(10), "web-1-pod": labAddr(11), "web-2-pod": labAddr(12), "web-3-pod": labAddr(13), "caller-pod": labAddr(14)}
 	if ps.Network != labBlock(1).String() || len(ps.Addresses) != len(want) {
 		t.Fatalf("network = %s, addresses = %v", ps.Network, ps.Addresses)
 	}
@@ -45,7 +45,7 @@ func TestTransparentLabGetsStableAddresses(t *testing.T) {
 	}
 
 	compose := h.read(".bb/runtime/docker-compose.yml")
-	for _, s := range []string{"subnet: " + labAddr(1, 0) + "/24", "ip_range: " + labAddr(1, 128) + "/25", "ipv4_address: " + labAddr(1, 14), "address_prefix: " + labAddr(1, 11)} {
+	for _, s := range []string{"subnet: " + labAddr(0) + "/24", "ip_range: " + labAddr(128) + "/25", "ipv4_address: " + labAddr(14), "address_prefix: " + labAddr(11)} {
 		if !strings.Contains(compose+h.read(".bb/runtime/config/caller-envoy/envoy.yaml"), s) {
 			t.Errorf("rendered files lack %q", s)
 		}
@@ -65,7 +65,7 @@ func TestTransparentLabGetsStableAddresses(t *testing.T) {
 		}
 	}
 
-	if ps.Network != labBlock(1).String() || ps.Addresses["cache"] != labAddr(1, 15) {
+	if ps.Network != labBlock(1).String() || ps.Addresses["cache"] != labAddr(15) {
 		t.Errorf("network = %s, cache = %s", ps.Network, ps.Addresses["cache"])
 	}
 	// Without a transparent pod: no fixed subnet or addresses.

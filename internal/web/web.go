@@ -81,7 +81,9 @@ func New(eng *core.Engine, opts Options) (*Server, error) {
 		return nil, fmt.Errorf("listen address %q: bb serve only listens on a loopback address such as 127.0.0.1", addr)
 	}
 
-	ln, err := net.Listen("tcp", addr)
+	var lc net.ListenConfig
+
+	ln, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +119,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdown, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 
 		_ = s.http.Shutdown(shutdown)

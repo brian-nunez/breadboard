@@ -164,7 +164,7 @@ func (ca *CA) IssueHost(names []string, now time.Time) (*Leaf, error) {
 	}
 
 	for _, n := range names {
-		if !strings.HasSuffix(n, "."+HostDomain) || n == "."+HostDomain {
+		if !validHostDNSName(n) {
 			return nil, fmt.Errorf("%w: %q", ErrNotHostName, n)
 		}
 	}
@@ -210,6 +210,34 @@ func (ca *CA) IssueHost(names []string, now time.Time) (*Leaf, error) {
 	}
 
 	return &Leaf{CertPEM: pemBlock("CERTIFICATE", der), KeyPEM: keyPEM, Cert: cert}, nil
+}
+
+// validHostDNSName reports whether n is a valid DNS hostname strictly below
+// .localhost (RFC 1035 labels, no wildcards, no whitespace or empty labels).
+func validHostDNSName(n string) bool {
+	if len(n) == 0 || len(n) > 253 || !strings.HasSuffix(n, "."+HostDomain) {
+		return false
+	}
+
+	prefix := strings.TrimSuffix(n, "."+HostDomain)
+	if prefix == "" {
+		return false
+	}
+
+	for label := range strings.SplitSeq(prefix, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+
+		for i := range len(label) {
+			c := label[i]
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 // HostNeedsReissue reports whether an existing host certificate must be

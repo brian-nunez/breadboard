@@ -122,7 +122,7 @@ func validateSidecars(s *Spec, types TypeLookup, app App, p string, add func(err
 
 		ids[sc.ID()] = true
 
-		owner := fmt.Sprintf("sidecar %s", sc.ID())
+		owner := "sidecar " + sc.ID()
 		switch {
 		case sc.Envoy != nil:
 			validateEnvoy(s, types, app, sp, sc.Envoy, add, pod, owner, outboundTargets)
@@ -134,7 +134,7 @@ func validateSidecars(s *Spec, types TypeLookup, app App, p string, add func(err
 			pb := sc.PgBouncer
 			if pb.Service != "" {
 				if pooled[pb.Service] {
-					add(Violation{Path: join(sp, "service"), Message: fmt.Sprintf("%s already has a pgbouncer sidecar in this app", pb.Service)})
+					add(Violation{Path: join(sp, "service"), Message: pb.Service + " already has a pgbouncer sidecar in this app"})
 				}
 
 				pooled[pb.Service] = true

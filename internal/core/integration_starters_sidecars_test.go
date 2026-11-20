@@ -34,6 +34,7 @@ func sidecarStarterLab(t *testing.T, prefix, id string) (*Engine, string, string
 
 // lastLines logs the tail of each app's log when the test failed.
 func lastLines(t *testing.T, eng *Engine, dir string, services ...string) {
+	t.Helper()
 	t.Cleanup(func() {
 		if !t.Failed() {
 			return

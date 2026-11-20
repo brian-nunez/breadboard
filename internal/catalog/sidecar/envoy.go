@@ -35,14 +35,14 @@ const (
 
 // Envoy listener and cluster names, read by explorers and tests.
 const (
-	envoyInboundListener     = "inbound"
-	envoyAppCluster          = "app"
-	envoyTransparentOut      = "transparent_outbound"
-	envoyTransparentIn       = "transparent_inbound"
-	envoyPassthroughCluster  = "passthrough"
-	envoyInboundPassCluster  = "inbound_passthrough"
-	envoyOutboundPrefix      = "outbound_"
-	envoyUpstreamConnTimeout = "2s"
+	envoyInboundListener       = "inbound"
+	envoyAppCluster            = "app"
+	envoyTransparentOut        = "transparent_outbound"
+	envoyTransparentIn         = "transparent_inbound"
+	envoyPassthroughCluster    = "passthrough"
+	envoyInboundOrigDstCluster = "inbound_passthrough"
+	envoyOutboundPrefix        = "outbound_"
+	envoyUpstreamConnTimeout   = "2s"
 )
 
 // Type URLs of the Envoy extensions the generated config uses.
@@ -480,7 +480,7 @@ func transparent(in Input) (list, list, error) {
 						"format_string", o("text_format_source", o("inline_string", "127.0.0.1:%DOWNSTREAM_LOCAL_PORT%")),
 					)},
 				)),
-				tcpProxy("inbound_passthrough", envoyInboundPassCluster),
+				tcpProxy("inbound_passthrough", envoyInboundOrigDstCluster),
 			},
 		))
 	}
@@ -498,7 +498,7 @@ func transparent(in Input) (list, list, error) {
 	inbound = append(inbound, field{"default_filter_chain", denyChain("ingress_denied")})
 	clusters := list{
 		o("name", envoyPassthroughCluster, "type", "ORIGINAL_DST", "lb_policy", "CLUSTER_PROVIDED", "connect_timeout", envoyUpstreamConnTimeout),
-		o("name", envoyInboundPassCluster, "type", "ORIGINAL_DST", "lb_policy", "CLUSTER_PROVIDED", "connect_timeout", "1s"),
+		o("name", envoyInboundOrigDstCluster, "type", "ORIGINAL_DST", "lb_policy", "CLUSTER_PROVIDED", "connect_timeout", "1s"),
 	}
 
 	return list{out, inbound}, clusters, nil

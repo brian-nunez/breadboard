@@ -256,7 +256,7 @@ func Validate(s *Spec, types TypeLookup) error {
 				case strings.TrimSpace(tag) != tag:
 					add(Violation{Path: tp, Message: "must not start or end with whitespace"})
 				case seenTags[tag]:
-					add(Violation{Path: tp, Message: fmt.Sprintf("%s is listed more than once", tag)})
+					add(Violation{Path: tp, Message: tag + " is listed more than once"})
 				}
 
 				seenTags[tag] = true
@@ -284,7 +284,7 @@ func Validate(s *Spec, types TypeLookup) error {
 			add(useChecks(s, types, up)(u))
 
 			if seenUses[u.Service] {
-				add(Violation{Path: up, Message: fmt.Sprintf("%s is listed more than once", u.Service)})
+				add(Violation{Path: up, Message: u.Service + " is listed more than once"})
 			}
 
 			seenUses[u.Service] = true

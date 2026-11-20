@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -57,7 +58,7 @@ func postgres() *Entry {
 			}
 			if s.Plain != nil {
 				hba = append(hba,
-					fmt.Sprintf("# Plaintext, only from the private segment shared with: %s", strings.Join(s.Plain.Clients, ", ")),
+					"# Plaintext, only from the private segment shared with: "+strings.Join(s.Plain.Clients, ", "),
 				)
 				for _, r := range s.Plain.Reasons {
 					hba = append(hba, hbaComment("Reason: "+r))
@@ -134,7 +135,7 @@ func postgres() *Entry {
 			return []EnvVar{
 				{Name: "DATABASE_URL", Value: fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s", user, pw, host, port, db, mode), Secret: true},
 				{Name: "PGHOST", Value: host},
-				{Name: "PGPORT", Value: fmt.Sprint(port)},
+				{Name: "PGPORT", Value: strconv.Itoa(port)},
 				{Name: "PGUSER", Value: user},
 				{Name: "PGPASSWORD", Value: pw, Secret: true},
 				{Name: "PGDATABASE", Value: db},

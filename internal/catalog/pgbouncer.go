@@ -214,7 +214,7 @@ func pgbouncerConfig(s Server, up Upstream, db, user string) []byte {
 
 func pgbouncerModeComment(u Upstream) string {
 	if u.Mode == spec.TLSOff {
-		return fmt.Sprintf("%s over its private segment (plaintext; see server_tls_sslmode).", u.Service)
+		return u.Service + " over its private segment (plaintext; see server_tls_sslmode)."
 	}
 
 	return fmt.Sprintf("%s over TLS, verified as %s (server_tls_sslmode).", u.Service, u.ServerName)

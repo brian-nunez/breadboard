@@ -214,7 +214,7 @@ func TestProxyUserFileReplacesTheConfig(t *testing.T) {
 	}
 
 	gen := renderWith(t, proxyLab(), secrets.Inline, nil)
-	if hash(t, b, "edge") == hash(t, gen, "edge") {
+	if hash(t, b) == hash(t, gen) {
 		t.Error("the user's file does not change the config hash")
 	}
 
@@ -226,7 +226,7 @@ func TestProxyUserFileReplacesTheConfig(t *testing.T) {
 	}
 }
 
-func hash(t *testing.T, b *Bundle, service string) string {
+func hash(t *testing.T, b *Bundle) string {
 	t.Helper()
 
 	f, _ := b.File(ComposeFile)
@@ -240,5 +240,5 @@ func hash(t *testing.T, b *Bundle, service string) string {
 		t.Fatal(err)
 	}
 
-	return doc.Services[service].Labels[LabelConfigHash]
+	return doc.Services["edge"].Labels[LabelConfigHash]
 }

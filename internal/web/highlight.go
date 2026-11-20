@@ -209,7 +209,7 @@ func yamlKeyEnd(s string) int {
 func yamlSplitComment(s string) (string, string) {
 	var quote byte
 
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 
 		switch {

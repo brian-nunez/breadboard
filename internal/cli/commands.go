@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,7 +67,7 @@ func (c *cli) catalog(args []string) error {
 	for _, e := range res.Entries {
 		ports := make([]string, len(e.Ports))
 		for i, p := range e.Ports {
-			ports[i] = fmt.Sprint(p)
+			ports[i] = strconv.Itoa(p)
 		}
 
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s, %s cpu\t%s\n", e.Type, e.Image, strings.Join(ports, ","), e.Memory, e.CPUs, e.Summary)

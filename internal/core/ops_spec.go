@@ -68,7 +68,7 @@ func (e *Engine) Init(ctx context.Context, req InitRequest) (*InitResult, error)
 			return nil, spec.Invalid("name", "%q must be a lowercase DNS label (a-z, 0-9, -) of at most 40 characters", name)
 		}
 
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, err
 		}
 
@@ -256,7 +256,7 @@ func (e *Engine) AddService(_ context.Context, req AddServiceRequest) (*AddServi
 		return nil, fmt.Errorf("%w; choose another name with --name", err)
 	}
 
-	if _, err := p.save(p.doc); err != nil {
+	if err := p.save(p.doc); err != nil {
 		return nil, err
 	}
 
@@ -317,7 +317,7 @@ func (e *Engine) RemoveService(_ context.Context, req RemoveServiceRequest) (*Re
 		return nil, err
 	}
 
-	if _, err := p.save(p.doc); err != nil {
+	if err := p.save(p.doc); err != nil {
 		return nil, err
 	}
 
@@ -612,14 +612,14 @@ func (e *Engine) applyStarter(ctx context.Context, st starters.Starter, render r
 			continue
 		case err == nil:
 			res.Conflicts = append(res.Conflicts, rel)
-			req.Events.warn(fmt.Sprintf("%s differs from the starter; left as is", rel))
+			req.Events.warn(rel + " differs from the starter; left as is")
 
 			continue
 		case !isNotExist(err):
 			return nil, err
 		}
 
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return nil, err
 		}
 
@@ -631,7 +631,7 @@ func (e *Engine) applyStarter(ctx context.Context, st starters.Starter, render r
 	}
 
 	if len(res.AddedApps) > 0 || len(res.AddedServices) > 0 {
-		if _, err := p.save(doc); err != nil {
+		if err := p.save(doc); err != nil {
 			return nil, err
 		}
 	}
@@ -776,7 +776,7 @@ func (e *Engine) Migrate(_ context.Context, req MigrateRequest) (*MigrateResult,
 	}
 
 	if changed {
-		if _, err := p.save(doc); err != nil {
+		if err := p.save(doc); err != nil {
 			return nil, err
 		}
 	}

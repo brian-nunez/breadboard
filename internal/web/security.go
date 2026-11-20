@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/brian-nunez/bkit/stash"
@@ -94,12 +95,40 @@ func (s *Server) auth(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 
-	next := r.URL.Query().Get("next")
-	if u, err := url.Parse(next); err != nil || next == "" || u.IsAbs() || u.Host != "" || next[0] != '/' {
-		next = "/"
+	next := safeNextPath(r.URL.Query().Get("next"))
+	w.Header().Set("Location", next)
+	w.WriteHeader(http.StatusSeeOther)
+}
+
+// safeNextPath ensures post-auth redirects stay on a relative path on this
+// server, rejecting scheme-relative ("//..."), backslash-prefixed ("/\..."),
+// control characters, and absolute URLs.
+func safeNextPath(raw string) string {
+	if raw == "" || raw[0] != '/' || strings.HasPrefix(raw, "//") || strings.HasPrefix(raw, `/\`) {
+		return "/"
 	}
 
-	http.Redirect(w, r, next, http.StatusSeeOther)
+	if strings.ContainsAny(raw, "\r\n") {
+		return "/"
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil || u.IsAbs() || u.Host != "" || u.Scheme != "" || !strings.HasPrefix(u.Path, "/") {
+		return "/"
+	}
+
+	if strings.HasPrefix(u.Path, "//") || strings.HasPrefix(u.Path, `/\`) {
+		return "/"
+	}
+
+	clean := &url.URL{Path: u.Path, RawQuery: u.RawQuery}
+
+	out := clean.RequestURI()
+	if strings.HasPrefix(out, "//") || strings.HasPrefix(out, `/\`) {
+		return "/"
+	}
+
+	return out
 }
 
 func (s *Server) validSession(r *http.Request) bool {

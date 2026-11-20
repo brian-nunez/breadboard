@@ -41,14 +41,16 @@ type HostURL struct {
 // hash of its name, modulo the range, so labs tend to keep apart.
 func hostPortStart(experiment string) int {
 	h := fnv.New32a()
-	h.Write([]byte(experiment))
+	_, _ = h.Write([]byte(experiment))
 
 	return hostPortFirst + int(h.Sum32()%hostPortCount)
 }
 
 // loopbackPortFree reports whether port binds on 127.0.0.1 now.
 func loopbackPortFree(port int) bool {
-	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	var lc net.ListenConfig
+
+	l, err := lc.Listen(context.Background(), "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
 		return false
 	}
@@ -136,21 +138,21 @@ func (e *Engine) hostPort(ctx context.Context, m *model.Model, ps *state.Project
 // names, reissued when they change or it nears expiry, and removed with
 // its state record when the lab has no host target. The host CA is
 // loaded, or created, only when the lab has one.
-func (e *Engine) reconcileHostCert(p *project, m *model.Model, ps *state.ProjectState, ev EventSink) (*compose.Cert, error) {
+func (e *Engine) reconcileHostCert(p *project, m *model.Model, ps *state.ProjectState, ev EventSink) (*compose.Cert, bool, error) {
 	router, ok := m.HostRouter()
 	if !ok {
 		if err := p.RemoveNamedCert(spec.HostRouterName, state.HostCert); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 		delete(ps.Certificates, hostCertKey)
 
-		return nil, nil
+		return nil, false, nil
 	}
 
 	ca, created, err := e.ensureHostCA()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	if created {
@@ -162,28 +164,28 @@ func (e *Engine) reconcileHostCert(p *project, m *model.Model, ps *state.Project
 
 	certPEM, keyPEM, ok, err := p.ReadNamedCert(router.Name, state.HostCert)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	if ok {
 		cert, err := pki.ParseCert(certPEM)
 		if err == nil && pki.KeyMatches(cert, keyPEM) && !ca.HostNeedsReissue(cert, names, now) {
-			return &compose.Cert{Cert: certPEM, Key: keyPEM}, nil
+			return &compose.Cert{Cert: certPEM, Key: keyPEM}, true, nil
 		}
 	}
 
 	leaf, err := ca.IssueHost(names, now)
 	if err != nil {
-		return nil, fmt.Errorf("issue the host certificate: %w", err)
+		return nil, false, fmt.Errorf("issue the host certificate: %w", err)
 	}
 
 	if err := p.WriteNamedCert(router.Name, state.HostCert, leaf.CertPEM, leaf.KeyPEM); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	ps.Certificates[hostCertKey] = state.CertRecord{Issuer: hostCAName, Serial: leaf.Cert.SerialNumber.Text(16), NotAfter: leaf.Cert.NotAfter}
 
-	return &compose.Cert{Cert: leaf.CertPEM, Key: leaf.KeyPEM}, nil
+	return &compose.Cert{Cert: leaf.CertPEM, Key: leaf.KeyPEM}, true, nil
 }
 
 // hostURL is the URL of a host name on the router's port.

@@ -106,24 +106,24 @@ func decodeAndValidate(doc *spec.Document) (*spec.Spec, error) {
 }
 
 // save validates doc and writes it to experiment.yaml.
-func (p *project) save(doc *spec.Document) (*spec.Spec, error) {
+func (p *project) save(doc *spec.Document) error {
 	s, err := decodeAndValidate(doc)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	data, err := doc.Bytes()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := state.WriteFile(p.specPath(), data, 0o644); err != nil {
-		return nil, err
+		return err
 	}
 
 	p.doc, p.spec = doc, s
 
-	return s, nil
+	return nil
 }
 
 var devStage = regexp.MustCompile(`(?im)^\s*FROM\s+\S+(\s+--\S+)*\s+AS\s+dev\s*$`)
@@ -139,11 +139,11 @@ func (p *project) checkApps() error {
 		data, err := os.ReadFile(df)
 		switch {
 		case isNotExist(err):
-			vs = append(vs, spec.Violation{Path: path, Message: fmt.Sprintf("%s has no Dockerfile", app.Path)})
+			vs = append(vs, spec.Violation{Path: path, Message: app.Path + " has no Dockerfile"})
 		case err != nil:
 			return err
 		case !devStage.Match(data):
-			vs = append(vs, spec.Violation{Path: path, Message: fmt.Sprintf("%s/Dockerfile has no stage named dev (FROM <image> AS dev)", app.Path)})
+			vs = append(vs, spec.Violation{Path: path, Message: app.Path + "/Dockerfile has no stage named dev (FROM <image> AS dev)"})
 		}
 	}
 
@@ -332,7 +332,7 @@ func (e *Engine) prepare(ctx context.Context, p *project, events EventSink, prob
 		return nil, err
 	}
 
-	hostCert, err := e.reconcileHostCert(p, m, ps, events)
+	hostCert, _, err := e.reconcileHostCert(p, m, ps, events)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +431,7 @@ var segmentPool = netip.MustParsePrefix("10.213.0.0/16")
 // race for the same block (D-202).
 func subnetStart(experiment string) int {
 	h := fnv.New32a()
-	h.Write([]byte(experiment))
+	_, _ = h.Write([]byte(experiment))
 
 	return int(h.Sum32() % 256)
 }
@@ -519,9 +519,9 @@ func (e *Engine) allocateSubnets(ctx context.Context, m *model.Model, ps *state.
 	free := func(what string) (netip.Prefix, error) {
 		base := segmentPool.Addr().As4()
 
-		start := subnetStart(m.Name)
+		start := uint8(subnetStart(m.Name) & 0xff)
 		for i := range 256 {
-			cand := netip.PrefixFrom(netip.AddrFrom4([4]byte{base[0], base[1], byte((start + i) % 256), 0}), 24)
+			cand := netip.PrefixFrom(netip.AddrFrom4([4]byte{base[0], base[1], start + uint8(i), 0}), 24)
 			if !taken(cand) {
 				return cand, nil
 			}
@@ -752,12 +752,8 @@ func writeBundle(dir string, b *compose.Bundle) error {
 		return err
 	}
 
-	keep := map[string]bool{}
-
 	for _, f := range b.Files {
 		path := filepath.Join(dir, filepath.FromSlash(f.Path))
-
-		keep[path] = true
 		if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, f.Data) {
 			if st, err := os.Stat(path); err == nil && st.Mode().Perm() == f.Mode.Perm() {
 				continue
@@ -773,21 +769,33 @@ func writeBundle(dir string, b *compose.Bundle) error {
 		}
 	}
 	// Remove files no longer in the bundle, then directories left empty,
-	// deepest first.
+	// deepest first, scoped via os.Root so symlinks cannot escape dir.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = root.Close() }()
+
+	keepRel := map[string]bool{}
+	for _, f := range b.Files {
+		keepRel[filepath.ToSlash(filepath.Clean(f.Path))] = true
+	}
+
 	var dirs []string
 
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		switch {
 		case err != nil:
 			return err
 		case d.IsDir():
-			if path != dir {
-				dirs = append(dirs, path)
+			if rel != "." {
+				dirs = append(dirs, rel)
 			}
 
 			return nil
-		case !keep[path]:
-			return os.Remove(path)
+		case !keepRel[rel]:
+			return root.Remove(rel)
 		}
 
 		return nil
@@ -797,8 +805,8 @@ func writeBundle(dir string, b *compose.Bundle) error {
 	}
 
 	for i := len(dirs) - 1; i >= 0; i-- {
-		if entries, err := os.ReadDir(dirs[i]); err == nil && len(entries) == 0 {
-			if err := os.Remove(dirs[i]); err != nil {
+		if entries, err := fs.ReadDir(root.FS(), dirs[i]); err == nil && len(entries) == 0 {
+			if err := root.Remove(dirs[i]); err != nil {
 				return err
 			}
 		}

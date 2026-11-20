@@ -8,19 +8,127 @@ run:
 linters:
   default: standard
   enable:
+    - bodyclose
+    - contextcheck
+    - copyloopvar
+    - depguard
     - errorlint
+    - exhaustive
+    - forbidigo
     - gocritic
+    - gosec
+    - intrange
     - misspell
+    - nilerr
+    - nilnil
     - nlreturn
+    - noctx
+    - nolintlint
+    - perfsprint
     - revive
+    - thelper
     - unconvert
+    - unparam
+    - usestdlibvars
     - whitespace
     - wsl_v5
   settings:
+    depguard:
+      rules:
+        no-unsafe:
+          deny:
+            - pkg: unsafe
+              desc: unsafe is forbidden across Breadboard
+        no-os-exec-outside-runtime:
+          files:
+            - "!$test"
+            - "!**/internal/runtime/runtime.go"
+            - "!**/internal/cli/serve.go"
+          deny:
+            - pkg: os/exec
+              desc: subprocess execution is restricted to internal/runtime (Docker) and internal/cli/serve.go (browser open)
+        crypto-rand-only-in-security:
+          files:
+            - "**/internal/pki/**"
+            - "**/internal/secrets/**"
+            - "!$test"
+          deny:
+            - pkg: math/rand
+              desc: use crypto/rand in security-sensitive packages
+            - pkg: math/rand/v2
+              desc: use crypto/rand in security-sensitive packages
+        no-flag-outside-cli:
+          files:
+            - "!$test"
+            - "!**/internal/cli/**"
+          deny:
+            - pkg: flag
+              desc: flag parsing belongs in internal/cli
+    exhaustive:
+      default-signifies-exhaustive: true
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^http\.(DefaultClient|Get|Post|PostForm|Head)$'
+          msg: "use an explicit *http.Client with timeouts instead of net/http default client helpers"
+        - pattern: '^time\.Sleep$'
+          msg: "use context-aware timers (select on ctx.Done() and time.NewTimer) instead of time.Sleep"
+    nolintlint:
+      allow-unused: false
+      require-explanation: true
+      require-specific: true
     wsl_v5:
       allow-first-in-block: true
       allow-whole-block: false
       branch-max-lines: 2
+  exclusions:
+    generated: lax
+    rules:
+      # Test code may use time.Sleep, default HTTP helpers, and unguarded test fixtures/commands.
+      - path: '_test\.go$'
+        linters:
+          - forbidigo
+          - gosec
+          - noctx
+      # Generated templ files are verified by scripts/web.sh check and are not hand-edited.
+      - path: '_templ\.go$'
+        linters:
+          - gosec
+          - perfsprint
+          - revive
+          - unparam
+          - usestdlibvars
+          - wsl_v5
+          - nlreturn
+      # templ components take context.Context at Render(ctx, w), not when constructing the closure.
+      - path: 'internal/web/'
+        linters:
+          - contextcheck
+        text: 'Function .*->.*\$1'
+      # Breadboard is a local CLI whose core job is reading computed experiment/config/state files.
+      - linters:
+          - gosec
+        text: 'G304:'
+      # Subprocess execution is already locked by depguard to these two files only.
+      - path: '^internal/(runtime/runtime|cli/serve)\.go$'
+        linters:
+          - gosec
+        text: 'G204:'
+      # os.Chmod(dir, 0o700) is the tightest mode for directories; G302 assumes regular files.
+      - path: '^internal/state/(home|project)\.go$'
+        linters:
+          - gosec
+        text: 'G302:'
+      # Static site export for GitHub Pages intentionally writes world-readable directories/files.
+      - path: '^internal/web/export\.go$'
+        linters:
+          - gosec
+        text: 'G30[16]:'
+      # bb serve runs over loopback HTTP (127.0.0.1); Secure cookies would break non-TLS localhost requests.
+      - path: '^internal/web/security\.go$'
+        linters:
+          - gosec
+        text: 'G124:'
 
 formatters:
   enable:

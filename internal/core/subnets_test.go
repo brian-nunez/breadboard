@@ -16,9 +16,9 @@ func labBlock(k int) netip.Prefix {
 	return netip.MustParsePrefix(fmt.Sprintf("10.213.%d.0/24", (subnetStart("lab")+k)%256))
 }
 
-// labAddr is host's address in labBlock(k).
-func labAddr(k, host int) string {
-	b := labBlock(k).Addr().As4()
+// labAddr is host's address in labBlock(1).
+func labAddr(host int) string {
+	b := labBlock(1).Addr().As4()
 	b[3] = byte(host)
 
 	return netip.AddrFrom4(b).String()

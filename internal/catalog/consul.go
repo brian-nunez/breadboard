@@ -157,7 +157,7 @@ func consul() *Entry {
 				Files: []File{{Name: "consul.json", Data: append(data, '\n')}},
 				Health: Health{
 					// Healthy once the registration has reached the server's catalog.
-					Test:          []string{"CMD-SHELL", fmt.Sprintf("consul catalog services | grep -qx %s", s.Service)},
+					Test:          []string{"CMD-SHELL", "consul catalog services | grep -qx " + s.Service},
 					Interval:      10 * time.Second,
 					Timeout:       5 * time.Second,
 					Retries:       5,

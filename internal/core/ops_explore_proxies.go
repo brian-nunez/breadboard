@@ -253,7 +253,7 @@ func parseHAProxy(out, domain string, units map[string]ProxyUpstream) (*HAProxyS
 	}
 
 	if len(records) == 0 || !slices.Contains(records[0], "pxname") || !slices.Contains(records[0], "svname") {
-		return nil, fmt.Errorf("haproxy stats CSV: no header")
+		return nil, errors.New("haproxy stats CSV: no header")
 	}
 
 	col := map[string]int{}
@@ -327,7 +327,7 @@ func parseHAProxy(out, domain string, units map[string]ProxyUpstream) (*HAProxyS
 	}
 
 	if len(res.Frontends) == 0 && len(res.Backends) == 0 {
-		return nil, fmt.Errorf("haproxy stats CSV: no rows")
+		return nil, errors.New("haproxy stats CSV: no rows")
 	}
 
 	return res, nil

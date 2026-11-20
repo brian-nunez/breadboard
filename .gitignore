@@ -33,5 +33,8 @@ go.work.sum
 __pycache__/
 *.py[cod]
 
-# Downloaded build tools (scripts/web.sh)
+# Downloaded build tools (scripts/web.sh, scripts/tools.sh)
 /.tools/
+
+# E2E browser test dependencies (tests/e2e/)
+/tests/e2e/node_modules/

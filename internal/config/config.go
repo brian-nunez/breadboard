@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/brian-nunez/bkit/settings"
@@ -228,7 +229,7 @@ func Set(ctx context.Context, home state.Home, name, value string) (Value, error
 		return Value{}, err
 	}
 
-	setKey(doc.Content[0], "version", fmt.Sprint(FormatVersion), "!!int", "")
+	setKey(doc.Content[0], "version", strconv.Itoa(FormatVersion), "!!int", "")
 	setKey(doc.Content[0], name, value, "!!str", k.Help)
 
 	out, err := yaml.Marshal(doc)

@@ -21,7 +21,7 @@ func TestIntegrationEnvoyProxy(t *testing.T) {
 // TestIntegrationTraefik runs Traefik with one upstream in each TLS mode
 // and checks what each mode promises (see proxyModesLab).
 func TestIntegrationTraefik(t *testing.T) {
-	_, name := proxyModesLab(t, "traefik", func(addr string) string {
+	name := proxyModesLab(t, "traefik", func(addr string) string {
 		return `nc -z -w 3 ` + strings.Replace(addr, ":", " ", 1) + ` && echo open`
 	})
 	// The API is on loopback: it answers inside the container and lists
@@ -105,9 +105,9 @@ apps:
 //   - passthrough: the client sees the backend's own certificate.
 //
 // It returns the lab's engine and experiment name for further checks.
-func proxyModesLab(t *testing.T, typ string, reach func(addr string) string) (*Engine, string) {
+func proxyModesLab(t *testing.T, typ string, reach func(addr string) string) string {
 	t.Helper()
-	eng, _, name := sidecarLab(t, "proxy-"+typ, `services:
+	_, _, name := sidecarLab(t, "proxy-"+typ, `services:
   edge:
     type: `+typ+`
     upstreams:
@@ -211,7 +211,7 @@ apps:
 		}
 	})
 
-	return eng, name
+	return name
 }
 
 // TestIntegrationTraefikStaticFile runs Traefik with a static_file that

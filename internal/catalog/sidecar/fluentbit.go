@@ -36,7 +36,7 @@ func renderFluentBit(in Input) (Output, error) {
 	endpoint := fmt.Sprintf("https://%s:%d", use.FQDN, use.Port)
 	section := func(name string, kv ...string) []string {
 		lines := []string{"[" + name + "]"}
-		for i := 0; i < len(kv); i += 2 {
+		for i := 0; i+1 < len(kv); i += 2 {
 			lines = append(lines, fmt.Sprintf("    %-20s %s", kv[i], kv[i+1]))
 		}
 

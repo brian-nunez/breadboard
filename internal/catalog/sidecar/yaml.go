@@ -24,7 +24,7 @@ func o(kv ...any) obj {
 	}
 
 	out := make(obj, 0, len(kv)/2)
-	for i := 0; i < len(kv); i += 2 {
+	for i := 0; i+1 < len(kv); i += 2 {
 		out = append(out, field{key: kv[i].(string), value: kv[i+1]})
 	}
 

@@ -222,7 +222,7 @@ func (e *Engine) AddApp(ctx context.Context, req AddAppRequest) (*AddAppResult, 
 		res.Files = append(res.Files, filepath.ToSlash(filepath.Join(target, f.Path)))
 	}
 
-	if _, err := p.save(doc); err != nil {
+	if err := p.save(doc); err != nil {
 		undo()
 
 		return nil, err
@@ -336,7 +336,7 @@ func writeAppFiles(root string, files []starters.File) error {
 
 	for _, f := range files {
 		path := filepath.Join(root, filepath.FromSlash(f.Path))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return err
 		}
 

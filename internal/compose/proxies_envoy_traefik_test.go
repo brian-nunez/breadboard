@@ -116,12 +116,12 @@ func TestTraefikStaticFileGolden(t *testing.T) {
 		}
 	}
 
-	if hash(t, b, "edge") == hash(t, gen, "edge") {
+	if hash(t, b) == hash(t, gen) {
 		t.Error("the static_file does not change the config hash")
 	}
 
 	edited := renderWith(t, s, secrets.Inline, map[string]string{"edge/static.yml": strings.Replace(traefikStatic, "0.5", "1.0", 1)})
-	if hash(t, edited, "edge") == hash(t, b, "edge") {
+	if hash(t, edited) == hash(t, b) {
 		t.Error("an edit to the static_file does not change the config hash")
 	}
 }

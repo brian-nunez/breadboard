@@ -1,0 +1,77 @@
+name: Nightly quality & security
+
+# Deeper verification that is too slow for every pull request:
+# active fuzzing, mutation testing, vulnerability & dead-code audits, and
+# Playwright browser smoke tests against a live `bb serve` instance.
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: Active fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Fuzz parser, PKI, Traefik static merge, and web security boundaries
+        run: make test-fuzz FUZZTIME=30s
+
+  mutation:
+    name: Mutation testing (gremlins)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Cache pinned tools
+        uses: actions/cache@v5
+        with:
+          path: .tools
+          key: tools-nightly-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/tools.sh') }}
+
+      - name: Run mutation tests on PKI, secrets, and spec
+        run: make test-mutation
+
+  e2e:
+    name: Web UI Playwright smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install Playwright and Chromium
+        working-directory: tests/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run web UI smoke tests
+        run: make test-e2e

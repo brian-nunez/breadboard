@@ -80,13 +80,16 @@ func acquire(path, operation string) (*Lock, error) {
 func acquireWait(path, operation string, timeout time.Duration) (*Lock, error) {
 	deadline := time.Now().Add(timeout)
 
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		l, err := acquire(path, operation)
 		if err == nil || !errors.Is(err, errs.ErrBusy) || time.Now().After(deadline) {
 			return l, err
 		}
 
-		time.Sleep(20 * time.Millisecond)
+		<-ticker.C
 	}
 }
 

@@ -221,7 +221,7 @@ var notesFS embed.FS
 func notes(id string) string {
 	data, err := notesFS.ReadFile("notes/" + id + ".md")
 	if err != nil {
-		panic(fmt.Sprintf("catalog: missing notes for %s", id))
+		panic("catalog: missing notes for " + id)
 	}
 
 	return string(data)

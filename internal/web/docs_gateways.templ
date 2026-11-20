@@ -568,6 +568,9 @@ templ gwAuth() {
 		[]string{"Valid token", "forwarded, with the claim in x-user"},
 	)
 	@docP() {
+		Notice the 401 vs 403 split: a missing, malformed, expired or wrongly signed token fails authentication (401 — the gateway cannot trust who you are), while a valid token issued for a different service fails the audience check (403 — the token is real, just not meant for this API).
+	}
+	@docP() {
 		The JWKS is fetched through an Envoy cluster, so in Breadboard it is a verified TLS hop to the issuer like any other. Other options forward the whole verified payload, with @docCodeWord("forward_payload_header"), or keep the token for the backend with @docCodeWord("forward: true"); by default Envoy strips it.
 	}
 	@docH2("forward", "Forward auth")
@@ -905,7 +908,7 @@ templ gwResilience() {
 		[]string{"Idle connection", "idle_timeout (1h)", "forwardingTimeouts.idleConnTimeout (90s)", "keepalive_timeout"},
 	)
 	@docP() {
-		Set timeouts from the outside in: the gateway's must be longer than the service's own call to its dependencies, or the gateway gives up while the work still finishes and is wasted; and each layer's must be shorter than its caller's. Envoy's route timeout counts from the end of the client's request to the end of the response, including every retry; @docCodeWord("per_try_timeout") bounds each attempt, so a 3s timeout with a 1s per-try timeout leaves room for about three attempts.
+		Set timeouts from the outside in: the gateway's must be longer than the service's own call to its dependencies, or the gateway gives up while the work still finishes and is wasted; and each layer's must be shorter than its caller's. In Go services, pass @docCodeWord("r.Context()") into downstream database, cache and HTTP calls: when the gateway times out and cancels the upstream request, that context cancels too and stops work nobody is waiting for. Envoy's route timeout counts from the end of the client's request to the end of the response, including every retry; @docCodeWord("per_try_timeout") bounds each attempt, so a 3s timeout with a 1s per-try timeout leaves room for about three attempts.
 	}
 	@docH2("retries", "Retries")
 	@docP() {

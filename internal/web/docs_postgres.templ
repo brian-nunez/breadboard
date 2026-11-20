@@ -286,7 +286,7 @@ templ postgresBasicUsage() {
 	}
 	@docCode("main.go", pgPoolCode)
 	@docP() {
-		@docCodeWord("pgxpool.New") does not connect. Connections open when they are first needed, up to @docCodeWord("pool_max_conns"), which defaults to 4 or the number of CPUs, whichever is greater. Errors appear on the first query, not from @docCodeWord("New")&#46;
+		@docCodeWord("pgxpool.New") does not connect. Connections open when they are first needed, up to @docCodeWord("pool_max_conns"), which defaults to 4 or the number of CPUs, whichever is greater. Errors appear on the first query, not from @docCodeWord("New"), so call @docCodeWord("pool.Ping(ctx)") right after @docCodeWord("New") when you want bad credentials or an unreachable server to fail at startup.
 	}
 	@docTerminal("bb init cache-lab", "bb starter redis/cache-invalidation", "bb up", "bb logs cache-reader -f")
 }
@@ -320,7 +320,7 @@ templ postgresTransactions() {
 		Read Committed is the default. Each statement takes a new snapshot when it starts, so two SELECTs in one transaction can see different data if another transaction committed in between.
 	}
 	@docP() {
-		When an UPDATE finds a row that a concurrent transaction is changing, it waits. If that transaction commits, Postgres re-checks the WHERE clause against the new version of the row and, if it still matches, applies the update to it. So @docCodeWord("SET balance = balance - 10") from two transactions subtracts 20. The trap is reading a value in one statement, computing in Go, and writing it back in another: the second writer overwrites the first one's result.
+		When an UPDATE finds a row that a concurrent transaction is changing, it waits. If that transaction commits, Postgres re-checks the WHERE clause against the new version of the row and, if it still matches, applies the update to it. So @docCodeWord("SET balance = balance - 10") from two transactions subtracts 20. The trap is reading a value in one statement, computing in Go, and writing it back in another: the second writer overwrites the first one's result. When you have to compute in Go under Read Committed, lock the row with @docCodeWord("SELECT ... FOR UPDATE") so a second transaction waits until you commit, or step up to a stricter isolation level below.
 	}
 	@docH2("stricter", "Repeatable Read and Serializable")
 	@docP() {

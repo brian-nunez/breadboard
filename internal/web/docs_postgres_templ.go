@@ -722,7 +722,23 @@ func postgresBasicUsage() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, ", so call ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("pool.Ping(ctx)").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, " right after ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("New").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, " when you want bad credentials or an unreachable server to fail at startup.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -769,7 +785,7 @@ func postgresTransactions() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "A transaction groups statements so they take effect together or not at all. The isolation level decides what a transaction sees of other transactions running at the same time.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "A transaction groups statements so they take effect together or not at all. The isolation level decides what a transaction sees of other transactions running at the same time.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -795,7 +811,7 @@ func postgresTransactions() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "Without ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "Without ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -803,7 +819,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, ", every statement is its own transaction: Postgres wraps it in an implicit BEGIN and COMMIT. To make several statements atomic, open a transaction explicitly:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, ", every statement is its own transaction: Postgres wraps it in an implicit BEGIN and COMMIT. To make several statements atomic, open a transaction explicitly:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -829,7 +845,7 @@ func postgresTransactions() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "What actually happens: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "What actually happens: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -837,7 +853,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " sends ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, " sends ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -845,7 +861,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, " on the connection, and every ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " on the connection, and every ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -853,7 +869,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, " runs on that same connection. ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, " runs on that same connection. ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -861,7 +877,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " sends ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, " sends ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -869,7 +885,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "&#46; If a statement failed earlier, the server treats that commit as a rollback and pgx returns ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "&#46; If a statement failed earlier, the server treats that commit as a rollback and pgx returns ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -877,7 +893,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "&#46; Once either has run, the transaction is closed and the deferred ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "&#46; Once either has run, the transaction is closed and the deferred ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -885,7 +901,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, " returns ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, " returns ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -893,7 +909,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, " without touching the server.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, " without touching the server.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -915,7 +931,7 @@ func postgresTransactions() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "In pgx, cancelling the context passed to ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "In pgx, cancelling the context passed to ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -923,7 +939,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, " does not roll the transaction back later. Only Commit or Rollback ends it, which is why the deferred Rollback matters.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, " does not roll the transaction back later. Only Commit or Rollback ends it, which is why the deferred Rollback matters.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -949,7 +965,7 @@ func postgresTransactions() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "An ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "An ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -957,7 +973,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, " does not overwrite a row in place. It writes a new version of the row and marks the old one as replaced by this transaction. A ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, " does not overwrite a row in place. It writes a new version of the row and marks the old one as replaced by this transaction. A ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -965,7 +981,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, " marks the row the same way. Each statement reads through a snapshot that decides which versions are visible to it, so a reader sees the last committed version and never waits for the writer.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, " marks the row the same way. Each statement reads through a snapshot that decides which versions are visible to it, so a reader sees the last committed version and never waits for the writer.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -999,7 +1015,7 @@ func postgresTransactions() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "Read Committed is the default. Each statement takes a new snapshot when it starts, so two SELECTs in one transaction can see different data if another transaction committed in between.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "Read Committed is the default. Each statement takes a new snapshot when it starts, so two SELECTs in one transaction can see different data if another transaction committed in between.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1021,7 +1037,7 @@ func postgresTransactions() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "When an UPDATE finds a row that a concurrent transaction is changing, it waits. If that transaction commits, Postgres re-checks the WHERE clause against the new version of the row and, if it still matches, applies the update to it. So ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "When an UPDATE finds a row that a concurrent transaction is changing, it waits. If that transaction commits, Postgres re-checks the WHERE clause against the new version of the row and, if it still matches, applies the update to it. So ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1029,7 +1045,15 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, " from two transactions subtracts 20. The trap is reading a value in one statement, computing in Go, and writing it back in another: the second writer overwrites the first one's result.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, " from two transactions subtracts 20. The trap is reading a value in one statement, computing in Go, and writing it back in another: the second writer overwrites the first one's result. When you have to compute in Go under Read Committed, lock the row with ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("SELECT ... FOR UPDATE").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, " so a second transaction waits until you commit, or step up to a stricter isolation level below.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1055,7 +1079,7 @@ func postgresTransactions() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "Repeatable Read takes one snapshot, at the transaction's first statement, and uses it until the end. Every read in the transaction sees the same data. If it tries to update or lock a row that another transaction changed and committed after that snapshot, Postgres aborts it with ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "Repeatable Read takes one snapshot, at the transaction's first statement, and uses it until the end. Every read in the transaction sees the same data. If it tries to update or lock a row that another transaction changed and committed after that snapshot, Postgres aborts it with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1063,7 +1087,7 @@ func postgresTransactions() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1085,7 +1109,7 @@ func postgresTransactions() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "Serializable adds checks on top of that snapshot. Postgres tracks what each transaction read using predicate locks, which never block, and aborts a transaction when the combined result could not have come from running the transactions one at a time. Both levels report this as SQLSTATE 40001, and the fix is always the same: roll back and retry the whole transaction.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "Serializable adds checks on top of that snapshot. Postgres tracks what each transaction read using predicate locks, which never block, and aborts a transaction when the combined result could not have come from running the transactions one at a time. Both levels report this as SQLSTATE 40001, and the fix is always the same: roll back and retry the whole transaction.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1139,7 +1163,7 @@ func postgresUpserts() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "An upsert inserts a row or, if one with the same key exists, does something else instead, in a single statement. It is how a consumer makes a redelivered message harmless.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "An upsert inserts a row or, if one with the same key exists, does something else instead, in a single statement. It is how a consumer makes a redelivered message harmless.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1165,7 +1189,7 @@ func postgresUpserts() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "A plain INSERT of a key that already exists fails with a unique violation. Adding ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "A plain INSERT of a key that already exists fails with a unique violation. Adding ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1173,7 +1197,7 @@ func postgresUpserts() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, " tells Postgres what to do instead. The redis/cache-invalidation starter seeds its products this way, so running the seed on every start adds missing rows and leaves existing ones alone:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, " tells Postgres what to do instead. The redis/cache-invalidation starter seeds its products this way, so running the seed on every start adds missing rows and leaves existing ones alone:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1199,7 +1223,7 @@ func postgresUpserts() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "The command tag counts the rows inserted or updated. A row skipped by ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "The command tag counts the rows inserted or updated. A row skipped by ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1207,7 +1231,7 @@ func postgresUpserts() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, " is not counted, so pgx's ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, " is not counted, so pgx's ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1215,7 +1239,7 @@ func postgresUpserts() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, " returns 0 for it. That is how code can tell a new row from a duplicate.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " returns 0 for it. That is how code can tell a new row from a duplicate.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1241,7 +1265,7 @@ func postgresUpserts() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "Postgres detects a conflict through a unique index, called the arbiter. In ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "Postgres detects a conflict through a unique index, called the arbiter. In ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1249,7 +1273,7 @@ func postgresUpserts() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, ", the column list is used to find a unique index on exactly those columns. If none exists, the statement fails with an error. A primary key or a UNIQUE constraint creates such an index automatically, so both work as arbiters.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, ", the column list is used to find a unique index on exactly those columns. If none exists, the statement fails with an error. A primary key or a UNIQUE constraint creates such an index automatically, so both work as arbiters.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1287,7 +1311,7 @@ func postgresUpserts() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " changes the existing row. The special table ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, " changes the existing row. The special table ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1295,7 +1319,7 @@ func postgresUpserts() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, " holds the values that were proposed for insertion:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, " holds the values that were proposed for insertion:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1321,7 +1345,7 @@ func postgresUpserts() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "Postgres guarantees an atomic outcome: each row is either inserted or updated, even when many sessions run the same statement concurrently. One DO UPDATE statement may not affect the same row twice, so a multi-row VALUES list with two rows for one key fails with a cardinality violation.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "Postgres guarantees an atomic outcome: each row is either inserted or updated, even when many sessions run the same statement concurrently. One DO UPDATE statement may not affect the same row twice, so a multi-row VALUES list with two rows for one key fails with a cardinality violation.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1347,7 +1371,7 @@ func postgresUpserts() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "The kafka/sink-to-postgres starter delivers each Kafka record at least once, so the same order can arrive twice after a crash. Its table makes the order id the primary key:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "The kafka/sink-to-postgres starter delivers each Kafka record at least once, so the same order can arrive twice after a crash. Its table makes the order id the primary key:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1373,7 +1397,7 @@ func postgresUpserts() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "and every insert names that key as the arbiter. A replayed order hits the primary key index, inserts nothing, and is logged as a duplicate:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "and every insert names that key as the arbiter. A replayed order hits the primary key index, inserts nothing, and is logged as a duplicate:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1399,7 +1423,7 @@ func postgresUpserts() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "Redelivery plus an idempotent write gives the effect of exactly-once processing. The Kafka side is covered in ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "Redelivery plus an idempotent write gives the effect of exactly-once processing. The Kafka side is covered in ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1407,7 +1431,7 @@ func postgresUpserts() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1454,7 +1478,7 @@ func postgresIndexes() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "An index is a separate structure that maps column values to row locations. The planner decides for each query whether using one is cheaper than reading the whole table, and EXPLAIN shows what it decided.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "An index is a separate structure that maps column values to row locations. The planner decides for each query whether using one is cheaper than reading the whole table, and EXPLAIN shows what it decided.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1484,7 +1508,7 @@ func postgresIndexes() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, " builds a B-tree unless told otherwise. A B-tree keeps values sorted, so it can find one value, a range, or return rows in order without sorting them.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, " builds a B-tree unless told otherwise. A B-tree keeps values sorted, so it can find one value, a range, or return rows in order without sorting them.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1523,7 +1547,7 @@ func postgresIndexes() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, " prints the plan the planner chose, as a tree of nodes, without running the query. These examples are from the PostgreSQL manual:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, " prints the plan the planner chose, as a tree of nodes, without running the query. These examples are from the PostgreSQL manual:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1558,7 +1582,7 @@ func postgresIndexes() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "The estimates come from statistics that ANALYZE collects (autovacuum runs it in the background). For a table of a few pages, a sequential scan beats any index, so on a small table the planner may ignore the index you just made. That is the planner working, not a bug.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "The estimates come from statistics that ANALYZE collects (autovacuum runs it in the background). For a table of a few pages, a sequential scan beats any index, so on a small table the planner may ignore the index you just made. That is the planner working, not a bug.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1588,7 +1612,7 @@ func postgresIndexes() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, " runs the query and adds what really happened to each node: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, " runs the query and adds what really happened to each node: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1596,7 +1620,7 @@ func postgresIndexes() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, " in milliseconds, the real ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, " in milliseconds, the real ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1604,7 +1628,7 @@ func postgresIndexes() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, ", and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, ", and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1612,7 +1636,7 @@ func postgresIndexes() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, ", how many times the node ran. Times and rows are per loop. In Postgres 18 it also reports buffer usage, which shows how many pages came from memory and how many were read. The output ends with Planning Time and Execution Time.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, ", how many times the node ran. Times and rows are per loop. In Postgres 18 it also reports buffer usage, which shows how many pages came from memory and how many were read. The output ends with Planning Time and Execution Time.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1634,7 +1658,7 @@ func postgresIndexes() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "EXPLAIN ANALYZE on an UPDATE or DELETE changes the data. Wrap it in BEGIN and ROLLBACK to look without keeping the change.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "EXPLAIN ANALYZE on an UPDATE or DELETE changes the data. Wrap it in BEGIN and ROLLBACK to look without keeping the change.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1660,7 +1684,7 @@ func postgresIndexes() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "Open psql as the superuser inside the Postgres container, in the app database. Replace the experiment name with yours; the service's Tables tab shows the exact command.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "Open psql as the superuser inside the Postgres container, in the app database. Replace the experiment name with yours; the service's Tables tab shows the exact command.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1686,7 +1710,7 @@ func postgresIndexes() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "Then build a table large enough for an index to matter, and compare the plans before and after creating one:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "Then build a table large enough for an index to matter, and compare the plans before and after creating one:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1733,7 +1757,7 @@ func postgresInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "What Breadboard runs when you add Postgres, and how it is wired.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "What Breadboard runs when you add Postgres, and how it is wired.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1759,7 +1783,7 @@ func postgresInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "The service runs the official ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "The service runs the official ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1767,7 +1791,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, " image with 512 MB of memory and half a CPU. On the first start, when the data volume is empty, the image runs Breadboard's init script, which creates an application role and a database it owns:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, " image with 512 MB of memory and half a CPU. On the first start, when the data volume is empty, the image runs Breadboard's init script, which creates an application role and a database it owns:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1805,7 +1829,7 @@ func postgresInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "The server starts with ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "The server starts with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1813,7 +1837,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, ", a certificate issued by your Breadboard CA for ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, ", a certificate issued by your Breadboard CA for ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1821,7 +1845,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, ", and a minimum of TLS 1.2. Postgres refuses a private key that others can read or another user owns, so the start script first copies the mounted key with mode 0600 and the postgres owner. Breadboard also writes the server's ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, ", and a minimum of TLS 1.2. Postgres refuses a private key that others can read or another user owns, so the start script first copies the mounted key with mode 0600 and the postgres owner. Breadboard also writes the server's ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1829,7 +1853,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, ", the file Postgres checks line by line to decide who may connect, from where, and how:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, ", the file Postgres checks line by line to decide who may connect, from where, and how:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1855,7 +1879,7 @@ func postgresInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "A network connection without TLS matches no line and is rejected. Apps use ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "A network connection without TLS matches no line and is rejected. Apps use ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1863,7 +1887,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, ", the only mode that checks both the certificate chain and the host name; ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, ", the only mode that checks both the certificate chain and the host name; ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1871,7 +1895,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, " encrypts but accepts any certificate. The health check itself connects this way, as the app role, and runs ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, " encrypts but accepts any certificate. The health check itself connects this way, as the app role, and runs ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1879,7 +1903,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1918,7 +1942,7 @@ func postgresInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "To practise without TLS, for example behind a pooler that terminates it, an app can ask for plaintext on its edge. A reason is required:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "To practise without TLS, for example behind a pooler that terminates it, an app can ask for plaintext on its edge. A reason is required:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1944,7 +1968,7 @@ func postgresInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "Breadboard then creates a private network shared only by Postgres and the apps that asked, and appends one ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "Breadboard then creates a private network shared only by Postgres and the apps that asked, and appends one ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1952,7 +1976,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, " line to pg_hba.conf that accepts unencrypted connections only from that network's subnet. Those apps connect to ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, " line to pg_hba.conf that accepts unencrypted connections only from that network's subnet. Those apps connect to ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1960,7 +1984,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, " with ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, " with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1968,7 +1992,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "&#46; Every other app still needs TLS.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "&#46; Every other app still needs TLS.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1994,7 +2018,7 @@ func postgresInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "Data lives in a named volume mounted at ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "Data lives in a named volume mounted at ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2002,7 +2026,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, ", so it survives ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, ", so it survives ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2010,7 +2034,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, " and is deleted by ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, " and is deleted by ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2018,7 +2042,7 @@ func postgresInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "&#46; The service's Tables tab in the dashboard lists every table in the app database with its exact row count and size. It runs psql inside the container as the superuser, over the local socket that pg_hba.conf trusts, and shows the command so you can open the same session:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "&#46; The service's Tables tab in the dashboard lists every table in the app database with its exact row count and size. It runs psql inside the container as the superuser, over the local socket that pg_hba.conf trusts, and shows the command so you can open the same session:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

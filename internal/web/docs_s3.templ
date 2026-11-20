@@ -278,7 +278,7 @@ templ s3BasicUsage() {
 		PutObject is an HTTP PUT of the whole body to the key's path. Writing to an existing key replaces the object; there is no append. Over HTTPS the SDK does not hash the body before sending it: it marks the payload as unsigned, streams it in aws-chunked encoding, and sends a CRC32 checksum of the body as a trailer after the data.
 	}
 	@docP() {
-		Reading is GetObject. The starter does not read its notes back, but it is one call, and the body is a stream you must close:
+		Reading is GetObject. The starter does not read its notes back, but it is one call, and @docCodeWord("out.Body") streams directly from the HTTP response rather than buffering the object in memory. Always drain and close it so Go's HTTP transport can reuse the underlying connection:
 	}
 	@docCode("reading an object", s3GetCode)
 	@docCallout("Errors are typed") {
@@ -378,7 +378,7 @@ templ s3Presigned() {
 	@docH2("presign", "Presigning a GET")
 	@docCode("cmd/objects/main.go", s3PresignCode)
 	@docP() {
-		@docCodeWord("PresignGetObject") does not contact the server. It builds the same GET request that @docCodeWord("GetObject") would send, signs it with the client's credentials, and returns the URL without sending it. The starter then fetches the URL with @docCodeWord("http.Get"), a client that knows nothing about S3 or signatures, and checks that the bytes match what it uploaded.
+		@docCodeWord("PresignGetObject") does not contact the server. It builds the same GET request that @docCodeWord("GetObject") would send, signs it with the client's credentials, and returns the URL without sending it. The starter then fetches the URL with @docCodeWord("http.Get"), a client that knows nothing about S3 or signatures, and checks that the bytes match what it uploaded. @docCodeWord("PresignPutObject") works the same way in reverse: your app signs an upload URL and hands it to a browser or caller, which PUTs the file straight to object storage without ever holding keys or sending the bytes through your app.
 	}
 	@docH2("anatomy", "What is in the URL")
 	@docP() {

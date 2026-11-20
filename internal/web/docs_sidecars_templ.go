@@ -938,6 +938,15 @@ func sidecarsTransparent() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = docSteps(
+			"The app resolves transparent-backend.<domain> through Docker DNS and opens a plain TCP connection to its IP on port 8443.",
+			"iptables sees a non-loopback TCP connection from a process that is not uid 1337 and redirects it to Envoy on 127.0.0.1:15001.",
+			"Envoy reads SO_ORIGINAL_DST (the backend's IP and port 8443) and the HTTP Host header, matches the declared outbound cluster, and opens a verified TLS connection to a replica.",
+			"The backend receives normal HTTPS, while the app only ever spoke plain HTTP.",
+		).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		templ_7745c5c3_Err = docH2("egress", "Egress allow and deny").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -1510,7 +1519,7 @@ func sidecarsLBDiagram() templ.Component {
 				var templ_7745c5c3_Var49 string
 				templ_7745c5c3_Var49, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 412, Col: 29}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 418, Col: 29}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var49)
 				if templ_7745c5c3_Err != nil {
@@ -1528,7 +1537,7 @@ func sidecarsLBDiagram() templ.Component {
 				var templ_7745c5c3_Var50 string
 				templ_7745c5c3_Var50, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 414, Col: 29}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 420, Col: 29}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 				if templ_7745c5c3_Err != nil {
@@ -1546,7 +1555,7 @@ func sidecarsLBDiagram() templ.Component {
 			var templ_7745c5c3_Var51 string
 			templ_7745c5c3_Var51, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(y + 30)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 416, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 422, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 			if templ_7745c5c3_Err != nil {
@@ -1559,7 +1568,7 @@ func sidecarsLBDiagram() templ.Component {
 			var templ_7745c5c3_Var52 string
 			templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 416, Col: 124}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 422, Col: 124}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 			if templ_7745c5c3_Err != nil {
@@ -1916,7 +1925,7 @@ func sidecarsPoolDiagram() templ.Component {
 			var templ_7745c5c3_Var63 string
 			templ_7745c5c3_Var63, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(50 + i*14)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 484, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_sidecars.templ`, Line: 490, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
 			if templ_7745c5c3_Err != nil {

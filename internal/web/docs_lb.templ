@@ -330,7 +330,10 @@ templ lbHealth() {
 	}
 	@docH2("why", "Why check at all")
 	@docP() {
-		Without checks a proxy keeps sending a share of requests to a backend that is down, and that share fails. A container that stopped leaves Docker's DNS, so a proxy that re-resolves drops it within seconds. A container that is running but broken (deadlocked, out of database connections, answering 500) stays in DNS: Docker's own health check marks it unhealthy in @docCodeWord("bb status"), but Docker's DNS keeps returning its address. Only the proxy's checks take it out of the rotation.
+		Without checks a proxy keeps sending a share of requests to a backend that is down, and that share fails. A container that stopped leaves Docker's DNS, so a proxy that re-resolves drops it within seconds. A container that is running but broken (deadlocked, out of database connections, answering 500) stays in DNS: only the proxy's checks take it out of the rotation.
+	}
+	@docCallout("Docker health vs proxy health") {
+		A container's Docker @docCodeWord("HEALTHCHECK") updates @docCodeWord("bb status") and controls startup ordering, but Docker's embedded DNS keeps returning a running container's IP even when Docker marks it unhealthy. Removing a live-but-broken replica from traffic is always the proxy's job.
 	}
 	@docH2("active", "Active checks")
 	@docP() {

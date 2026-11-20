@@ -2065,33 +2065,13 @@ func gwAuth() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 117, "The JWKS is fetched through an Envoy cluster, so in Breadboard it is a verified TLS hop to the issuer like any other. Other options forward the whole verified payload, with ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("forward_payload_header").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 118, ", or keep the token for the backend with ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("forward: true").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 119, "; by default Envoy strips it.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 117, "Notice the 401 vs 403 split: a missing, malformed, expired or wrongly signed token fails authentication (401 — the gateway cannot trust who you are), while a valid token issued for a different service fails the audience check (403 — the token is real, just not meant for this API).")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
 		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var61), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("forward", "Forward auth").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2107,47 +2087,23 @@ func gwAuth() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 120, "With forward auth the gateway makes a sub-request to an auth service for every client request, copying the original's headers (cookies, ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 118, "The JWKS is fetched through an Envoy cluster, so in Breadboard it is a verified TLS hop to the issuer like any other. Other options forward the whole verified payload, with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = docCodeWord("Authorization").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = docCodeWord("forward_payload_header").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 121, ") and describing it in ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 119, ", or keep the token for the backend with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = docCodeWord("X-Forwarded-Method").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = docCodeWord("forward: true").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 122, ", ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("X-Forwarded-Host").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 123, ", ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("X-Forwarded-Uri").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 124, " and their siblings. A 2xx answer lets the request through, with headers listed in ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("authResponseHeaders").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 125, " copied onto it; any other answer goes back to the client as it is, so the auth service's 401 or redirect to a login page is what the user sees.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 120, "; by default Envoy strips it.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2157,7 +2113,7 @@ func gwAuth() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docCode("dynamic.yml (Traefik)", gwForwardAuthCode).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docH2("forward", "Forward auth").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2173,7 +2129,73 @@ func gwAuth() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 126, "The same pattern is ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 121, "With forward auth the gateway makes a sub-request to an auth service for every client request, copying the original's headers (cookies, ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("Authorization").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 122, ") and describing it in ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("X-Forwarded-Method").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 123, ", ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("X-Forwarded-Host").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 124, ", ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("X-Forwarded-Uri").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 125, " and their siblings. A 2xx answer lets the request through, with headers listed in ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("authResponseHeaders").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 126, " copied onto it; any other answer goes back to the client as it is, so the auth service's 401 or redirect to a login page is what the user sees.")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var63), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docCode("dynamic.yml (Traefik)", gwForwardAuthCode).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var64 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 127, "The same pattern is ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2181,7 +2203,7 @@ func gwAuth() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 127, " in NGINX (2xx allows; 401 or 403 are returned to the client; anything else is an error) and the ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, " in NGINX (2xx allows; 401 or 403 are returned to the client; anything else is an error) and the ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2189,13 +2211,13 @@ func gwAuth() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 128, " filter in Envoy, which can also call a gRPC service.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 129, " filter in Envoy, which can also call a gRPC service.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var63), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var64), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2212,32 +2234,6 @@ func gwAuth() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var64 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-			if !templ_7745c5c3_IsBuffer {
-				defer func() {
-					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-					if templ_7745c5c3_Err == nil {
-						templ_7745c5c3_Err = templ_7745c5c3_BufErr
-					}
-				}()
-			}
-			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 129, "Short-lived JWTs (minutes) with refresh tokens are the usual answer to revocation. Forward auth fits session cookies, opaque API keys and logic that changes often, at the price of a dependency on every request: when the auth service is down, every request is denied.")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			return nil
-		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var64), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("trust", "Trusting identity headers").Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
 		templ_7745c5c3_Var65 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
@@ -2250,7 +2246,33 @@ func gwAuth() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 130, "A backend that reads ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 130, "Short-lived JWTs (minutes) with refresh tokens are the usual answer to revocation. Forward auth fits session cookies, opaque API keys and logic that changes often, at the price of a dependency on every request: when the auth service is down, every request is denied.")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var65), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docH2("trust", "Trusting identity headers").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var66 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 131, "A backend that reads ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2258,13 +2280,13 @@ func gwAuth() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 131, " trusts whoever set it. That is safe only if every path to the backend goes through the gateway, and the gateway sets the header from verified identity on every route, replacing any copy the client sent. A service reachable around the gateway, or a route that forgets the auth middleware, lets a client claim to be anyone. Breadboard's TLS everywhere helps: the backend can require its caller to be the gateway's certificate, not anyone on the network.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 132, " trusts whoever set it. That is safe only if every path to the backend goes through the gateway, and the gateway sets the header from verified identity on every route, replacing any copy the client sent. A service reachable around the gateway, or a route that forgets the auth middleware, lets a client claim to be anyone. Breadboard's TLS everywhere helps: the backend can require its caller to be the gateway's certificate, not anyone on the network.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var65), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var66), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2301,7 +2323,7 @@ func gwAuthDiagram() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 132, "<svg viewBox=\"0 0 900 250\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Top: a client sends a bearer token; Envoy checks it against cached keys from the issuer's JWKS and forwards x-user to the backend. Bottom: Traefik sends each request to an auth service first and forwards X-User on a 2xx\"><defs><marker id=\"gwa-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"22\" class=\"fill-slate-900 text-[13px] font-semibold\">JWT</text> <rect x=\"20\" y=\"40\" width=\"130\" height=\"44\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"34\" y=\"67\" class=\"fill-slate-700 text-[13px]\">client</text> <line x1=\"150\" y1=\"62\" x2=\"306\" y2=\"62\" stroke-width=\"1.5\" marker-end=\"url(#gwa-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"228\" y=\"54\" text-anchor=\"middle\" class=\"fill-slate-500 font-mono text-[11px]\">Bearer eyJ…</text> <rect x=\"310\" y=\"34\" width=\"220\" height=\"56\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"326\" y=\"58\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">envoy: jwt_authn</text> <text x=\"326\" y=\"78\" class=\"fill-slate-500 text-[11px]\">signature, exp, iss, aud</text> <rect x=\"350\" y=\"104\" width=\"140\" height=\"22\" rx=\"5\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"362\" y=\"119\" class=\"fill-slate-500 text-[11px]\">issuer: JWKS (cached)</text> <line x1=\"420\" y1=\"104\" x2=\"420\" y2=\"94\" stroke-width=\"1.5\" stroke-dasharray=\"3 3\" class=\"stroke-slate-400\"></line> <line x1=\"530\" y1=\"62\" x2=\"686\" y2=\"62\" stroke-width=\"1.5\" marker-end=\"url(#gwa-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"608\" y=\"54\" text-anchor=\"middle\" class=\"fill-indigo-700 font-mono text-[11px]\">x-user: alice</text> <rect x=\"690\" y=\"40\" width=\"190\" height=\"44\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"704\" y=\"67\" class=\"fill-slate-900 font-mono text-[13px]\">backend</text> <text x=\"20\" y=\"160\" class=\"fill-slate-900 text-[13px] font-semibold\">forward auth</text> <rect x=\"20\" y=\"178\" width=\"130\" height=\"44\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"34\" y=\"205\" class=\"fill-slate-700 text-[13px]\">client</text> <line x1=\"150\" y1=\"200\" x2=\"306\" y2=\"200\" stroke-width=\"1.5\" marker-end=\"url(#gwa-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"228\" y=\"192\" text-anchor=\"middle\" class=\"fill-slate-500 font-mono text-[11px]\">cookie / API key</text> <rect x=\"310\" y=\"172\" width=\"220\" height=\"56\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"326\" y=\"196\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">traefik: forwardAuth</text> <text x=\"326\" y=\"216\" class=\"fill-slate-500 text-[11px]\">every request, first</text> <rect x=\"350\" y=\"134\" width=\"140\" height=\"22\" rx=\"5\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"362\" y=\"149\" class=\"fill-slate-500 text-[11px]\">auth: 2xx or 401</text> <line x1=\"420\" y1=\"156\" x2=\"420\" y2=\"168\" stroke-width=\"1.5\" stroke-dasharray=\"3 3\" class=\"stroke-slate-400\"></line> <line x1=\"530\" y1=\"200\" x2=\"686\" y2=\"200\" stroke-width=\"1.5\" marker-end=\"url(#gwa-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"608\" y=\"192\" text-anchor=\"middle\" class=\"fill-indigo-700 font-mono text-[11px]\">X-User: alice</text> <rect x=\"690\" y=\"178\" width=\"190\" height=\"44\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"704\" y=\"205\" class=\"fill-slate-900 font-mono text-[13px]\">backend</text></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 133, "<svg viewBox=\"0 0 900 250\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Top: a client sends a bearer token; Envoy checks it against cached keys from the issuer's JWKS and forwards x-user to the backend. Bottom: Traefik sends each request to an auth service first and forwards X-User on a 2xx\"><defs><marker id=\"gwa-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"22\" class=\"fill-slate-900 text-[13px] font-semibold\">JWT</text> <rect x=\"20\" y=\"40\" width=\"130\" height=\"44\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"34\" y=\"67\" class=\"fill-slate-700 text-[13px]\">client</text> <line x1=\"150\" y1=\"62\" x2=\"306\" y2=\"62\" stroke-width=\"1.5\" marker-end=\"url(#gwa-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"228\" y=\"54\" text-anchor=\"middle\" class=\"fill-slate-500 font-mono text-[11px]\">Bearer eyJ…</text> <rect x=\"310\" y=\"34\" width=\"220\" height=\"56\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"326\" y=\"58\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">envoy: jwt_authn</text> <text x=\"326\" y=\"78\" class=\"fill-slate-500 text-[11px]\">signature, exp, iss, aud</text> <rect x=\"350\" y=\"104\" width=\"140\" height=\"22\" rx=\"5\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"362\" y=\"119\" class=\"fill-slate-500 text-[11px]\">issuer: JWKS (cached)</text> <line x1=\"420\" y1=\"104\" x2=\"420\" y2=\"94\" stroke-width=\"1.5\" stroke-dasharray=\"3 3\" class=\"stroke-slate-400\"></line> <line x1=\"530\" y1=\"62\" x2=\"686\" y2=\"62\" stroke-width=\"1.5\" marker-end=\"url(#gwa-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"608\" y=\"54\" text-anchor=\"middle\" class=\"fill-indigo-700 font-mono text-[11px]\">x-user: alice</text> <rect x=\"690\" y=\"40\" width=\"190\" height=\"44\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"704\" y=\"67\" class=\"fill-slate-900 font-mono text-[13px]\">backend</text> <text x=\"20\" y=\"160\" class=\"fill-slate-900 text-[13px] font-semibold\">forward auth</text> <rect x=\"20\" y=\"178\" width=\"130\" height=\"44\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"34\" y=\"205\" class=\"fill-slate-700 text-[13px]\">client</text> <line x1=\"150\" y1=\"200\" x2=\"306\" y2=\"200\" stroke-width=\"1.5\" marker-end=\"url(#gwa-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"228\" y=\"192\" text-anchor=\"middle\" class=\"fill-slate-500 font-mono text-[11px]\">cookie / API key</text> <rect x=\"310\" y=\"172\" width=\"220\" height=\"56\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"326\" y=\"196\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">traefik: forwardAuth</text> <text x=\"326\" y=\"216\" class=\"fill-slate-500 text-[11px]\">every request, first</text> <rect x=\"350\" y=\"134\" width=\"140\" height=\"22\" rx=\"5\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"362\" y=\"149\" class=\"fill-slate-500 text-[11px]\">auth: 2xx or 401</text> <line x1=\"420\" y1=\"156\" x2=\"420\" y2=\"168\" stroke-width=\"1.5\" stroke-dasharray=\"3 3\" class=\"stroke-slate-400\"></line> <line x1=\"530\" y1=\"200\" x2=\"686\" y2=\"200\" stroke-width=\"1.5\" marker-end=\"url(#gwa-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"608\" y=\"192\" text-anchor=\"middle\" class=\"fill-indigo-700 font-mono text-[11px]\">X-User: alice</text> <rect x=\"690\" y=\"178\" width=\"190\" height=\"44\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"704\" y=\"205\" class=\"fill-slate-900 font-mono text-[13px]\">backend</text></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2391,7 +2413,7 @@ func gwRateLimit() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var68 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var69 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -2403,17 +2425,17 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 133, "A rate limit caps how many requests a client may make over time. The algorithm decides how bursts are treated and how much state the limiter keeps; where it runs decides whether the limit is per gateway instance or for the whole system.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 134, "A rate limit caps how many requests a client may make over time. The algorithm decides how bursts are treated and how much state the limiter keeps; where it runs decides whether the limit is per gateway instance or for the whole system.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docLead().Render(templ.WithChildren(ctx, templ_7745c5c3_Var68), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docLead().Render(templ.WithChildren(ctx, templ_7745c5c3_Var69), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var69 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var70 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -2431,7 +2453,7 @@ func gwRateLimit() templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docFigure("Token bucket: tokens drip in at a steady rate up to a capacity, and a burst spends what has saved up. Leaky bucket: requests queue in the bucket and leave at a steady rate; when the bucket is full, new ones are rejected.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var69), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docFigure("Token bucket: tokens drip in at a steady rate up to a capacity, and a burst spends what has saved up. Leaky bucket: requests queue in the bucket and leave at a steady rate; when the bucket is full, new ones are rejected.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var70), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2447,40 +2469,6 @@ func gwRateLimit() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var70 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-			if !templ_7745c5c3_IsBuffer {
-				defer func() {
-					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-					if templ_7745c5c3_Err == nil {
-						templ_7745c5c3_Err = templ_7745c5c3_BufErr
-					}
-				}()
-			}
-			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 134, "A rate limit is not a concurrency limit. A limit of 100 requests a second admits 100 one-second requests that all pile up at once; capping how many run at the same time is a circuit breaker's job (see ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docLink("/docs/api-gateways/resilience", "Resilience at the gateway").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 135, ").")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			return nil
-		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var70), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("token-bucket", "Token bucket").Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
 		templ_7745c5c3_Var71 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
@@ -2493,7 +2481,15 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 136, "A bucket holds up to B tokens and gains r tokens per second. Each request takes one token; a request that finds the bucket empty is rejected. A client that has been quiet has a full bucket, so it can send B requests at once, then r a second after that. Two numbers, two meanings: the rate is the long-run average, the capacity is the largest burst. State per key is a token count and a timestamp.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 135, "A rate limit is not a concurrency limit. A limit of 100 requests a second admits 100 one-second requests that all pile up at once; capping how many run at the same time is a circuit breaker's job (see ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docLink("/docs/api-gateways/resilience", "Resilience at the gateway").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 136, ").")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2503,7 +2499,7 @@ func gwRateLimit() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docCode("envoy.yaml (Envoy local_ratelimit)", gwEnvoyRLCode).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docH2("token-bucket", "Token bucket").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2519,79 +2515,7 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, "Envoy's ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("local_ratelimit").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 138, " filter is a token bucket: ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("max_tokens").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, " is the capacity, and ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("tokens_per_fill").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 140, " every ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("fill_interval").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, " the rate. A rejected request gets a 429 from Envoy itself, and the ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("http_local_rate_limiter.http_local_rate_limit.rate_limited").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 142, " counter in the admin stats goes up. Traefik's ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("rateLimit").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 143, " middleware is a token bucket too: ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("average").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, " per ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("period").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 145, " is the rate and ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("burst").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, " the capacity.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, "A bucket holds up to B tokens and gains r tokens per second. Each request takes one token; a request that finds the bucket empty is rejected. A client that has been quiet has a full bucket, so it can send B requests at once, then r a second after that. Two numbers, two meanings: the rate is the long-run average, the capacity is the largest burst. State per key is a token count and a timestamp.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2601,11 +2525,7 @@ func gwRateLimit() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docCode("dynamic.yml (Traefik rateLimit)", gwTraefikRLCode).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("leaky-bucket", "Leaky bucket").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docCode("envoy.yaml (Envoy local_ratelimit)", gwEnvoyRLCode).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2621,7 +2541,79 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, "Picture a bucket with a hole: requests pour in, and they leak out to the backend at a constant rate r. The bucket holds B requests; a request arriving when it is full is rejected. Whatever the arrival pattern, the backend sees a smooth flow. Used only to decide accept or reject, a leaky bucket and a token bucket with the same rate and size admit the same requests; the difference that matters in practice is that a leaky bucket can delay the requests it holds rather than pass them on at once.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 138, "Envoy's ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("local_ratelimit").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, " filter is a token bucket: ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("max_tokens").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 140, " is the capacity, and ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("tokens_per_fill").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, " every ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("fill_interval").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 142, " the rate. A rejected request gets a 429 from Envoy itself, and the ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("http_local_rate_limiter.http_local_rate_limit.rate_limited").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 143, " counter in the admin stats goes up. Traefik's ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("rateLimit").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, " middleware is a token bucket too: ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("average").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 145, " per ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("period").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, " is the rate and ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("burst").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, " the capacity.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2631,7 +2623,11 @@ func gwRateLimit() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docCode("nginx.conf (NGINX limit_req)", gwNginxRLCode).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docCode("dynamic.yml (Traefik rateLimit)", gwTraefikRLCode).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docH2("leaky-bucket", "Leaky bucket").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2647,55 +2643,7 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "NGINX's ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("limit_req").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 149, " says in its documentation that it uses the leaky bucket method. ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("rate=5r/s").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, " is tracked at millisecond granularity, as one request every 200 ms, not five at the start of each second. ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("burst=10").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, " is the bucket: up to 10 excess requests are queued and released at the rate, and the 11th is rejected. With ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("nodelay").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, " the queued requests are forwarded immediately, but their places in the bucket still free up only at the rate, so the limit holds while the latency goes away; ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("delay=N").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, " forwards the first N at once and delays the rest. Rejected requests get 503 unless ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("limit_req_status").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, " says otherwise.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "Picture a bucket with a hole: requests pour in, and they leak out to the backend at a constant rate r. The bucket holds B requests; a request arriving when it is full is rejected. Whatever the arrival pattern, the backend sees a smooth flow. Used only to decide accept or reject, a leaky bucket and a token bucket with the same rate and size admit the same requests; the difference that matters in practice is that a leaky bucket can delay the requests it holds rather than pass them on at once.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2705,7 +2653,7 @@ func gwRateLimit() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docH2("fixed-window", "Fixed window").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docCode("nginx.conf (NGINX limit_req)", gwNginxRLCode).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2721,7 +2669,55 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, "Count requests per key in fixed intervals, such as each calendar minute, and reject once the count reaches the limit; the counter resets at the boundary. It is one counter per key and trivial in a shared store (increment, expire). Its flaw is the boundary: a client can send the full limit in the last second of one window and again in the first second of the next, twice the limit in two seconds.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 149, "NGINX's ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("limit_req").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 150, " says in its documentation that it uses the leaky bucket method. ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("rate=5r/s").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, " is tracked at millisecond granularity, as one request every 200 ms, not five at the start of each second. ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("burst=10").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 152, " is the bucket: up to 10 excess requests are queued and released at the rate, and the 11th is rejected. With ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("nodelay").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, " the queued requests are forwarded immediately, but their places in the bucket still free up only at the rate, so the limit holds while the latency goes away; ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("delay=N").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, " forwards the first N at once and delays the rest. Rejected requests get 503 unless ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("limit_req_status").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, " says otherwise.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2731,7 +2727,7 @@ func gwRateLimit() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docH2("sliding-window", "Sliding window").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docH2("fixed-window", "Fixed window").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2747,13 +2743,39 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "A sliding window limits the last N seconds as of now, so no boundary can be gamed. The exact version, a sliding log, keeps a timestamp per request and counts those in the window: precise, but memory grows with the limit. The common approximation, a sliding window counter, keeps the current and previous fixed-window counts and weighs the previous one by how much of it still overlaps the window. It is two counters per key and close to exact when traffic is spread evenly.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 156, "Count requests per key in fixed intervals, such as each calendar minute, and reject once the count reaches the limit; the counter resets at the boundary. It is one counter per key and trivial in a shared store (increment, expire). Its flaw is the boundary: a client can send the full limit in the last second of one window and again in the first second of the next, twice the limit in two seconds.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
 		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var76), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docH2("sliding-window", "Sliding window").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var77 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "A sliding window limits the last N seconds as of now, so no boundary can be gamed. The exact version, a sliding log, keeps a timestamp per request and counts those in the window: precise, but memory grows with the limit. The common approximation, a sliding window counter, keeps the current and previous fixed-window counts and weighs the previous one by how much of it still overlaps the window. It is two counters per key and close to exact when traffic is spread evenly.")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var77), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2779,7 +2801,7 @@ func gwRateLimit() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var77 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var78 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -2791,7 +2813,7 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "A limit applies per key: a client address, an API key, a user from a verified token, or a route. One bucket for everyone protects the service but lets one client starve the rest; one per client is fair but needs a key that clients cannot change at will. Behind another proxy or a NAT, many users share one address, so an identity from authentication is usually the better key. NGINX takes the key from the zone: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, "A limit applies per key: a client address, an API key, a user from a verified token, or a route. One bucket for everyone protects the service but lets one client starve the rest; one per client is fair but needs a key that clients cannot change at will. Behind another proxy or a NAT, many users share one address, so an identity from authentication is usually the better key. NGINX takes the key from the zone: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2799,7 +2821,7 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 158, ", or any variable such as ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, ", or any variable such as ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2807,7 +2829,7 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 159, "; an empty key is not limited. Traefik uses ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "; an empty key is not limited. Traefik uses ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2815,7 +2837,7 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 160, "&#46; Envoy's local filter keeps one bucket by default; per-key buckets come from ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, "&#46; Envoy's local filter keeps one bucket by default; per-key buckets come from ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2823,7 +2845,7 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, ", matched against entries a route's ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, ", matched against entries a route's ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2831,13 +2853,13 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, " actions produce from the client address or a header.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, " actions produce from the client address or a header.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var77), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var78), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2845,7 +2867,7 @@ func gwRateLimit() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var78 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var79 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -2863,29 +2885,7 @@ func gwRateLimit() templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docFigure("Local: each gateway instance keeps its own bucket, so three instances admit about three times the limit. Global: every instance asks one rate limit service, which keeps the shared count.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var78), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Var79 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-			if !templ_7745c5c3_IsBuffer {
-				defer func() {
-					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-					if templ_7745c5c3_Err == nil {
-						templ_7745c5c3_Err = templ_7745c5c3_BufErr
-					}
-				}()
-			}
-			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 163, "A local limit lives in one gateway process. It costs nothing per request, but with N gateway instances behind a load balancer a client gets roughly N times the limit, and the share each instance sees depends on how it is balanced. Envoy's local bucket is shared by the workers of one Envoy process; NGINX's zone is shared memory across the workers of one server; Traefik keeps its buckets in the process.")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			return nil
-		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var79), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docFigure("Local: each gateway instance keeps its own bucket, so three instances admit about three times the limit. Global: every instance asks one rate limit service, which keeps the shared count.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var79), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2901,23 +2901,7 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "A global limit keeps the count in one place every instance consults. In Envoy that is a separate service: the ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("envoy.filters.http.ratelimit").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, " filter sends descriptors over gRPC to a rate limit service (the reference implementation, envoyproxy/ratelimit, counts in Redis) and rejects when it says over limit. Every request pays a network call and depends on that service; Envoy's docs suggest a local limit in front to absorb large bursts and a global one for the exact quota. Traefik's ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("rateLimit").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, " can also keep its buckets in Redis.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "A local limit lives in one gateway process. It costs nothing per request, but with N gateway instances behind a load balancer a client gets roughly N times the limit, and the share each instance sees depends on how it is balanced. Envoy's local bucket is shared by the workers of one Envoy process; NGINX's zone is shared memory across the workers of one server; Traefik keeps its buckets in the process.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2939,17 +2923,29 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "The rate-limiting starter runs Envoy's local token bucket and NGINX's leaky bucket, each in one container, so the counts you see are exactly what each algorithm decides. Neither starts a global rate limit service.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 165, "A global limit keeps the count in one place every instance consults. In Envoy that is a separate service: the ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("envoy.filters.http.ratelimit").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 166, " filter sends descriptors over gRPC to a rate limit service (the reference implementation, envoyproxy/ratelimit, counts in Redis) and rejects when it says over limit. Every request pays a network call and depends on that service; Envoy's docs suggest a local limit in front to absorb large bursts and a global one for the exact quota. Traefik's ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("rateLimit").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, " can also keep its buckets in Redis.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docCallout("Breadboard's examples use local limiting").Render(templ.WithChildren(ctx, templ_7745c5c3_Var81), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("answer", "What the client gets back").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var81), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2965,7 +2961,33 @@ func gwRateLimit() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "A rejected request should get 429 Too Many Requests, with a ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "The rate-limiting starter runs Envoy's local token bucket and NGINX's leaky bucket, each in one container, so the counts you see are exactly what each algorithm decides. Neither starts a global rate limit service.")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docCallout("Breadboard's examples use local limiting").Render(templ.WithChildren(ctx, templ_7745c5c3_Var82), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docH2("answer", "What the client gets back").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var83 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, "A rejected request should get 429 Too Many Requests, with a ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2973,7 +2995,7 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 169, " header when the gateway can say when to come back. Clients should back off with jitter, not retry at once: a fleet of clients retrying immediately turns a limit into a storm. Envoy's local filter answers 429 by default and can add draft ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, " header when the gateway can say when to come back. Clients should back off with jitter, not retry at once: a fleet of clients retrying immediately turns a limit into a storm. Envoy's local filter answers 429 by default and can add draft ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2981,7 +3003,7 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, " headers with ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 171, " headers with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2989,7 +3011,7 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 171, "; Traefik answers 429; NGINX answers 503 unless ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, "; Traefik answers 429; NGINX answers 503 unless ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2997,7 +3019,7 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, " changes it, and its ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, " changes it, and its ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3005,13 +3027,13 @@ func gwRateLimit() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 173, " variable puts PASSED, DELAYED or REJECTED in the access log.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, " variable puts PASSED, DELAYED or REJECTED in the access log.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var82), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var83), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3052,112 +3074,112 @@ func gwBucketsDiagram() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, "<svg viewBox=\"0 0 900 230\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Left: a token bucket with four of six tokens; each request takes one, and tokens refill at a fixed rate. Right: a leaky bucket queue of requests leaving at a fixed rate, with a request rejected because the queue is full\"><defs><marker id=\"gwb-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">token bucket</text> <text x=\"160\" y=\"52\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">+ r tokens per second</text> <line x1=\"160\" y1=\"58\" x2=\"160\" y2=\"78\" stroke-width=\"1.5\" marker-end=\"url(#gwb-arrow)\" class=\"stroke-slate-400\"></line> <path d=\"M90 82 L100 190 L220 190 L230 82\" fill=\"none\" stroke-width=\"2\" class=\"stroke-slate-400\"></path> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, "<svg viewBox=\"0 0 900 230\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Left: a token bucket with four of six tokens; each request takes one, and tokens refill at a fixed rate. Right: a leaky bucket queue of requests leaving at a fixed rate, with a request rejected because the queue is full\"><defs><marker id=\"gwb-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">token bucket</text> <text x=\"160\" y=\"52\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">+ r tokens per second</text> <line x1=\"160\" y1=\"58\" x2=\"160\" y2=\"78\" stroke-width=\"1.5\" marker-end=\"url(#gwb-arrow)\" class=\"stroke-slate-400\"></line> <path d=\"M90 82 L100 190 L220 190 L230 82\" fill=\"none\" stroke-width=\"2\" class=\"stroke-slate-400\"></path> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for i, full := range gwTokens {
 			if full == 1 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 175, "<circle cx=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var84 string
-				templ_7745c5c3_Var84, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(122 + (i%3)*38)).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 791, Col: 37}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var84)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "\" cy=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 176, "<circle cx=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var85 string
-				templ_7745c5c3_Var85, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(172 - (i/3)*34)).Resolve(ctx)
+				templ_7745c5c3_Var85, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(122 + (i%3)*38)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 791, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 794, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "\" r=\"13\" class=\"fill-indigo-400\"></circle> ")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "<circle cx=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 177, "\" cy=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var86 string
-				templ_7745c5c3_Var86, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(122 + (i%3)*38)).Resolve(ctx)
+				templ_7745c5c3_Var86, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(172 - (i/3)*34)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 793, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 794, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\" cy=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 178, "\" r=\"13\" class=\"fill-indigo-400\"></circle> ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "<circle cx=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var87 string
-				templ_7745c5c3_Var87, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(172 - (i/3)*34)).Resolve(ctx)
+				templ_7745c5c3_Var87, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(122 + (i%3)*38)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 793, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 796, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var87)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "\" r=\"13\" fill=\"none\" stroke-dasharray=\"3 3\" class=\"stroke-slate-300\"></circle> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 180, "\" cy=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var88 string
+				templ_7745c5c3_Var88, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(172 - (i/3)*34)).Resolve(ctx)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 796, Col: 65}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "\" r=\"13\" fill=\"none\" stroke-dasharray=\"3 3\" class=\"stroke-slate-300\"></circle> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 181, "<text x=\"160\" y=\"212\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">capacity B = 6, 4 saved</text> <line x1=\"250\" y1=\"150\" x2=\"330\" y2=\"150\" stroke-width=\"1.5\" marker-end=\"url(#gwb-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"290\" y=\"140\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">1 token</text> <text x=\"340\" y=\"146\" class=\"fill-slate-700 text-[12px]\">each request</text> <text x=\"340\" y=\"164\" class=\"fill-slate-700 text-[12px]\">empty → 429</text> <text x=\"480\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">leaky bucket</text> <line x1=\"480\" y1=\"90\" x2=\"556\" y2=\"90\" stroke-width=\"1.5\" marker-end=\"url(#gwb-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"488\" y=\"80\" class=\"fill-slate-500 text-[11px]\">requests</text> <path d=\"M560 60 L570 170 L690 170 L700 60\" fill=\"none\" stroke-width=\"2\" class=\"stroke-slate-400\"></path> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 182, "<text x=\"160\" y=\"212\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">capacity B = 6, 4 saved</text> <line x1=\"250\" y1=\"150\" x2=\"330\" y2=\"150\" stroke-width=\"1.5\" marker-end=\"url(#gwb-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"290\" y=\"140\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">1 token</text> <text x=\"340\" y=\"146\" class=\"fill-slate-700 text-[12px]\">each request</text> <text x=\"340\" y=\"164\" class=\"fill-slate-700 text-[12px]\">empty → 429</text> <text x=\"480\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">leaky bucket</text> <line x1=\"480\" y1=\"90\" x2=\"556\" y2=\"90\" stroke-width=\"1.5\" marker-end=\"url(#gwb-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"488\" y=\"80\" class=\"fill-slate-500 text-[11px]\">requests</text> <path d=\"M560 60 L570 170 L690 170 L700 60\" fill=\"none\" stroke-width=\"2\" class=\"stroke-slate-400\"></path> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for i := range 4 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 182, "<rect x=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var88 string
-			templ_7745c5c3_Var88, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(584 + (i%2)*52)).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 806, Col: 33}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "\" y=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 183, "<rect x=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var89 string
-			templ_7745c5c3_Var89, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(136 - (i/2)*36)).Resolve(ctx)
+			templ_7745c5c3_Var89, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(584 + (i%2)*52)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 806, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 809, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var89)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 184, "\" width=\"40\" height=\"26\" rx=\"4\" class=\"fill-slate-300\"></rect> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 184, "\" y=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var90 string
+			templ_7745c5c3_Var90, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(136 - (i/2)*36)).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 809, Col: 60}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var90)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "\" width=\"40\" height=\"26\" rx=\"4\" class=\"fill-slate-300\"></rect> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "<text x=\"630\" y=\"52\" text-anchor=\"middle\" class=\"fill-red-700 text-[11px] font-semibold\">full → reject</text> <line x1=\"630\" y1=\"170\" x2=\"630\" y2=\"206\" stroke-width=\"1.5\" marker-end=\"url(#gwb-arrow)\" class=\"stroke-indigo-400\"></line> <text x=\"642\" y=\"200\" class=\"fill-indigo-700 text-[11px] font-semibold\">out at r per second</text> <text x=\"720\" y=\"110\" class=\"fill-slate-700 text-[12px]\">queued requests</text> <text x=\"720\" y=\"128\" class=\"fill-slate-700 text-[12px]\">wait (NGINX burst),</text> <text x=\"720\" y=\"146\" class=\"fill-slate-700 text-[12px]\">or pass at once</text> <text x=\"720\" y=\"164\" class=\"fill-slate-700 text-[12px]\">(nodelay)</text></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "<text x=\"630\" y=\"52\" text-anchor=\"middle\" class=\"fill-red-700 text-[11px] font-semibold\">full → reject</text> <line x1=\"630\" y1=\"170\" x2=\"630\" y2=\"206\" stroke-width=\"1.5\" marker-end=\"url(#gwb-arrow)\" class=\"stroke-indigo-400\"></line> <text x=\"642\" y=\"200\" class=\"fill-indigo-700 text-[11px] font-semibold\">out at r per second</text> <text x=\"720\" y=\"110\" class=\"fill-slate-700 text-[12px]\">queued requests</text> <text x=\"720\" y=\"128\" class=\"fill-slate-700 text-[12px]\">wait (NGINX burst),</text> <text x=\"720\" y=\"146\" class=\"fill-slate-700 text-[12px]\">or pass at once</text> <text x=\"720\" y=\"164\" class=\"fill-slate-700 text-[12px]\">(nodelay)</text></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3182,131 +3204,131 @@ func gwLocalGlobalDiagram() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 186, "<svg viewBox=\"0 0 900 200\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Left: three gateway instances each with their own bucket of 10 per second, admitting about 30. Right: three instances that each ask one rate limit service backed by Redis\"><defs><marker id=\"gwl-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">local</text> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 187, "<svg viewBox=\"0 0 900 200\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Left: three gateway instances each with their own bucket of 10 per second, admitting about 30. Right: three instances that each ask one rate limit service backed by Redis\"><defs><marker id=\"gwl-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">local</text> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for i := range 3 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 187, "<rect x=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var91 string
-			templ_7745c5c3_Var91, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(20 + i*130)).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 825, Col: 29}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var91)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "\" y=\"50\" width=\"116\" height=\"70\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 188, "<rect x=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var92 string
-			templ_7745c5c3_Var92, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(34 + i*130)).Resolve(ctx)
+			templ_7745c5c3_Var92, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(20 + i*130)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 826, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 828, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, "\" y=\"76\" class=\"fill-indigo-800 font-mono text-[12px] font-semibold\">gateway ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 189, "\" y=\"50\" width=\"116\" height=\"70\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var93 string
-			templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
+			templ_7745c5c3_Var93, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(34 + i*130)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 826, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 829, Col: 29}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var93))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, "</text> <text x=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, "\" y=\"76\" class=\"fill-indigo-800 font-mono text-[12px] font-semibold\">gateway ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var94 string
-			templ_7745c5c3_Var94, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(34 + i*130)).Resolve(ctx)
+			templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 827, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 829, Col: 120}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var94)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 191, "\" y=\"100\" class=\"fill-slate-600 text-[11px]\">bucket: 10/s</text> ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var94))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 192, "<text x=\"210\" y=\"160\" text-anchor=\"middle\" class=\"fill-red-700 text-[12px] font-semibold\">client gets about 30/s</text> <text x=\"480\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">global</text> ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		for i := range 3 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 193, "<rect x=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 191, "</text> <text x=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var95 string
-			templ_7745c5c3_Var95, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(480 + i*130)).Resolve(ctx)
+			templ_7745c5c3_Var95, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(34 + i*130)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 832, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 830, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 194, "\" y=\"40\" width=\"116\" height=\"50\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 192, "\" y=\"100\" class=\"fill-slate-600 text-[11px]\">bucket: 10/s</text> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 193, "<text x=\"210\" y=\"160\" text-anchor=\"middle\" class=\"fill-red-700 text-[12px] font-semibold\">client gets about 30/s</text> <text x=\"480\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">global</text> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for i := range 3 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 194, "<rect x=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var96 string
-			templ_7745c5c3_Var96, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(494 + i*130)).Resolve(ctx)
+			templ_7745c5c3_Var96, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(480 + i*130)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 833, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 835, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var96)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 195, "\" y=\"70\" class=\"fill-indigo-800 font-mono text-[12px] font-semibold\">gateway ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 195, "\" y=\"40\" width=\"116\" height=\"50\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var97 string
-			templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
+			templ_7745c5c3_Var97, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(494 + i*130)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 833, Col: 121}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 836, Col: 30}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var97))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 196, "</text> <line x1=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 196, "\" y=\"70\" class=\"fill-indigo-800 font-mono text-[12px] font-semibold\">gateway ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var98 string
-			templ_7745c5c3_Var98, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(538 + i*130)).Resolve(ctx)
+			templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(itoa(i + 1))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 834, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 836, Col: 121}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, "\" y1=\"90\" x2=\"668\" y2=\"136\" stroke-width=\"1.5\" marker-end=\"url(#gwl-arrow)\" class=\"stroke-slate-400\"></line> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 197, "</text> <line x1=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var99 string
+			templ_7745c5c3_Var99, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(538 + i*130)).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 837, Col: 31}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, "\" y1=\"90\" x2=\"668\" y2=\"136\" stroke-width=\"1.5\" marker-end=\"url(#gwl-arrow)\" class=\"stroke-slate-400\"></line> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, "<rect x=\"600\" y=\"140\" width=\"180\" height=\"44\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"614\" y=\"161\" class=\"fill-slate-900 font-mono text-[12px] font-semibold\">rate limit service</text> <text x=\"614\" y=\"177\" class=\"fill-slate-500 text-[11px]\">one count, in Redis</text> <text x=\"866\" y=\"170\" text-anchor=\"end\" class=\"fill-indigo-700 text-[12px] font-semibold\">10/s total</text></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 199, "<rect x=\"600\" y=\"140\" width=\"180\" height=\"44\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"614\" y=\"161\" class=\"fill-slate-900 font-mono text-[12px] font-semibold\">rate limit service</text> <text x=\"614\" y=\"177\" class=\"fill-slate-500 text-[11px]\">one count, in Redis</text> <text x=\"866\" y=\"170\" text-anchor=\"end\" class=\"fill-indigo-700 text-[12px] font-semibold\">10/s total</text></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3373,7 +3395,7 @@ func gwResilience() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var100 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var101 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -3385,17 +3407,17 @@ func gwResilience() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 199, "Every request through a gateway depends on a service that can be slow, failing or overloaded. Timeouts bound how long a request waits, retries hide brief failures, budgets stop retries from making things worse, and circuit breakers fail fast instead of piling more work on a service that is already struggling.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "Every request through a gateway depends on a service that can be slow, failing or overloaded. Timeouts bound how long a request waits, retries hide brief failures, budgets stop retries from making things worse, and circuit breakers fail fast instead of piling more work on a service that is already struggling.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docLead().Render(templ.WithChildren(ctx, templ_7745c5c3_Var100), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docLead().Render(templ.WithChildren(ctx, templ_7745c5c3_Var101), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var101 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var102 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -3413,37 +3435,11 @@ func gwResilience() templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docFigure("Retries multiply down a call chain: with three tries at each of four layers, one failing request becomes 27 calls to the database. A retry budget limits how many retries may be in flight at once, as a share of the requests in flight, so a failing service is not hit with every retry at the same time.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var101), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docFigure("Retries multiply down a call chain: with three tries at each of four layers, one failing request becomes 27 calls to the database. A retry budget limits how many retries may be in flight at once, as a share of the requests in flight, so a failing service is not hit with every retry at the same time.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var102), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = docH2("failure", "How failure spreads").Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Var102 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-			if !templ_7745c5c3_IsBuffer {
-				defer func() {
-					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-					if templ_7745c5c3_Err == nil {
-						templ_7745c5c3_Err = templ_7745c5c3_BufErr
-					}
-				}()
-			}
-			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 200, "A slow service is worse than a dead one. A dead one refuses connections and callers fail fast; a slow one holds every caller's connection, thread and memory while it thinks. Requests keep arriving at the same rate, so the work in flight grows until the callers run out of something too, and the slowness spreads upstream. The gateway is where that cascade can be stopped before it reaches every client.")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			return nil
-		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var102), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("timeouts", "Timeouts").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3459,7 +3455,7 @@ func gwResilience() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 201, "A timeout turns an unbounded wait into a fast, clear error. Gateways have several, each bounding a different phase:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 201, "A slow service is worse than a dead one. A dead one refuses connections and callers fail fast; a slow one holds every caller's connection, thread and memory while it thinks. Requests keep arriving at the same rate, so the work in flight grows until the callers run out of something too, and the slowness spreads upstream. The gateway is where that cascade can be stopped before it reaches every client.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3469,13 +3465,7 @@ func gwResilience() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docTable([]string{"Timeout", "Envoy", "Traefik", "NGINX"},
-			[]string{"Connect", "cluster connect_timeout (Breadboard: 2s)", "serversTransport forwardingTimeouts.dialTimeout (30s)", "proxy_connect_timeout (Breadboard: 5s)"},
-			[]string{"Whole request", "route timeout (15s)", "none by default", "none: per read and write"},
-			[]string{"Per try", "retry_policy.per_try_timeout", "—", "proxy_next_upstream_timeout (all tries)"},
-			[]string{"Waiting for the answer", "—", "forwardingTimeouts.responseHeaderTimeout (0, none)", "proxy_read_timeout, between reads (60s)"},
-			[]string{"Idle connection", "idle_timeout (1h)", "forwardingTimeouts.idleConnTimeout (90s)", "keepalive_timeout"},
-		).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docH2("timeouts", "Timeouts").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3491,15 +3481,7 @@ func gwResilience() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 202, "Set timeouts from the outside in: the gateway's must be longer than the service's own call to its dependencies, or the gateway gives up while the work still finishes and is wasted; and each layer's must be shorter than its caller's. Envoy's route timeout counts from the end of the client's request to the end of the response, including every retry; ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("per_try_timeout").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 203, " bounds each attempt, so a 3s timeout with a 1s per-try timeout leaves room for about three attempts.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 202, "A timeout turns an unbounded wait into a fast, clear error. Gateways have several, each bounding a different phase:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3509,7 +3491,13 @@ func gwResilience() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docH2("retries", "Retries").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docTable([]string{"Timeout", "Envoy", "Traefik", "NGINX"},
+			[]string{"Connect", "cluster connect_timeout (Breadboard: 2s)", "serversTransport forwardingTimeouts.dialTimeout (30s)", "proxy_connect_timeout (Breadboard: 5s)"},
+			[]string{"Whole request", "route timeout (15s)", "none by default", "none: per read and write"},
+			[]string{"Per try", "retry_policy.per_try_timeout", "—", "proxy_next_upstream_timeout (all tries)"},
+			[]string{"Waiting for the answer", "—", "forwardingTimeouts.responseHeaderTimeout (0, none)", "proxy_read_timeout, between reads (60s)"},
+			[]string{"Idle connection", "idle_timeout (1h)", "forwardingTimeouts.idleConnTimeout (90s)", "keepalive_timeout"},
+		).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3525,7 +3513,49 @@ func gwResilience() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, "A retry sends a failed request again, usually to another host, and turns a brief failure (a replica restarting, a dropped connection) into a slower success. It is only safe when doing the request twice is harmless: GET, PUT, DELETE, or a POST with an idempotency key the service checks. NGINX never retries a non-idempotent request (POST, LOCK, PATCH) that it already sent unless told to; Envoy retries whatever the ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 203, "Set timeouts from the outside in: the gateway's must be longer than the service's own call to its dependencies, or the gateway gives up while the work still finishes and is wasted; and each layer's must be shorter than its caller's. In Go services, pass ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("r.Context()").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, " into downstream database, cache and HTTP calls: when the gateway times out and cancels the upstream request, that context cancels too and stops work nobody is waiting for. Envoy's route timeout counts from the end of the client's request to the end of the response, including every retry; ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("per_try_timeout").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 205, " bounds each attempt, so a 3s timeout with a 1s per-try timeout leaves room for about three attempts.")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var105), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docH2("retries", "Retries").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var106 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 206, "A retry sends a failed request again, usually to another host, and turns a brief failure (a replica restarting, a dropped connection) into a slower success. It is only safe when doing the request twice is harmless: GET, PUT, DELETE, or a POST with an idempotency key the service checks. NGINX never retries a non-idempotent request (POST, LOCK, PATCH) that it already sent unless told to; Envoy retries whatever the ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3533,13 +3563,13 @@ func gwResilience() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 205, " conditions match, whatever the method, so the route decides.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 207, " conditions match, whatever the method, so the route decides.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var105), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var106), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3560,7 +3590,7 @@ func gwResilience() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var106 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var107 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -3572,13 +3602,13 @@ func gwResilience() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 206, "Retries help when failures are rare and independent. When a service is overloaded, every retry is more load on the thing that is already failing: a service at 50% errors receives up to (1 + retries) times its normal traffic exactly when it can least serve it. In a chain, it multiplies: three tries at each of four layers is 27 calls at the bottom for one user request.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 208, "Retries help when failures are rare and independent. When a service is overloaded, every retry is more load on the thing that is already failing: a service at 50% errors receives up to (1 + retries) times its normal traffic exactly when it can least serve it. In a chain, it multiplies: three tries at each of four layers is 27 calls at the bottom for one user request.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var106), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var107), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3596,7 +3626,7 @@ func gwResilience() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var107 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var108 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -3608,13 +3638,13 @@ func gwResilience() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 207, "A circuit breaker stops calling a service that is failing or full, and answers at once instead. The caller gets a fast error rather than a slow one, and the service gets room to recover. The term covers two designs:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 209, "A circuit breaker stops calling a service that is failing or full, and answers at once instead. The caller gets a fast error rather than a slow one, and the service gets room to recover. The term covers two designs:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var107), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var108), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3630,7 +3660,7 @@ func gwResilience() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var108 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var109 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -3642,7 +3672,7 @@ func gwResilience() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 208, "A concurrency limit is easy to reason about: by Little's law, a service that takes 200 ms per request at 50 in flight serves at most 250 requests a second, so set ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 210, "A concurrency limit is easy to reason about: by Little's law, a service that takes 200 ms per request at 50 in flight serves at most 250 requests a second, so set ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3650,7 +3680,7 @@ func gwResilience() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 209, " near what it can actually run at once and let the rest fail fast. Watch ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, " near what it can actually run at once and let the rest fail fast. Watch ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3658,13 +3688,13 @@ func gwResilience() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 210, " in Envoy's stats: 1 means the limit is being hit now.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 212, " in Envoy's stats: 1 means the limit is being hit now.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var108), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var109), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3686,52 +3716,6 @@ func gwResilience() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var109 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-			if !templ_7745c5c3_IsBuffer {
-				defer func() {
-					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-					if templ_7745c5c3_Err == nil {
-						templ_7745c5c3_Err = templ_7745c5c3_BufErr
-					}
-				}()
-			}
-			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "The generated proxy configs set connect timeouts (Envoy 2s, NGINX 5s) and health checks, and stop there: no retry policy, no circuit breaker thresholds, no route timeouts beyond each proxy's default (Envoy 15s). NGINX's default ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("proxy_next_upstream error timeout").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 212, " does retry the next server after a connection error or timeout, for requests that are safe to send twice. The resilience starters add every setting above in their own ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("envoy.yaml").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, ", where you can turn each one off and watch what changes.")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			return nil
-		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var109), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("try", "Try them").Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docStarters(stRetries, stBreaking, stSidecarCB).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
 		templ_7745c5c3_Var110 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
@@ -3744,7 +3728,53 @@ func gwResilience() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, "Health checks and outlier detection are covered in ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, "The generated proxy configs set connect timeouts (Envoy 2s, NGINX 5s) and health checks, and stop there: no retry policy, no circuit breaker thresholds, no route timeouts beyond each proxy's default (Envoy 15s). NGINX's default ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("proxy_next_upstream error timeout").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, " does retry the next server after a connection error or timeout, for requests that are safe to send twice. The resilience starters add every setting above in their own ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("envoy.yaml").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 215, ", where you can turn each one off and watch what changes.")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var110), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docH2("try", "Try them").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docStarters(stRetries, stBreaking, stSidecarCB).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var111 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "Health checks and outlier detection are covered in ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3752,13 +3782,13 @@ func gwResilience() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 215, "&#46;")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 217, "&#46;")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var110), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var111), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3787,114 +3817,114 @@ func gwRetryDiagram() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "<svg viewBox=\"0 0 900 200\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"A chain of gateway, service A, service B and database. With three tries at each layer, calls grow 1, 3, 9, 27. A 20% retry budget limits retries in flight to a fifth of the requests in flight, active plus pending, but never below a floor of 3, so a lone failing request still gets every retry\"><defs><marker id=\"gwy-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">three tries per layer, no budget</text> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 218, "<svg viewBox=\"0 0 900 200\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"A chain of gateway, service A, service B and database. With three tries at each layer, calls grow 1, 3, 9, 27. A 20% retry budget limits retries in flight to a fifth of the requests in flight, active plus pending, but never below a floor of 3, so a lone failing request still gets every retry\"><defs><marker id=\"gwy-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"24\" class=\"fill-slate-900 text-[13px] font-semibold\">three tries per layer, no budget</text> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for i, hop := range gwRetryHops {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 217, "<rect x=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var112 string
-			templ_7745c5c3_Var112, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(20 + i*220)).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 972, Col: 29}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var112)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 218, "\" y=\"40\" width=\"170\" height=\"60\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 219, "<rect x=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var113 string
-			templ_7745c5c3_Var113, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(36 + i*220)).Resolve(ctx)
+			templ_7745c5c3_Var113, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(20 + i*220)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 973, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 975, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var113)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 219, "\" y=\"66\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 220, "\" y=\"40\" width=\"170\" height=\"60\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var114 string
-			templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.JoinStringErrs(hop)
+			templ_7745c5c3_Var114, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(36 + i*220)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 973, Col: 103}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 976, Col: 29}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var114))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var114)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 220, "</text> <text x=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 221, "\" y=\"66\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var115 string
-			templ_7745c5c3_Var115, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(36 + i*220)).Resolve(ctx)
+			templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinStringErrs(hop)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 974, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 976, Col: 103}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var115)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var115))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 221, "\" y=\"88\" class=\"fill-red-700 text-[12px] font-semibold\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 222, "</text> <text x=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var116 string
-			templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(gwRetryLoads[i])
+			templ_7745c5c3_Var116, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(36 + i*220)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 974, Col: 103}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 977, Col: 29}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var116)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 222, " × calls</text> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 223, "\" y=\"88\" class=\"fill-red-700 text-[12px] font-semibold\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var117 string
+			templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(gwRetryLoads[i])
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 977, Col: 103}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 224, " × calls</text> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if i < 3 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 223, "<line x1=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var117 string
-				templ_7745c5c3_Var117, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(190 + i*220)).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 976, Col: 32}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var117)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 224, "\" y1=\"70\" x2=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 225, "<line x1=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var118 string
-				templ_7745c5c3_Var118, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(236 + i*220)).Resolve(ctx)
+				templ_7745c5c3_Var118, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(190 + i*220)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 976, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 979, Col: 32}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var118)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 225, "\" y2=\"70\" stroke-width=\"1.5\" marker-end=\"url(#gwy-arrow)\" class=\"stroke-red-300\"></line> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 226, "\" y1=\"70\" x2=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var119 string
+				templ_7745c5c3_Var119, templ_7745c5c3_Err = templruntime.NewAttributeExpression(itoa(236 + i*220)).Resolve(ctx)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 979, Col: 65}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var119)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 227, "\" y2=\"70\" stroke-width=\"1.5\" marker-end=\"url(#gwy-arrow)\" class=\"stroke-red-300\"></line> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 226, "<text x=\"20\" y=\"140\" class=\"fill-slate-900 text-[13px] font-semibold\">retry budget 20%</text> <rect x=\"20\" y=\"152\" width=\"860\" height=\"34\" rx=\"8\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"36\" y=\"174\" class=\"fill-indigo-800 text-[12px]\">retries in flight ≤ 20% of requests in flight (active + pending), at least 3: a concurrency limit, not a load multiple</text></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 228, "<text x=\"20\" y=\"140\" class=\"fill-slate-900 text-[13px] font-semibold\">retry budget 20%</text> <rect x=\"20\" y=\"152\" width=\"860\" height=\"34\" rx=\"8\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"36\" y=\"174\" class=\"fill-indigo-800 text-[12px]\">retries in flight ≤ 20% of requests in flight (active + pending), at least 3: a concurrency limit, not a load multiple</text></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3937,7 +3967,7 @@ func gwBFF() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var120 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var121 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -3949,17 +3979,17 @@ func gwBFF() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 227, "A screen often needs data from several services. Aggregation lets the client make one call and a server-side component make the several; a backend for frontend is that component, built for one kind of client and owned by the team that builds the client.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 229, "A screen often needs data from several services. Aggregation lets the client make one call and a server-side component make the several; a backend for frontend is that component, built for one kind of client and owned by the team that builds the client.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docLead().Render(templ.WithChildren(ctx, templ_7745c5c3_Var120), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docLead().Render(templ.WithChildren(ctx, templ_7745c5c3_Var121), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var121 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var122 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -3977,37 +4007,11 @@ func gwBFF() templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docFigure("Gateway routing: the client calls users and orders itself, two round trips over its own network. BFF: the client makes one call; the BFF calls both services in parallel over the data centre network and returns one merged answer.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var121), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docFigure("Gateway routing: the client calls users and orders itself, two round trips over its own network. BFF: the client makes one call; the BFF calls both services in parallel over the data centre network and returns one merged answer.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var122), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = docH2("chatty", "The chatty client").Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Var122 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-			if !templ_7745c5c3_IsBuffer {
-				defer func() {
-					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-					if templ_7745c5c3_Err == nil {
-						templ_7745c5c3_Err = templ_7745c5c3_BufErr
-					}
-				}()
-			}
-			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 228, "A mobile home screen shows the user's profile, recent orders and recommendations. Called directly, that is three requests over a phone network, each paying its latency; the client parses three formats, handles three failures, and changes whenever any service changes its API. Many requests also fetch more than the screen shows, which costs a phone battery and bandwidth.")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			return nil
-		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var122), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("aggregation", "Aggregation").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4023,7 +4027,7 @@ func gwBFF() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 229, "An aggregator accepts one request and makes the calls on the client's behalf, in parallel where they are independent, over the fast network inside the system. The client's latency becomes one round trip plus the slowest call, not the sum of every call over a slow link. The aggregator can also trim each answer to what the screen needs.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 230, "A mobile home screen shows the user's profile, recent orders and recommendations. Called directly, that is three requests over a phone network, each paying its latency; the client parses three formats, handles three failures, and changes whenever any service changes its API. Many requests also fetch more than the screen shows, which costs a phone battery and bandwidth.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4033,11 +4037,7 @@ func gwBFF() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docCode("bff/main.go (sketch)", gwBFFCode).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("bff", "Backend for frontend").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docH2("aggregation", "Aggregation").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4053,13 +4053,43 @@ func gwBFF() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 230, "A backend for frontend (BFF) is an aggregator per client type: one for the web app, one for mobile, one for partners. Each is shaped by its client's screens and changes with them, and the team that owns the client owns its BFF, so a mobile change does not need a central API team. The pattern was named by Sam Newman from work at SoundCloud.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 231, "An aggregator accepts one request and makes the calls on the client's behalf, in parallel where they are independent, over the fast network inside the system. The client's latency becomes one round trip plus the slowest call, not the sum of every call over a slow link. The aggregator can also trim each answer to what the screen needs.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
 		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var124), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docCode("bff/main.go (sketch)", gwBFFCode).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docH2("bff", "Backend for frontend").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var125 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 232, "A backend for frontend (BFF) is an aggregator per client type: one for the web app, one for mobile, one for partners. Each is shaped by its client's screens and changes with them, and the team that owns the client owns its BFF, so a mobile change does not need a central API team. The pattern was named by Sam Newman from work at SoundCloud.")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var125), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4085,7 +4115,7 @@ func gwBFF() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var125 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var126 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -4097,7 +4127,7 @@ func gwBFF() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 231, "They combine: the gateway stays in front for TLS, authentication and rate limits, and routes ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 233, "They combine: the gateway stays in front for TLS, authentication and rate limits, and routes ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4105,7 +4135,7 @@ func gwBFF() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 232, " to the mobile BFF and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 234, " to the mobile BFF and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4113,13 +4143,13 @@ func gwBFF() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 233, " to the web one. Keep aggregation out of the gateway's config; a gateway that knows about dashboards is a shared monolith. GraphQL is a related answer: one generic endpoint where the client describes the shape it needs, at the cost of a schema layer.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 235, " to the web one. Keep aggregation out of the gateway's config; a gateway that knows about dashboards is a shared monolith. GraphQL is a related answer: one generic endpoint where the client describes the shape it needs, at the cost of a schema layer.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var125), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var126), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4169,7 +4199,7 @@ func gwBFFDiagram() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 234, "<svg viewBox=\"0 0 900 230\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Top: a client calls users and orders through the gateway with two requests. Bottom: a client makes one request through the gateway to a BFF, which calls users and orders in parallel and merges the answers\"><defs><marker id=\"gwf-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"22\" class=\"fill-slate-900 text-[13px] font-semibold\">gateway routing</text> <rect x=\"20\" y=\"40\" width=\"120\" height=\"56\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"34\" y=\"72\" class=\"fill-slate-700 text-[13px]\">client</text> <line x1=\"140\" y1=\"56\" x2=\"296\" y2=\"56\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <line x1=\"140\" y1=\"80\" x2=\"296\" y2=\"80\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"218\" y=\"48\" text-anchor=\"middle\" class=\"fill-slate-500 font-mono text-[11px]\">GET /users/me</text> <text x=\"218\" y=\"100\" text-anchor=\"middle\" class=\"fill-slate-500 font-mono text-[11px]\">GET /orders/recent</text> <rect x=\"300\" y=\"40\" width=\"140\" height=\"56\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"316\" y=\"72\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">gateway</text> <line x1=\"440\" y1=\"56\" x2=\"676\" y2=\"46\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <line x1=\"440\" y1=\"80\" x2=\"676\" y2=\"90\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"20\" y=\"140\" class=\"fill-slate-900 text-[13px] font-semibold\">backend for frontend</text> <rect x=\"20\" y=\"158\" width=\"120\" height=\"56\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"34\" y=\"190\" class=\"fill-slate-700 text-[13px]\">client</text> <line x1=\"140\" y1=\"186\" x2=\"296\" y2=\"186\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-indigo-400\"></line> <text x=\"218\" y=\"178\" text-anchor=\"middle\" class=\"fill-indigo-700 font-mono text-[11px]\">GET /dashboard</text> <rect x=\"300\" y=\"158\" width=\"140\" height=\"56\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"316\" y=\"190\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">gateway</text> <line x1=\"440\" y1=\"186\" x2=\"496\" y2=\"186\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <rect x=\"500\" y=\"158\" width=\"120\" height=\"56\" rx=\"10\" class=\"fill-white stroke-indigo-300\"></rect> <text x=\"516\" y=\"184\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">bff</text> <text x=\"516\" y=\"202\" class=\"fill-slate-500 text-[11px]\">fan out, merge</text> <line x1=\"620\" y1=\"176\" x2=\"676\" y2=\"60\" stroke-width=\"1.5\" stroke-dasharray=\"5 4\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-indigo-400\"></line> <line x1=\"620\" y1=\"196\" x2=\"676\" y2=\"140\" stroke-width=\"1.5\" stroke-dasharray=\"5 4\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-indigo-400\"></line> <rect x=\"680\" y=\"24\" width=\"200\" height=\"44\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"696\" y=\"51\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">users</text> <rect x=\"680\" y=\"80\" width=\"200\" height=\"72\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"696\" y=\"120\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">orders</text> <text x=\"866\" y=\"214\" text-anchor=\"end\" class=\"fill-slate-500 text-[11px]\">dashed: in parallel, inside the system</text></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 236, "<svg viewBox=\"0 0 900 230\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Top: a client calls users and orders through the gateway with two requests. Bottom: a client makes one request through the gateway to a BFF, which calls users and orders in parallel and merges the answers\"><defs><marker id=\"gwf-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <text x=\"20\" y=\"22\" class=\"fill-slate-900 text-[13px] font-semibold\">gateway routing</text> <rect x=\"20\" y=\"40\" width=\"120\" height=\"56\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"34\" y=\"72\" class=\"fill-slate-700 text-[13px]\">client</text> <line x1=\"140\" y1=\"56\" x2=\"296\" y2=\"56\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <line x1=\"140\" y1=\"80\" x2=\"296\" y2=\"80\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"218\" y=\"48\" text-anchor=\"middle\" class=\"fill-slate-500 font-mono text-[11px]\">GET /users/me</text> <text x=\"218\" y=\"100\" text-anchor=\"middle\" class=\"fill-slate-500 font-mono text-[11px]\">GET /orders/recent</text> <rect x=\"300\" y=\"40\" width=\"140\" height=\"56\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"316\" y=\"72\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">gateway</text> <line x1=\"440\" y1=\"56\" x2=\"676\" y2=\"46\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <line x1=\"440\" y1=\"80\" x2=\"676\" y2=\"90\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"20\" y=\"140\" class=\"fill-slate-900 text-[13px] font-semibold\">backend for frontend</text> <rect x=\"20\" y=\"158\" width=\"120\" height=\"56\" rx=\"8\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"34\" y=\"190\" class=\"fill-slate-700 text-[13px]\">client</text> <line x1=\"140\" y1=\"186\" x2=\"296\" y2=\"186\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-indigo-400\"></line> <text x=\"218\" y=\"178\" text-anchor=\"middle\" class=\"fill-indigo-700 font-mono text-[11px]\">GET /dashboard</text> <rect x=\"300\" y=\"158\" width=\"140\" height=\"56\" rx=\"10\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"316\" y=\"190\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">gateway</text> <line x1=\"440\" y1=\"186\" x2=\"496\" y2=\"186\" stroke-width=\"1.5\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-slate-400\"></line> <rect x=\"500\" y=\"158\" width=\"120\" height=\"56\" rx=\"10\" class=\"fill-white stroke-indigo-300\"></rect> <text x=\"516\" y=\"184\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">bff</text> <text x=\"516\" y=\"202\" class=\"fill-slate-500 text-[11px]\">fan out, merge</text> <line x1=\"620\" y1=\"176\" x2=\"676\" y2=\"60\" stroke-width=\"1.5\" stroke-dasharray=\"5 4\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-indigo-400\"></line> <line x1=\"620\" y1=\"196\" x2=\"676\" y2=\"140\" stroke-width=\"1.5\" stroke-dasharray=\"5 4\" marker-end=\"url(#gwf-arrow)\" class=\"stroke-indigo-400\"></line> <rect x=\"680\" y=\"24\" width=\"200\" height=\"44\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"696\" y=\"51\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">users</text> <rect x=\"680\" y=\"80\" width=\"200\" height=\"72\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"696\" y=\"120\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">orders</text> <text x=\"866\" y=\"214\" text-anchor=\"end\" class=\"fill-slate-500 text-[11px]\">dashed: in parallel, inside the system</text></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4237,7 +4267,7 @@ func gwGRPC() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var128 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var129 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -4249,17 +4279,17 @@ func gwGRPC() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 235, "gRPC is remote procedure calls over HTTP/2, with Protocol Buffers as the usual message format. A gateway that understands HTTP/2 can route gRPC calls by service and method, balance each call, enforce deadlines and count results by gRPC status.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 237, "gRPC is remote procedure calls over HTTP/2, with Protocol Buffers as the usual message format. A gateway that understands HTTP/2 can route gRPC calls by service and method, balance each call, enforce deadlines and count results by gRPC status.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docLead().Render(templ.WithChildren(ctx, templ_7745c5c3_Var128), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docLead().Render(templ.WithChildren(ctx, templ_7745c5c3_Var129), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var129 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var130 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -4277,7 +4307,7 @@ func gwGRPC() templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docFigure("One Envoy listener takes gRPC calls over HTTP/2 and routes each by its path, /package.Service/Method, to the cluster that implements it. A Search call that outlives its 0.5-second method deadline (max_stream_duration) is ended by Envoy with DEADLINE_EXCEEDED.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var129), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docFigure("One Envoy listener takes gRPC calls over HTTP/2 and routes each by its path, /package.Service/Method, to the cluster that implements it. A Search call that outlives its 0.5-second method deadline (max_stream_duration) is ended by Envoy with DEADLINE_EXCEEDED.").Render(templ.WithChildren(ctx, templ_7745c5c3_Var130), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4298,56 +4328,6 @@ func gwGRPC() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Var130 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-			if !templ_7745c5c3_IsBuffer {
-				defer func() {
-					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-					if templ_7745c5c3_Err == nil {
-						templ_7745c5c3_Err = templ_7745c5c3_BufErr
-					}
-				}()
-			}
-			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 236, "Because calls are multiplexed on long-lived connections, an L4 balancer that picks a backend per connection sends every call from one client to the same backend for as long as the connection lives. An L7 proxy that speaks HTTP/2 terminates the client's connection, sees each call as a stream, and balances calls across backends. See ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docLink("/docs/load-balancing/l4-vs-l7", "L4 vs L7 proxying").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 237, "&#46; Envoy was built with gRPC in mind; NGINX proxies it with ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("grpc_pass").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 238, "; Traefik routes it as HTTP/2 with an ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("h2c").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 239, " or HTTPS backend.")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			return nil
-		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var130), templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("routing", "Routing by service and method").Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
 		templ_7745c5c3_Var131 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
@@ -4360,15 +4340,31 @@ func gwGRPC() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 240, "Since the service and method are the path, ordinary path routes are gRPC routes: a prefix for a whole service, an exact path for one method. Envoy also offers a ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 238, "Because calls are multiplexed on long-lived connections, an L4 balancer that picks a backend per connection sends every call from one client to the same backend for as long as the connection lives. An L7 proxy that speaks HTTP/2 terminates the client's connection, sees each call as a stream, and balances calls across backends. See ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = docCodeWord("grpc: {}").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = docLink("/docs/load-balancing/l4-vs-l7", "L4 vs L7 proxying").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 241, " route match that matches only requests with a gRPC content type, to keep gRPC and REST apart on one listener.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 239, "&#46; Envoy was built with gRPC in mind; NGINX proxies it with ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("grpc_pass").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 240, "; Traefik routes it as HTTP/2 with an ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("h2c").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 241, " or HTTPS backend.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4378,11 +4374,7 @@ func gwGRPC() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docCode("envoy.yaml (routes)", gwGRPCRoutesCode).Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = docH2("http2", "HTTP/2 to the backend").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docH2("routing", "Routing by service and method").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4398,55 +4390,15 @@ func gwGRPC() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 242, "The client side is negotiated by ALPN: Breadboard's generated Envoy and NGINX listeners offer ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 242, "Since the service and method are the path, ordinary path routes are gRPC routes: a prefix for a whole service, an exact path for one method. Envoy also offers a ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = docCodeWord("h2").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = docCodeWord("grpc: {}").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 243, " and ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("http/1.1").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 244, "&#46; The backend side is configured per cluster, and Breadboard's generated Envoy clusters speak HTTP/1.1, which cannot carry gRPC. A gRPC cluster needs HTTP/2 explicitly, over TLS with ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("h2").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 245, " in ALPN. A verified hop checks both the CA, with ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("trusted_ca").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 246, ", and the name, with ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("match_typed_subject_alt_names").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 247, ": ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("sni").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 248, " only tells the backend which certificate to send.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 243, " route match that matches only requests with a gRPC content type, to keep gRPC and REST apart on one listener.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4456,11 +4408,11 @@ func gwGRPC() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docCode("envoy.yaml (cluster)", gwGRPCClusterCode).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docCode("envoy.yaml (routes)", gwGRPCRoutesCode).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docH2("deadlines", "Deadlines and timeouts").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docH2("http2", "HTTP/2 to the backend").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4476,7 +4428,55 @@ func gwGRPC() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 249, "A deadline is the caller's: it says how long the whole call, through every hop, may take. When it passes, the client's gRPC library ends the call with DEADLINE_EXCEEDED, whatever the servers are doing. Envoy can limit a call per route in two ways, and they end it with different statuses:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 244, "The client side is negotiated by ALPN: Breadboard's generated Envoy and NGINX listeners offer ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("h2").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 245, " and ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("http/1.1").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 246, "&#46; The backend side is configured per cluster, and Breadboard's generated Envoy clusters speak HTTP/1.1, which cannot carry gRPC. A gRPC cluster needs HTTP/2 explicitly, over TLS with ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("h2").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 247, " in ALPN. A verified hop checks both the CA, with ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("trusted_ca").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 248, ", and the name, with ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("match_typed_subject_alt_names").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 249, ": ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("sni").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 250, " only tells the backend which certificate to send.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4486,10 +4486,11 @@ func gwGRPC() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docList(
-			"max_stream_duration is a deadline. With grpc_timeout_header_max, Envoy takes the client's grpc-timeout, capped at that maximum, and passes the tighter deadline on to the server; max_stream_duration applies to calls that carry no grpc-timeout. When it passes, Envoy cancels the call upstream and answers the client itself with grpc-status 4, DEADLINE_EXCEEDED (downstream duration timeout). The routes above give Search 0.5 seconds while the rest of the service honours the client's deadline up to 5.",
-			"The route timeout, 15s by default, is an upstream request timeout. When it passes, Envoy answers HTTP 504, which a gRPC client sees as grpc-status 14, UNAVAILABLE (upstream request timeout): a status that invites a retry, for a call that was only slow. Use max_stream_duration for gRPC deadlines, and leave the route timeout as the backstop.",
-		).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docCode("envoy.yaml (cluster)", gwGRPCClusterCode).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docH2("deadlines", "Deadlines and timeouts").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4505,15 +4506,7 @@ func gwGRPC() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 250, "When Envoy ends a gRPC call itself, it answers in gRPC terms: a trailers-only response with a ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = docCodeWord("grpc-status").Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 251, " mapped from the HTTP error, and the gRPC client reports that status. Servers should also watch their own context and stop work the caller has abandoned.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 251, "A deadline is the caller's: it says how long the whole call, through every hop, may take. When it passes, the client's gRPC library ends the call with DEADLINE_EXCEEDED, whatever the servers are doing. Envoy can limit a call per route in two ways, and they end it with different statuses:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4523,7 +4516,10 @@ func gwGRPC() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = docH2("status", "Status codes and metrics").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docList(
+			"max_stream_duration is a deadline. With grpc_timeout_header_max, Envoy takes the client's grpc-timeout, capped at that maximum, and passes the tighter deadline on to the server; max_stream_duration applies to calls that carry no grpc-timeout. When it passes, Envoy cancels the call upstream and answers the client itself with grpc-status 4, DEADLINE_EXCEEDED (downstream duration timeout). The routes above give Search 0.5 seconds while the rest of the service honours the client's deadline up to 5.",
+			"The route timeout, 15s by default, is an upstream request timeout. When it passes, Envoy answers HTTP 504, which a gRPC client sees as grpc-status 14, UNAVAILABLE (upstream request timeout): a status that invites a retry, for a call that was only slow. Use max_stream_duration for gRPC deadlines, and leave the route timeout as the backstop.",
+		).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4539,7 +4535,41 @@ func gwGRPC() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 252, "HTTP metrics see gRPC failures as 200s, so a gateway needs gRPC-aware counters. Envoy's ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 252, "When Envoy ends a gRPC call itself, it answers in gRPC terms: a trailers-only response with a ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("grpc-status").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 253, " mapped from the HTTP error, and the gRPC client reports that status. Servers should also watch their own context and stop work the caller has abandoned.")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var135), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = docH2("status", "Status codes and metrics").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var136 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 254, "HTTP metrics see gRPC failures as 200s, so a gateway needs gRPC-aware counters. Envoy's ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4547,7 +4577,7 @@ func gwGRPC() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 253, " filter counts calls by result, per service and method when ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 255, " filter counts calls by result, per service and method when ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4555,7 +4585,7 @@ func gwGRPC() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 254, " or an allowlist of methods is set, as ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 256, " or an allowlist of methods is set, as ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4563,7 +4593,7 @@ func gwGRPC() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 255, ", ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 257, ", ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4571,7 +4601,7 @@ func gwGRPC() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 256, " and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 258, " and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4579,7 +4609,7 @@ func gwGRPC() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 257, ", and the access log can record ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 259, ", and the access log can record ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4587,7 +4617,7 @@ func gwGRPC() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 258, " per call. NGINX logs ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 260, " per call. NGINX logs ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4595,13 +4625,13 @@ func gwGRPC() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 259, " as 200 for a failed call; the gRPC status is in a trailer.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 261, " as 200 for a failed call; the gRPC status is in a trailer.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var135), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = docP().Render(templ.WithChildren(ctx, templ_7745c5c3_Var136), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4648,7 +4678,7 @@ func gwGRPCDiagram() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 260, "<svg viewBox=\"0 0 900 220\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"A gRPC client sends calls over one HTTP/2 connection to Envoy; calls to /catalog.v1.Catalog/ go to catalog and calls to /orders.v1.Orders/ go to orders, and a Search call that outlives its 0.5-second max_stream_duration is ended by Envoy with DEADLINE_EXCEEDED\"><defs><marker id=\"gwg-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <rect x=\"20\" y=\"70\" width=\"140\" height=\"80\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"36\" y=\"104\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">grpc client</text> <text x=\"36\" y=\"126\" class=\"fill-slate-500 text-[11px]\">one HTTP/2 connection</text> <line x1=\"160\" y1=\"110\" x2=\"306\" y2=\"110\" stroke-width=\"3\" marker-end=\"url(#gwg-arrow)\" class=\"stroke-indigo-300\"></line> <text x=\"232\" y=\"100\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">many streams</text> <rect x=\"310\" y=\"30\" width=\"280\" height=\"160\" rx=\"12\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"326\" y=\"56\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">envoy :8443 (h2)</text> <text x=\"326\" y=\"88\" class=\"fill-slate-700 font-mono text-[11px]\">/catalog.v1.Catalog/* → catalog</text> <text x=\"326\" y=\"116\" class=\"fill-slate-700 font-mono text-[11px]\">/orders.v1.Orders/* → orders</text> <text x=\"326\" y=\"150\" class=\"fill-red-700 font-mono text-[11px]\">Search &gt; 0.5s → DEADLINE_EXCEEDED</text> <text x=\"326\" y=\"172\" class=\"fill-slate-500 text-[11px]\">grpc_stats: per method, per status</text> <rect x=\"680\" y=\"40\" width=\"200\" height=\"50\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"696\" y=\"70\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">catalog</text> <rect x=\"680\" y=\"130\" width=\"200\" height=\"50\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"696\" y=\"160\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">orders</text> <line x1=\"590\" y1=\"86\" x2=\"676\" y2=\"66\" stroke-width=\"1.5\" marker-end=\"url(#gwg-arrow)\" class=\"stroke-slate-400\"></line> <line x1=\"590\" y1=\"116\" x2=\"676\" y2=\"152\" stroke-width=\"1.5\" marker-end=\"url(#gwg-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"636\" y=\"206\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">HTTP/2 over verified TLS</text></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 262, "<svg viewBox=\"0 0 900 220\" width=\"900\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"A gRPC client sends calls over one HTTP/2 connection to Envoy; calls to /catalog.v1.Catalog/ go to catalog and calls to /orders.v1.Orders/ go to orders, and a Search call that outlives its 0.5-second max_stream_duration is ended by Envoy with DEADLINE_EXCEEDED\"><defs><marker id=\"gwg-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-slate-400\"></path></marker></defs> <rect x=\"20\" y=\"70\" width=\"140\" height=\"80\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"36\" y=\"104\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">grpc client</text> <text x=\"36\" y=\"126\" class=\"fill-slate-500 text-[11px]\">one HTTP/2 connection</text> <line x1=\"160\" y1=\"110\" x2=\"306\" y2=\"110\" stroke-width=\"3\" marker-end=\"url(#gwg-arrow)\" class=\"stroke-indigo-300\"></line> <text x=\"232\" y=\"100\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">many streams</text> <rect x=\"310\" y=\"30\" width=\"280\" height=\"160\" rx=\"12\" class=\"fill-indigo-50 stroke-indigo-200\"></rect> <text x=\"326\" y=\"56\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">envoy :8443 (h2)</text> <text x=\"326\" y=\"88\" class=\"fill-slate-700 font-mono text-[11px]\">/catalog.v1.Catalog/* → catalog</text> <text x=\"326\" y=\"116\" class=\"fill-slate-700 font-mono text-[11px]\">/orders.v1.Orders/* → orders</text> <text x=\"326\" y=\"150\" class=\"fill-red-700 font-mono text-[11px]\">Search &gt; 0.5s → DEADLINE_EXCEEDED</text> <text x=\"326\" y=\"172\" class=\"fill-slate-500 text-[11px]\">grpc_stats: per method, per status</text> <rect x=\"680\" y=\"40\" width=\"200\" height=\"50\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"696\" y=\"70\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">catalog</text> <rect x=\"680\" y=\"130\" width=\"200\" height=\"50\" rx=\"10\" class=\"fill-slate-50 stroke-slate-200\"></rect> <text x=\"696\" y=\"160\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">orders</text> <line x1=\"590\" y1=\"86\" x2=\"676\" y2=\"66\" stroke-width=\"1.5\" marker-end=\"url(#gwg-arrow)\" class=\"stroke-slate-400\"></line> <line x1=\"590\" y1=\"116\" x2=\"676\" y2=\"152\" stroke-width=\"1.5\" marker-end=\"url(#gwg-arrow)\" class=\"stroke-slate-400\"></line> <text x=\"636\" y=\"206\" text-anchor=\"middle\" class=\"fill-slate-500 text-[11px]\">HTTP/2 over verified TLS</text></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4678,16 +4708,16 @@ func docOfficial(links []link) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 261, "<ul class=\"my-4 flex flex-col gap-1.5 text-[16px] leading-7\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 263, "<ul class=\"my-4 flex flex-col gap-1.5 text-[16px] leading-7\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, l := range links {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 262, "<li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 264, "<li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Var138 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Var139 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 				templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 				templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 				if !templ_7745c5c3_IsBuffer {
@@ -4699,31 +4729,31 @@ func docOfficial(links []link) templ.Component {
 					}()
 				}
 				ctx = templ.InitializeContext(ctx)
-				var templ_7745c5c3_Var139 string
-				templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(l.Title)
+				var templ_7745c5c3_Var140 string
+				templ_7745c5c3_Var140, templ_7745c5c3_Err = templ.JoinStringErrs(l.Title)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 1219, Col: 14}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `docs_gateways.templ`, Line: 1222, Col: 14}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var139))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var140))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 263, " ↗")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 265, " ↗")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				return nil
 			})
-			templ_7745c5c3_Err = extLink(l.URL).Render(templ.WithChildren(ctx, templ_7745c5c3_Var138), templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = extLink(l.URL).Render(templ.WithChildren(ctx, templ_7745c5c3_Var139), templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 264, "</li>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 266, "</li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 265, "</ul>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 267, "</ul>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

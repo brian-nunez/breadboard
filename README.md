@@ -164,6 +164,7 @@ When you want to build your own design instead of following a starter, add an ap
 ```sh
 bb add kafka            # add the services you need
 bb add app orders       # write ./orders and add it to experiment.yaml
+# edit ./orders/main.go (main is empty until you add your code)
 bb up
 ```
 

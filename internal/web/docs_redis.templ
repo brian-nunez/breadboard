@@ -240,7 +240,7 @@ templ redisExpiry() {
 	}
 	@docH2("rules", "What keeps or clears a TTL")
 	@docList(
-		"Commands that replace or delete the value clear the TTL: SET, GETSET, DEL and the *STORE commands. A plain SET on a key with a TTL leaves it with none.",
+		"Commands that replace or delete the value clear the TTL: SET, DEL and the *STORE commands. A plain SET on a key with a TTL leaves it with none (pass KEEPTTL to keep it).",
 		"Commands that change the value in place keep the TTL: INCR, LPUSH, HSET.",
 		"EXPIRE on a key that already has a TTL replaces it with the new one. PERSIST removes it.",
 		"RENAME moves the TTL to the new name.",
@@ -373,7 +373,7 @@ templ redisInBreadboard() {
 		The server starts with @docCodeWord("--port 0"), which turns off the plaintext port completely, and @docCodeWord("--tls-port 6379"), so the usual Redis port speaks only TLS. Its certificate is issued by your Breadboard CA for @docCodeWord("redis.<domain>")&#46; @docCodeWord("--tls-auth-clients no") turns off Redis's default of requiring client certificates: clients verify the server, and the server checks the password.
 	}
 	@docP() {
-		Unlike Kafka, Redis has no plaintext listener even when an app asks for @docCodeWord("tls.mode: off"), and validation rejects that edge. Redis binds every port to the same addresses, so a plaintext port could not be limited to a private network shared with one app. Plaintext Redis is planned to arrive with terminating proxies.
+		Unlike Kafka, Redis has no plaintext listener even when an app asks for @docCodeWord("tls.mode: off"), and validation rejects that edge. Redis binds every port to the same addresses, so a plaintext port could not be limited to a private network shared with one app.
 	}
 	@docH2("env", "What your app receives")
 	@docList(

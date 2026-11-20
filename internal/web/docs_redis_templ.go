@@ -802,7 +802,7 @@ func redisExpiry() templ.Component {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = docList(
-			"Commands that replace or delete the value clear the TTL: SET, GETSET, DEL and the *STORE commands. A plain SET on a key with a TTL leaves it with none.",
+			"Commands that replace or delete the value clear the TTL: SET, DEL and the *STORE commands. A plain SET on a key with a TTL leaves it with none (pass KEEPTTL to keep it).",
 			"Commands that change the value in place keep the TTL: INCR, LPUSH, HSET.",
 			"EXPIRE on a key that already has a TTL replaces it with the new one. PERSIST removes it.",
 			"RENAME moves the TTL to the new name.",
@@ -1776,7 +1776,7 @@ func redisInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, ", and validation rejects that edge. Redis binds every port to the same addresses, so a plaintext port could not be limited to a private network shared with one app. Plaintext Redis is planned to arrive with terminating proxies.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, ", and validation rejects that edge. Redis binds every port to the same addresses, so a plaintext port could not be limited to a private network shared with one app.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

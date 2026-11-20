@@ -162,7 +162,7 @@ templ pgbouncerAnatomy() {
 		"Protocol-level prepared statements work in transaction mode: PgBouncer tracks them per client, up to max_prepared_statements (200 by default since 1.24). SQL PREPARE, SET, LISTEN, session advisory locks and WITH HOLD cursors do not.",
 	)
 	@docP() {
-		See @docLink("/docs/load-balancing/connection-pooling", "Connection pooling") explains how to choose a mode and a size.
+		@docLink("/docs/load-balancing/connection-pooling", "Connection pooling") explains how to choose a mode and a size.
 	}
 	@docH2("admin", "The admin console")
 	@docCode("pgbouncer.ini", pgbouncerAdminCode)

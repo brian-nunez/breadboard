@@ -15,8 +15,7 @@ func redis() *Entry {
 		Summary: "Redis in-memory data store, TLS only on 6379, password auth.",
 		Image:   "redis:8.10.3-alpine3.23",
 		// Redis binds every port to the same addresses, so a plaintext port
-		// cannot be confined to a private segment; v1 offers none. Plaintext
-		// through a terminating proxy arrives with proxies in Phase 5.
+		// cannot be confined to a private segment; this entry offers TLS only.
 		Listeners: []Listener{{Name: "redis", Protocol: "redis", Port: port}},
 		Resources: Resources{Memory: "256m", CPUs: "0.25"},
 		Secrets: []Secret{

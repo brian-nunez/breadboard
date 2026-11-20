@@ -174,7 +174,7 @@ templ kafkaBasicUsage() {
 		Each @docCodeWord("PollFetches") returns whatever records arrived since the last call, from every partition this consumer owns. The consumer only reads; nothing is removed from the topic. Its position is an offset per partition, which it commits back to Kafka so a restart resumes where it left off (see @docLink("/docs/kafka/offsets-and-delivery", "Offsets and delivery")).
 	}
 	@docCallout("Why ConsumeResetOffset") {
-		A brand-new group has no committed offsets yet, so the client needs a rule for where to start. franz-go's default is to start one minute back in time; the starter asks for the oldest record instead, so a fresh consumer reads everything already in the topic.
+		franz-go splits initial reads from error recovery: @docCodeWord("ConsumeStartOffset") sets where a brand-new group with no committed offsets starts (its default is already @docCodeWord("AtStart()"), the oldest record), while @docCodeWord("ConsumeResetOffset") sets where a consumer resumes if its offset falls out of range or a broker loses data (its default is @docCodeWord("RewindOffset(time.Minute)"), one minute back in time). Passing @docCodeWord("ConsumeResetOffset(kgo.NewOffset().AtStart())") makes both initial reads and out-of-range resets start from the oldest record.
 	}
 	@docH2("run", "Run it")
 	@docTerminal("bb init kafka-lab", "bb starter kafka/producer-consumer", "bb up", "bb logs consumer -f")

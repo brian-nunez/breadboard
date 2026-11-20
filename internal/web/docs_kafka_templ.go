@@ -498,7 +498,47 @@ func kafkaBasicUsage() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "A brand-new group has no committed offsets yet, so the client needs a rule for where to start. franz-go's default is to start one minute back in time; the starter asks for the oldest record instead, so a fresh consumer reads everything already in the topic.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "franz-go splits initial reads from error recovery: ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("ConsumeStartOffset").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, " sets where a brand-new group with no committed offsets starts (its default is already ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("AtStart()").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, ", the oldest record), while ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("ConsumeResetOffset").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, " sets where a consumer resumes if its offset falls out of range or a broker loses data (its default is ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("RewindOffset(time.Minute)").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, ", one minute back in time). Passing ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = docCodeWord("ConsumeResetOffset(kgo.NewOffset().AtStart())").Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, " makes both initial reads and out-of-range resets start from the oldest record.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -549,7 +589,7 @@ func kafkaTopics() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "A topic is a named log. A partition is one of the independent, ordered logs a topic is split into: the unit of parallelism, ordering and storage.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "A topic is a named log. A partition is one of the independent, ordered logs a topic is split into: the unit of parallelism, ordering and storage.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -575,7 +615,7 @@ func kafkaTopics() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "Each partition is an append-only sequence of records numbered from 0. That number is the offset. Records stay for the topic's retention period (seven days by default), whether or not they were read, so any number of consumers can read the same partition independently.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "Each partition is an append-only sequence of records numbered from 0. That number is the offset. Records stay for the topic's retention period (seven days by default), whether or not they were read, so any number of consumers can read the same partition independently.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -601,7 +641,7 @@ func kafkaTopics() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "The broker in Breadboard does not create topics automatically, so code asks for one explicitly with the admin client. The partition count is the key decision: it caps how many consumers in one group can work in parallel.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "The broker in Breadboard does not create topics automatically, so code asks for one explicitly with the admin client. The partition count is the key decision: it caps how many consumers in one group can work in parallel.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -627,7 +667,7 @@ func kafkaTopics() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "The replication factor is 1 because the lab has one broker. In production it is usually 3, so each partition has a leader and two followers that take over if the leader's broker fails.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "The replication factor is 1 because the lab has one broker. In production it is usually 3, so each partition has a leader and two followers that take over if the leader's broker fails.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -653,7 +693,7 @@ func kafkaTopics() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "When a record has a key, franz-go hashes it with murmur2, exactly as the Java client does, and takes the result modulo the number of partitions. The same key therefore always lands on the same partition, while the partition count stays the same.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "When a record has a key, franz-go hashes it with murmur2, exactly as the Java client does, and takes the result modulo the number of partitions. The same key therefore always lands on the same partition, while the partition count stays the same.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -687,7 +727,7 @@ func kafkaTopics() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "Kafka guarantees order within a partition, never across a topic. If two events must be processed in order (an order's created and paid events, say), give them the same key so they share a partition.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "Kafka guarantees order within a partition, never across a topic. If two events must be processed in order (an order's created and paid events, say), give them the same key so they share a partition.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -734,7 +774,7 @@ func kafkaGroups() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "A consumer group is a set of consumers that share the work of reading a topic. Kafka assigns each partition to exactly one member of the group, so partitions are the unit of parallelism: a group can never have more active members than the topic has partitions.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "A consumer group is a set of consumers that share the work of reading a topic. Kafka assigns each partition to exactly one member of the group, so partitions are the unit of parallelism: a group can never have more active members than the topic has partitions.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -782,7 +822,7 @@ func kafkaGroups() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "Membership is a client setting, not something you create on the broker. Any client that sets the same group ID joins the same group. With franz-go that is one option:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "Membership is a client setting, not something you create on the broker. Any client that sets the same group ID joins the same group. With franz-go that is one option:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -808,7 +848,7 @@ func kafkaGroups() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "What actually happens when this client starts: it asks the brokers which one coordinates the group, sends that coordinator a JoinGroup request, and receives the list of members. One member, the leader, computes which partitions each member gets and sends the plan back with SyncGroup. Then every member fetches only its own partitions and sends a heartbeat every 3 seconds to stay in the group.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "What actually happens when this client starts: it asks the brokers which one coordinates the group, sends that coordinator a JoinGroup request, and receives the list of members. One member, the leader, computes which partitions each member gets and sends the plan back with SyncGroup. Then every member fetches only its own partitions and sends a heartbeat every 3 seconds to stay in the group.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -834,7 +874,7 @@ func kafkaGroups() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "franz-go's default assignment strategy is cooperative-sticky: partitions stay with their current owner where possible, and a rebalance only moves the partitions that have to move, while every other member keeps reading.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "franz-go's default assignment strategy is cooperative-sticky: partitions stay with their current owner where possible, and a rebalance only moves the partitions that have to move, while every other member keeps reading.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -868,7 +908,7 @@ func kafkaGroups() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "While partitions move, their records are not being read, so lag grows briefly. A member that dies without leaving cleanly keeps its partitions until its session times out, which is why killing a consumer pauses its partitions for up to 45 seconds.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "While partitions move, their records are not being read, so lag grows briefly. A member that dies without leaving cleanly keeps its partitions until its session times out, which is why killing a consumer pauses its partitions for up to 45 seconds.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -912,12 +952,12 @@ func kafkaGroupDiagram() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<svg viewBox=\"0 0 640 170\" width=\"640\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Three partitions; consumer-1 owns partitions 0 and 1, consumer-2 owns partition 2\"><defs><marker id=\"g-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-indigo-400\"></path></marker></defs> <rect x=\"20\" y=\"10\" width=\"230\" height=\"150\" rx=\"10\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"36\" y=\"36\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">topic: orders</text> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<svg viewBox=\"0 0 640 170\" width=\"640\" class=\"mx-auto block h-auto max-w-full\" role=\"img\" aria-label=\"Three partitions; consumer-1 owns partitions 0 and 1, consumer-2 owns partition 2\"><defs><marker id=\"g-arrow\" viewBox=\"0 0 8 8\" refX=\"7\" refY=\"4\" markerWidth=\"8\" markerHeight=\"8\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"fill-indigo-400\"></path></marker></defs> <rect x=\"20\" y=\"10\" width=\"230\" height=\"150\" rx=\"10\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"36\" y=\"36\" class=\"fill-slate-900 font-mono text-[13px] font-semibold\">topic: orders</text> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for i, y := range []int{48, 86, 124} {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<rect x=\"36\" y=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<rect x=\"36\" y=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -930,7 +970,7 @@ func kafkaGroupDiagram() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" width=\"198\" height=\"30\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"48\" y=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" width=\"198\" height=\"30\" rx=\"6\" class=\"fill-white stroke-slate-200\"></rect> <text x=\"48\" y=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -943,7 +983,7 @@ func kafkaGroupDiagram() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" class=\"fill-slate-700 text-[13px]\">partition ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" class=\"fill-slate-700 text-[13px]\">partition ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -956,12 +996,12 @@ func kafkaGroupDiagram() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</text> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</text> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<path d=\"M250 63 C 320 63, 320 64, 398 64\" fill=\"none\" stroke-width=\"1.5\" marker-end=\"url(#g-arrow)\" class=\"stroke-indigo-300\"></path> <path d=\"M250 101 C 320 101, 320 66, 398 66\" fill=\"none\" stroke-width=\"1.5\" marker-end=\"url(#g-arrow)\" class=\"stroke-indigo-300\"></path> <path d=\"M250 139 C 320 139, 320 108, 398 108\" fill=\"none\" stroke-width=\"1.5\" marker-end=\"url(#g-arrow)\" class=\"stroke-indigo-300\"></path> <rect x=\"400\" y=\"22\" width=\"220\" height=\"118\" rx=\"10\" stroke-dasharray=\"5 4\" class=\"fill-white stroke-indigo-400\"></rect> <text x=\"416\" y=\"46\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">group: orders-consumers</text> <rect x=\"416\" y=\"52\" width=\"188\" height=\"28\" rx=\"6\" class=\"fill-indigo-50\"></rect> <text x=\"426\" y=\"71\" class=\"fill-slate-900 text-[13px] font-semibold\">consumer-1</text> <text x=\"594\" y=\"71\" text-anchor=\"end\" class=\"fill-slate-500 text-[12px]\">owns p0, p1</text> <rect x=\"416\" y=\"94\" width=\"188\" height=\"28\" rx=\"6\" class=\"fill-indigo-50\"></rect> <text x=\"426\" y=\"113\" class=\"fill-slate-900 text-[13px] font-semibold\">consumer-2</text> <text x=\"594\" y=\"113\" text-anchor=\"end\" class=\"fill-slate-500 text-[12px]\">owns p2</text></svg>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<path d=\"M250 63 C 320 63, 320 64, 398 64\" fill=\"none\" stroke-width=\"1.5\" marker-end=\"url(#g-arrow)\" class=\"stroke-indigo-300\"></path> <path d=\"M250 101 C 320 101, 320 66, 398 66\" fill=\"none\" stroke-width=\"1.5\" marker-end=\"url(#g-arrow)\" class=\"stroke-indigo-300\"></path> <path d=\"M250 139 C 320 139, 320 108, 398 108\" fill=\"none\" stroke-width=\"1.5\" marker-end=\"url(#g-arrow)\" class=\"stroke-indigo-300\"></path> <rect x=\"400\" y=\"22\" width=\"220\" height=\"118\" rx=\"10\" stroke-dasharray=\"5 4\" class=\"fill-white stroke-indigo-400\"></rect> <text x=\"416\" y=\"46\" class=\"fill-indigo-800 font-mono text-[13px] font-semibold\">group: orders-consumers</text> <rect x=\"416\" y=\"52\" width=\"188\" height=\"28\" rx=\"6\" class=\"fill-indigo-50\"></rect> <text x=\"426\" y=\"71\" class=\"fill-slate-900 text-[13px] font-semibold\">consumer-1</text> <text x=\"594\" y=\"71\" text-anchor=\"end\" class=\"fill-slate-500 text-[12px]\">owns p0, p1</text> <rect x=\"416\" y=\"94\" width=\"188\" height=\"28\" rx=\"6\" class=\"fill-indigo-50\"></rect> <text x=\"426\" y=\"113\" class=\"fill-slate-900 text-[13px] font-semibold\">consumer-2</text> <text x=\"594\" y=\"113\" text-anchor=\"end\" class=\"fill-slate-500 text-[12px]\">owns p2</text></svg>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -998,7 +1038,7 @@ func kafkaOffsets() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "An offset is a consumer group's position in a partition. When it is committed, relative to when the work is done, decides whether a crash loses records or repeats them.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "An offset is a consumer group's position in a partition. When it is committed, relative to when the work is done, decides whether a crash loses records or repeats them.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1024,7 +1064,7 @@ func kafkaOffsets() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "A group commits, per partition, the offset of the next record it wants. Kafka stores these commits in an internal topic, ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "A group commits, per partition, the offset of the next record it wants. Kafka stores these commits in an internal topic, ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1032,7 +1072,7 @@ func kafkaOffsets() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, ", which you can see in the Topics & groups tab. Lag is the difference between a partition's end and the group's committed offset: records written but not yet processed.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, ", which you can see in the Topics & groups tab. Lag is the difference between a partition's end and the group's committed offset: records written but not yet processed.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1058,7 +1098,7 @@ func kafkaOffsets() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "By default franz-go commits automatically every 5 seconds, for records already returned by ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "By default franz-go commits automatically every 5 seconds, for records already returned by ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1066,7 +1106,7 @@ func kafkaOffsets() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "&#46; If the consumer crashes after processing records but before the next commit, those records are delivered again after restart. That is at-least-once delivery, and it is why the kafka/producer-consumer starter's Break this section asks you to kill a consumer and count duplicates.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "&#46; If the consumer crashes after processing records but before the next commit, those records are delivered again after restart. That is at-least-once delivery, and it is why the kafka/producer-consumer starter's Break this section asks you to kill a consumer and count duplicates.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1092,7 +1132,7 @@ func kafkaOffsets() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "The kafka/sink-to-postgres starter turns auto-commit off and commits only after its database writes succeed. A crash can then only cause a replay, never a lost record:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "The kafka/sink-to-postgres starter turns auto-commit off and commits only after its database writes succeed. A crash can then only cause a replay, never a lost record:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1130,7 +1170,7 @@ func kafkaOffsets() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "The practical route to effectively-once is at-least-once delivery plus idempotent processing. The sink gives every order a unique ID and inserts with a conflict clause, so a replayed order changes nothing:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "The practical route to effectively-once is at-least-once delivery plus idempotent processing. The sink gives every order a unique ID and inserts with a conflict clause, so a replayed order changes nothing:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1181,7 +1221,7 @@ func kafkaInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "What Breadboard runs when you add Kafka, and how it is wired.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "What Breadboard runs when you add Kafka, and how it is wired.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1207,7 +1247,7 @@ func kafkaInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "The service runs the official ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "The service runs the official ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1215,7 +1255,7 @@ func kafkaInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, " image in KRaft mode: one process is both the broker that stores partitions and the controller that manages cluster metadata, so there is no ZooKeeper. With one node the replication factor is 1, and if the container stops every partition is unavailable until it comes back.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, " image in KRaft mode: one process is both the broker that stores partitions and the controller that manages cluster metadata, so there is no ZooKeeper. With one node the replication factor is 1, and if the container stops every partition is unavailable until it comes back.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1241,7 +1281,7 @@ func kafkaInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "Clients connect to the SSL listener at ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "Clients connect to the SSL listener at ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1249,7 +1289,7 @@ func kafkaInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "&#46; The broker's certificate is issued by your Breadboard CA for that name, and clients verify it. There is no client authentication in v1. A plaintext listener on 9092 exists only when an app asks for one with ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "&#46; The broker's certificate is issued by your Breadboard CA for that name, and clients verify it. There is no client authentication in v1. A plaintext listener on 9092 exists only when an app asks for one with ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1257,7 +1297,7 @@ func kafkaInBreadboard() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, ", and only on a private network shared with that app.")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, ", and only on a private network shared with that app.")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1295,7 +1335,7 @@ func kafkaInBreadboard() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "The image ships Kafka's own scripts, and Breadboard mounts a client configuration that already trusts the CA. This is what the dashboard's Topics & groups tab runs:")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "The image ships Kafka's own scripts, and Breadboard mounts a client configuration that already trusts the CA. This is what the dashboard's Topics & groups tab runs:")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1332,7 +1372,7 @@ func kafkaGroupsLive(experiment, service string, k *kafkaLive) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<div class=\"my-6 rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-4\"><div class=\"flex items-center gap-2 text-sm font-semibold text-indigo-800\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<div class=\"my-6 rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-4\"><div class=\"flex items-center gap-2 text-sm font-semibold text-indigo-800\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1340,7 +1380,7 @@ func kafkaGroupsLive(experiment, service string, k *kafkaLive) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, " In ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, " In ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1353,7 +1393,7 @@ func kafkaGroupsLive(experiment, service string, k *kafkaLive) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, " right now</div><p class=\"mt-1 text-[15px] leading-6 text-slate-700\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, " right now</div><p class=\"mt-1 text-[15px] leading-6 text-slate-700\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1366,7 +1406,7 @@ func kafkaGroupsLive(experiment, service string, k *kafkaLive) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</p><a href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</p><a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1379,7 +1419,7 @@ func kafkaGroupsLive(experiment, service string, k *kafkaLive) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\" class=\"mt-1 inline-block text-sm text-indigo-600 hover:text-indigo-800\">Open ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" class=\"mt-1 inline-block text-sm text-indigo-600 hover:text-indigo-800\">Open ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1392,7 +1432,7 @@ func kafkaGroupsLive(experiment, service string, k *kafkaLive) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, " in the dashboard →</a></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, " in the dashboard →</a></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

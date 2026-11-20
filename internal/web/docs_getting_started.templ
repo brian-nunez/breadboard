@@ -151,7 +151,7 @@ templ gettingStartedIntro() {
 		Breadboard is a local lab for practicing system design with real software. You describe an experiment in one file, @docCodeWord("experiment.yaml"), and Breadboard runs it in Docker Compose on an isolated network, with TLS on every connection between containers, generated credentials, health checks and resource limits.
 	}
 	@docP() {
-		Every service is the real thing in a container: Kafka, Postgres, Redis, Consul and S3 Compatible storage, not mocks or cloud emulators. There is no Breadboard SDK. Starters write working Go code that uses the official client libraries, so what you learn carries over to real projects.
+		Every service is the real thing in a container: Kafka, Postgres, Redis, Consul, S3 Compatible storage, HAProxy, Envoy, Traefik, NGINX and PgBouncer, not mocks or cloud emulators. There is no Breadboard SDK. Starters write working Go code that uses the official client libraries, so what you learn carries over to real projects.
 	}
 	@docP() {
 		@docCodeWord("bb") is one binary on your machine and never runs in a container. Experiments do: the infrastructure and your own app code are both compose services. Breadboard is built for learning, not for hosting production systems.
@@ -430,6 +430,9 @@ templ gettingStartedStarters() {
 		"If a name the starter needs already belongs to something else in experiment.yaml, bb starter fails before writing any file.",
 	)
 	@docH2("list", "The starters")
+	@docP() {
+		Starters are grouped by area—core infrastructure, sidecars, load balancing, proxies and pooling, and API gateways. Browse the full list on the @docLink("/starters", "Starters") page, or start with one of the core examples:
+	}
 	<ul class="my-4 flex flex-col gap-2.5 text-[16px] leading-7 text-slate-700">
 		for _, s := range gsStarterList {
 			<li class="flex gap-3">
@@ -442,18 +445,20 @@ templ gettingStartedStarters() {
 		}
 	</ul>
 	@docP() {
-		Each technology's docs go deeper: @docLink("/docs/kafka", "Kafka"), @docLink("/docs/postgres", "Postgres"), @docLink("/docs/redis", "Redis"), @docLink("/docs/consul", "Consul") and @docLink("/docs/s3-compatible", "S3 Compatible")&#46;
+		Each section of the docs goes deeper and links every starter in its area: @docLink("/docs/kafka", "Kafka"), @docLink("/docs/postgres", "Postgres"), @docLink("/docs/redis", "Redis"), @docLink("/docs/consul", "Consul"), @docLink("/docs/s3-compatible", "S3 Compatible"), @docLink("/docs/sidecars", "Sidecars"), @docLink("/docs/load-balancing", "Load balancing"), @docLink("/docs/api-gateways", "API gateways"), @docLink("/docs/haproxy", "HAProxy"), @docLink("/docs/envoy", "Envoy"), @docLink("/docs/traefik", "Traefik"), @docLink("/docs/nginx", "NGINX") and @docLink("/docs/pgbouncer", "PgBouncer")&#46;
 	}
 }
 
-// gsStarterList is the starter list in starters.md, in its order.
+// gsStarterList highlights representative starters across Breadboard's areas.
 var gsStarterList = []struct{ ID, Teaches string }{
 	{"kafka/producer-consumer", "topics, partitions, keys, consumer groups, offsets and rebalancing."},
 	{"kafka/sink-to-postgres", "consume events and write them to Postgres; idempotent inserts; at-least-once delivery."},
 	{"redis/cache-invalidation", "cache-aside reads, invalidate-on-write driven by Kafka events, TTLs and stale reads."},
-	{"consul/service-discovery", "(recommended) registration through a Consul sidecar, a health-checked catalog, and resolving services by name."},
-	{"consul/self-registration", "(alternative) the same lookup, with each service registering and deregistering itself through the Consul API."},
+	{"lb/consul-traefik", "backends registered by Consul sidecars, discovered and balanced automatically by Traefik."},
 	{"s3/objects-basics", "buckets, keys and prefixes, multipart upload and presigned URLs against S3 Compatible storage."},
+	{"sidecar/envoy-ambassador", "an Envoy sidecar balancing calls across replicas, with retries and timeouts in config."},
+	{"lb/round-robin", "NGINX rotating across three replicas found through DNS."},
+	{"gw/rate-limiting", "Envoy's token bucket beside NGINX's leaky bucket under the same burst."},
 }
 
 const gsOwnAppSpec = `apps:

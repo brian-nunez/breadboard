@@ -1306,7 +1306,7 @@ func consulHealthChecks() templ.Component {
 			"Apply consul/service-discovery and run bb up.",
 			"Run docker stop bb-consul-lab-greeter-1.",
 			"Within one check interval the check turns critical, and the caller logs no healthy greeter instances.",
-			"Start the greeter again and the next passing check brings it back.",
+			"Start the greeter again and restart its agent (docker start bb-consul-lab-greeter-1 && docker restart bb-consul-lab-greeter-agent-1): the agent shared the stopped container's network namespace, so restarting it rejoins the new one and the next passing check brings the greeter back.",
 		).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err

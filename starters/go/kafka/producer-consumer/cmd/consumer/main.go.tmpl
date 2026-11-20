@@ -18,7 +18,7 @@ func main() {
 		// Consumers in the same group split the topic's partitions between them.
 		kgo.ConsumerGroup("orders-consumers"),
 		kgo.ConsumeTopics("orders"),
-		// A new group starts from the oldest record instead of only new ones.
+		// Start from the oldest record, and reset there if an offset falls out of range.
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 	)
 	if err != nil {

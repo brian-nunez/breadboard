@@ -2353,9 +2353,9 @@ func gettingStartedOwnApp() templ.Component {
 		}
 		templ_7745c5c3_Err = docList(
 			"main.go: a header comment that maps your lab, one entry per service with each variable it gives the app and what it holds (secrets are marked, never printed).",
-			"A blank import of each service's official client, at the version the starters use; drop the _ when you use one.",
-			"An init check that stops the program with one message naming every missing variable.",
-			"An empty main for your code. The program exits at once, and bb up reports an app that exits as failed, so until your program keeps running (a server, a consumer loop) bb up shows that it exited.",
+			"main() at the top: requireEnv checking every variable, then one live client handle per service (newPostgres, newRedis, newKafkaProducer and newKafkaConsumer with a demo events topic, newS3, newConsul, newHTTPClient) that connects and verifies connectivity on startup.",
+			"No fake business logic connecting the services together—just the wiring helpers below main() so you can start calling the official SDKs right away.",
+			"The program logs ready and waits on SIGTERM, so bb up starts healthy on the first run.",
 			"go.mod and go.sum with every client library, a Dockerfile like the starters' (compiled while the image builds), and a README.",
 		).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {

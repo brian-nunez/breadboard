@@ -193,12 +193,11 @@ func (c *cli) addApp(args []string) error {
 
 	_, _ = fmt.Fprintln(c.out, "\nNext:")
 	tw := c.table()
-	_, _ = fmt.Fprintln(tw, "  bb up\tstart the lab and the app")
+	_, _ = fmt.Fprintln(tw, "  bb up\tstart the lab and verify every client connection")
+	_, _ = fmt.Fprintf(tw, "  bb logs %s\tsee the app connect\n", res.Name)
 	_, _ = fmt.Fprintln(tw, "  bb creds\tsee every value")
 	_ = tw.Flush()
-	_, _ = fmt.Fprintf(c.out, "main in %s/main.go is empty, so the program exits at once, and bb up reports an app that\n", res.Dir)
-	_, _ = fmt.Fprintln(c.out, "exits as failed: until your program keeps running (a server, a consumer loop), bb up shows it exited.")
-	_, _ = fmt.Fprintln(c.out, "Write your program there and run bb up again.")
+	_, _ = fmt.Fprintf(c.out, "Write your experiment in %s/main.go and run bb up again.\n", res.Dir)
 
 	return nil
 }

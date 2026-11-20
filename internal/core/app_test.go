@@ -80,7 +80,7 @@ services:
 	}
 
 	main := h.read("shop/main.go")
-	for _, want := range []string{`"DATABASE_URL", "PGHOST"`, `"REDIS_URL",`, `_ "github.com/jackc/pgx/v5/pgxpool"`, `_ "github.com/redis/go-redis/v9"`, "requireEnv(", "postgres.bb.internal", "\nfunc main() {\n}\n"} {
+	for _, want := range []string{`"DATABASE_URL", "PGHOST"`, `"REDIS_URL",`, `"github.com/jackc/pgx/v5/pgxpool"`, `"github.com/redis/go-redis/v9"`, "requireEnv(", "postgres.bb.internal", `db := newPostgres(ctx, "DATABASE_URL")`, `cache := newRedis(ctx, "REDIS_URL")`, "<-ctx.Done()"} {
 		if !strings.Contains(main, want) {
 			t.Errorf("main.go lacks %q", want)
 		}
@@ -296,7 +296,7 @@ func TestAddAppPrefixedEnv(t *testing.T) {
 	}
 
 	code := h.read("report/main.go")
-	for _, want := range []string{`"ANALYTICS_DATABASE_URL", "ANALYTICS_PGHOST"`, `_ "github.com/jackc/pgx/v5/pgxpool" // postgres, analytics`} {
+	for _, want := range []string{`"ANALYTICS_DATABASE_URL", "ANALYTICS_PGHOST"`, `"github.com/jackc/pgx/v5/pgxpool"`, `db := newPostgres(ctx, "DATABASE_URL")`, `analyticsDB := newPostgres(ctx, "ANALYTICS_DATABASE_URL")`} {
 		if !strings.Contains(code, want) {
 			t.Errorf("main.go lacks %q", want)
 		}

@@ -1,6 +1,7 @@
 package starters
 
 import (
+	"bufio"
 	"context"
 	"io/fs"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -226,18 +228,22 @@ func TestRenderApp(t *testing.T) {
 		"// postgres (Postgres): PostgreSQL relational database",
 		"DATABASE_URL", "(secret)", "PGHOST         host name: postgres.bb.internal",
 		"REDIS_URL", "bb creds", "SSL_CERT_FILE", "BB_FQDN", "TLS_CERT_FILE", "TLS_KEY_FILE",
-		"import (\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n\n\t// Official client libraries for the services above. The _ keeps each\n\t// in the build until you use it; drop the _ when you do.\n" +
-			"\t_ \"github.com/jackc/pgx/v5/pgxpool\" // postgres\n\t_ \"github.com/redis/go-redis/v9\"    // redis\n)\n",
-		"func init() {\n\trequireEnv(\n\t\t// postgres (Postgres)\n\t\t\"DATABASE_URL\", \"PGHOST\",",
-		"\t\t// redis (Redis)\n\t\t\"REDIS_URL\",\n\t)\n}",
+		`"github.com/jackc/pgx/v5/pgxpool"`,
+		`"github.com/redis/go-redis/v9"`,
+		"requireEnv(\n\t\t// postgres (Postgres)\n\t\t\"DATABASE_URL\", \"PGHOST\",",
+		"\t\t// redis (Redis)\n\t\t\"REDIS_URL\",\n\t)",
+		`db := newPostgres(ctx, "DATABASE_URL")`,
+		"defer db.Close()",
+		`cache := newRedis(ctx, "REDIS_URL")`,
+		"defer cache.Close()",
+		`log.Println("shop: connected and ready (edit main.go and run bb up)")`,
+		"<-ctx.Done()",
+		"func newPostgres(ctx context.Context, urlEnv string) *pgxpool.Pool",
+		"func newRedis(ctx context.Context, urlEnv string) *redis.Client",
 	} {
 		if !strings.Contains(main, want) {
 			t.Errorf("main.go lacks %q:\n%s", want, main)
 		}
-	}
-
-	if !strings.HasSuffix(main, "\nfunc main() {\n}\n") {
-		t.Errorf("main is not empty:\n%s", main)
 	}
 
 	if strings.Contains(main, "s3cr3t") {
@@ -256,13 +262,13 @@ func TestRenderApp(t *testing.T) {
 	}
 
 	readme := have["README.md"]
-	for _, want := range []string{"# shop", "| `redis` | Redis | `REDIS_URL` (secret) |", "bb creds", "go mod tidy", "bb add kafka", "uses: [postgres, redis, kafka]", "bb learn kafka", "ports:", "host:", "checks the variables of the services in `uses`", "Breadboard supplies the app's own TLS and identity variables", "example.com/shop", "`main` is empty", "`bb up` shows that `shop` exited"} {
+	for _, want := range []string{"# shop", "| `redis` | Redis | `REDIS_URL` (secret) |", "bb creds", "go mod tidy", "bb add kafka", "uses: [postgres, redis, kafka]", "bb learn kafka", "ports:", "host:", "requireEnv", "Breadboard supplies the app's own TLS and identity variables", "example.com/shop", "bb logs shop", "new*"} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md lacks %q", want)
 		}
 	}
 
-	for _, gone := range []string{"services.go", "must(", "uncomment", "connectPostgres"} {
+	for _, gone := range []string{"services.go", "must(", "uncomment", "connectPostgres", "`main` is empty"} {
 		if strings.Contains(readme+main, gone) {
 			t.Errorf("README.md or main.go still mentions %q", gone)
 		}
@@ -283,38 +289,46 @@ func TestAppReadmeExample(t *testing.T) {
 	}
 }
 
-// One import per client package, with every service that uses it; HTTP
-// proxies import nothing but appear in the header; prefixed variables are
-// checked by their injected names.
+// One import and helper per client package, even when multiple services
+// share a type; HTTP proxies wire an http.Client and their URL variable;
+// prefixed variables are passed by their injected names.
 func TestRenderAppImports(t *testing.T) {
 	a := AppScaffold{Name: "app", Experiment: "lab", Uses: testUses(t,
 		[3]string{"postgres", "postgres", ""}, [3]string{"analytics", "postgres", ""}, [3]string{"pool", "pgbouncer", ""},
 		[3]string{"edge", "haproxy", ""})}
 
 	main := appFiles(t, a)["main.go"]
-	if strings.Count(main, `"github.com/jackc/pgx/v5/pgxpool"`) != 1 || !strings.Contains(main, `_ "github.com/jackc/pgx/v5/pgxpool" // postgres, analytics, pool`) {
-		t.Errorf("pgxpool import:\n%s", main)
+	if strings.Count(main, `"github.com/jackc/pgx/v5/pgxpool"`) != 1 || strings.Count(main, "func newPostgres(") != 1 {
+		t.Errorf("pgxpool import/helper:\n%s", main)
 	}
 
-	if strings.Contains(main, "net/http") || !strings.Contains(main, "// edge (HAProxy):") || !strings.Contains(main, `"EDGE_URL",`) {
-		t.Errorf("HTTP proxy:\n%s", main)
-	}
-
-	if !strings.Contains(main, `"ANALYTICS_DATABASE_URL", "ANALYTICS_PGHOST"`) {
-		t.Errorf("prefixed variables:\n%s", main)
+	for _, want := range []string{
+		`db := newPostgres(ctx, "DATABASE_URL")`,
+		`analyticsDB := newPostgres(ctx, "ANALYTICS_DATABASE_URL")`,
+		`poolDB := newPostgres(ctx, "POOL_DATABASE_URL")`,
+		`"net/http"`,
+		`httpClient := newHTTPClient()`,
+		`edgeURL := os.Getenv("EDGE_URL")`,
+		`"ANALYTICS_DATABASE_URL", "ANALYTICS_PGHOST"`,
+	} {
+		if !strings.Contains(main, want) {
+			t.Errorf("main.go lacks %q:\n%s", want, main)
+		}
 	}
 }
 
 func TestRenderAppWithoutServices(t *testing.T) {
 	main := appFiles(t, AppScaffold{Name: "solo", Experiment: "lab"})["main.go"]
-	for _, want := range []string{"No services yet", "requireEnv()", "import (\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n)\n", "\nfunc main() {\n}\n"} {
+	for _, want := range []string{"No services yet", "requireEnv()", `log.Println("solo: ready (edit main.go and run bb up)")`, "<-ctx.Done()"} {
 		if !strings.Contains(main, want) {
 			t.Errorf("main.go lacks %q:\n%s", want, main)
 		}
 	}
 
-	if strings.Contains(main, "_ \"") {
-		t.Errorf("an app without services has blank imports:\n%s", main)
+	for _, gone := range []string{"newPostgres", "newRedis", "newKafkaProducer", "newS3", "newConsul", "newHTTPClient"} {
+		if strings.Contains(main, gone) {
+			t.Errorf("an app without services has %q:\n%s", gone, main)
+		}
 	}
 }
 
@@ -348,8 +362,8 @@ func TestRenderedAppBuilds(t *testing.T) {
 			{"kafka", "kafka", "plain"},
 			{"edge-1", "haproxy", ""},
 		},
-		// Distinct service names that read alike.
-		"colliding": {{"a-b", "redis", ""}, {"a--b", "redis", ""}, {"a-b2", "redis", ""}},
+		// Distinct service names that read alike, plus a leading-digit DNS label.
+		"colliding": {{"a-b", "redis", ""}, {"a--b", "redis", ""}, {"a-b2", "redis", ""}, {"123", "postgres", ""}},
 		// App names that are standard library packages: the module path
 		// is example.com/<name>, so they do not shadow them.
 		"log":     nil,
@@ -392,13 +406,23 @@ func TestRenderedAppBuilds(t *testing.T) {
 	}
 }
 
-// checkRun runs the built scaffold without its variables and with them.
+// checkRun runs the built scaffold without its variables (must exit 1 with
+// one message naming every variable) and with dummy variables: apps that
+// wait without pinging must log ready and exit 0 on SIGTERM; apps that ping
+// must pass requireEnv and fail cleanly without panicking.
 func checkRun(t *testing.T, bin string, a AppScaffold) {
 	t.Helper()
 
 	var names []string
 
+	pings := false
+
 	for _, u := range a.Uses {
+		switch u.Type {
+		case "postgres", "pgbouncer", "redis", "kafka", "s3-compatible", "consul":
+			pings = true
+		}
+
 		for _, v := range u.Vars {
 			names = append(names, v.Name)
 		}
@@ -422,16 +446,63 @@ func checkRun(t *testing.T, bin string, a AppScaffold) {
 	}
 
 	for _, n := range names {
-		env = append(env, n+"=x")
+		env = append(env, n+"=http://127.0.0.1:1")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if !pings {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, bin)
+		cmd.Env = env
+
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+
+		var lines []string
+
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			line := sc.Text()
+			lines = append(lines, line)
+
+			if strings.Contains(line, a.Name+": ") && strings.Contains(line, "ready") {
+				_ = cmd.Process.Signal(syscall.SIGTERM)
+
+				break
+			}
+		}
+
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("on SIGTERM the ready app exited with %v:\n%s", err, strings.Join(lines, "\n"))
+		}
+
+		out := strings.Join(lines, "\n")
+		if !strings.Contains(out, a.Name+": ") || !strings.Contains(out, "ready") {
+			t.Fatalf("ready app output = %q", out)
+		}
+
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin)
-
 	cmd.Env = env
-	if out, err := cmd.CombinedOutput(); err != nil || len(out) != 0 {
-		t.Fatalf("with its variables the empty program should exit 0 silently; got %v:\n%s", err, out)
+
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("with unreachable dummy services the app exited 0:\n%s", out)
+	}
+
+	if strings.Contains(string(out), "missing environment variables") || strings.Contains(string(out), "panic") {
+		t.Fatalf("with its variables set, the app should pass requireEnv without panicking:\n%s", out)
 	}
 }

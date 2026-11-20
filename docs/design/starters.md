@@ -162,23 +162,23 @@ The template is `starters/go/app/` (embedded with the starters, every file `.tmp
 
 | File | Content |
 |---|---|
-| `main.go` | A header comment that maps the lab: each used service with its catalog title and summary, and each variable with what it holds, its value when not secret, or `(secret)`; plus `SSL_CERT_FILE`, `BB_FQDN`, `TLS_CERT_FILE`, `TLS_KEY_FILE` and `bb creds`. A blank import of each used service's client (`_` keeps the module in the build until the learner uses it). `init()` calls `requireEnv` with every variable of the used services; any missing ones stop the program with exit code 1 and one line naming them all. `main` is empty (Brian's direction): the program exits at once, so `bb up` reports the app as failed (D-058) until the learner's code keeps running. |
-| `go.mod`, `go.sum` | One canonical pair for every app, generated with `go mod tidy` against a file importing every client, at the starters' versions; the module path is `example.com/<name>`. Unused requirements are harmless; `go mod tidy` trims them. |
+| `main.go` | A header comment that maps the lab: each used service with its catalog title and summary, and each variable with what it holds, its value when not secret, or `(secret)`; plus `SSL_CERT_FILE`, `BB_FQDN`, `TLS_CERT_FILE`, `TLS_KEY_FILE` and `bb creds`. `main()` sits at the top: `requireEnv` checks every variable of the used services (exiting 1 with one line naming all missing ones), then calls small `new*` wiring functions below `main()` (`newPostgres`, `newRedis`, `newKafkaProducer` and `newKafkaConsumer` with demo topic `events` created via `kadm` and group `<app>-group`, `newS3`, `newConsul`, `newHTTPClient`) that connect using the exact injected env vars and verify connectivity (`Ping`, `ListBuckets`, `Status().Leader()`), logs ready, and waits on `SIGTERM` (`<-ctx.Done()`) so `bb up` starts healthy immediately. No fake logic interconnects services. |
+| `go.mod`, `go.sum` | One canonical pair for every app, generated with `go mod tidy` against a file importing every client (including `franz-go/pkg/kadm`, `aws-sdk-go-v2`, and `aws-sdk-go-v2/credentials`), at the starters' versions; the module path is `example.com/<name>`. Unused requirements are harmless; `go mod tidy` trims them. |
 | `Dockerfile` | The starters' shape: a `dev` stage on `golang:<GoImage>` that runs `go build -o /usr/local/bin/<name> .` with the build cache mount, and a non-root `prod` stage on `alpine:<AlpineVersion>`. |
-| `README.md` | What the app is, the services and variables it can reach, that `main` is empty and what `bb up` then reports, how to run, rebuild, add a service later, and reach it from a browser (`ports`, `host`). |
+| `README.md` | What the app is, the services and variables it can reach, how `main.go` wires and verifies each client before waiting on `SIGTERM`, how to run, rebuild, add a service later, and reach it from a browser (`ports`, `host`). |
 
-Each catalog type maps to one client package in `starters.sdkImports` (a test fails for a type without one). Several services of one type share one import, whose comment lists them:
+Each catalog type maps to one client package in `starters.sdkImports` (a test fails for a type without one) and one wiring helper in `main.go` (one helper per catalog type, taking the exact injected env var names so prefixed multi-service labs reuse the same helper):
 
-| Types | Blank import |
+| Types | Client package & helper |
 |---|---|
-| `postgres`, `pgbouncer` | `github.com/jackc/pgx/v5/pgxpool` |
-| `redis` | `github.com/redis/go-redis/v9` |
-| `kafka` | `github.com/twmb/franz-go/pkg/kgo` |
-| `s3-compatible` | `github.com/aws/aws-sdk-go-v2/service/s3` (`go.mod` also has `aws-sdk-go-v2/config`, which the S3 starter uses) |
-| `consul` | `github.com/hashicorp/consul/api` |
-| `haproxy`, `envoy`, `traefik`, `nginx` | none: `net/http` is the client; they appear in the header and the init check only |
+| `postgres`, `pgbouncer` | `github.com/jackc/pgx/v5/pgxpool` (`newPostgres`, verifies with `Ping`) |
+| `redis` | `github.com/redis/go-redis/v9` (`newRedis`, verifies with `Ping`) |
+| `kafka` | `github.com/twmb/franz-go/pkg/kgo` + `kadm` (`newKafkaProducer`, `newKafkaConsumer`; verifies with `Ping` and ensures demo topic `events` exists with 3 partitions) |
+| `s3-compatible` | `github.com/aws/aws-sdk-go-v2/service/s3` (`newS3` with `UsePathStyle: true`, verifies with `ListBuckets`) |
+| `consul` | `github.com/hashicorp/consul/api` (`newConsul`, verifies with `Status().Leader()`) |
+| `haproxy`, `envoy`, `traefik`, `nginx` | `net/http` (`newHTTPClient` + `<service>URL := os.Getenv(...)`) |
 
-`TestRenderedAppBuilds` renders the scaffold for every catalog type at once, each type alone, no service, prefixed and plaintext uses, colliding service names, and app names `log` and `context`, and runs `go build` and `go vet` with `-mod=readonly`; it then runs the binary without its variables (one message, exit 1) and with them (exits 0 at once, silently).
+`TestRenderedAppBuilds` renders the scaffold for every catalog type at once, each type alone, no service, prefixed and plaintext uses, colliding and leading-digit service names, and app names `log` and `context`, and runs `go build` and `go vet` with `-mod=readonly`; it then runs the binary without its variables (one message, exit 1) and with dummy variables (verifying ready/SIGTERM for non-pinging apps and clean non-panic failure past `requireEnv` for pinging apps). `TestIntegrationAddApp` runs a real Postgres, Redis and Kafka lab with `AddApp` defaults and asserts `bb up` succeeds, the app logs ready, and Kafka's `events` topic exists.
 
 ## Starter list
 

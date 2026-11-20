@@ -164,18 +164,17 @@ When you want to build your own design instead of following a starter, add an ap
 ```sh
 bb add kafka            # add the services you need
 bb add app orders       # write ./orders and add it to experiment.yaml
-# edit ./orders/main.go (main is empty until you add your code)
-bb up
+bb up                   # build, connect every client and verify health
+bb logs orders          # confirm the app connected
 ```
 
 `bb add app` writes a Go module (`main.go`, `go.mod`, `go.sum`, `Dockerfile`, `README.md`) into a new directory. By default the app uses every infra service in the lab; `--uses a,b` picks some. `main.go` contains:
 
 - a header listing every service the app uses, with each environment variable it receives and an example value;
-- an import of each used service's official client library;
-- an `init` that checks those variables are set;
-- an empty `main` for your code.
+- `main()` at the top: `requireEnv` checking those variables, auto-wired official SDK clients (such as `newPostgres`, `newRedis`, `newKafkaProducer`/`newKafkaConsumer`, `newS3`, `newConsul`, `newHTTPClient`) that connect and verify connectivity on startup, and `<-ctx.Done()` so `bb up` starts healthy;
+- the small `new*` wiring functions below `main()`.
 
-Because `main` is empty, the program exits at once, and `bb up` reports the app as exited until your program keeps running (a server, a consumer loop). Write your code, then run `bb up` again. `bb creds` shows every value the app receives.
+There is no fake business logic connecting the services—just live SDK handles ready for your experiment. Write your code in `main.go`, then run `bb up` again. `bb creds` shows every value the app receives.
 
 ## Starters
 

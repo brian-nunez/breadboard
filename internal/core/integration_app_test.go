@@ -4,18 +4,15 @@ package core
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// TestIntegrationAddApp runs the learner's first step: a lab with Postgres
-// and Redis, bb add app with defaults, bb up. main is empty (Brian's
-// direction, D-217), so the program exits at once and bb up reports the
-// app as failed (D-058), naming it. Its init check still passed: the
-// logs carry no missing-variable message, so bb up injected every
-// variable the scaffold expects.
+// TestIntegrationAddApp runs the learner's first step: a lab with Postgres,
+// Redis and Kafka, bb add app with defaults, then bb up. The auto-wired
+// scaffold connects and pings every client over verified TLS, ensures the
+// Kafka demo topic exists, logs ready and stays running so bb up succeeds.
 func TestIntegrationAddApp(t *testing.T) {
 	eng := realEngine(t)
 	ctx := context.Background()
@@ -31,7 +28,7 @@ func TestIntegrationAddApp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, typ := range []string{"postgres", "redis"} {
+	for _, typ := range []string{"postgres", "redis", "kafka"} {
 		if _, err := eng.AddService(ctx, AddServiceRequest{Dir: dir, Type: typ}); err != nil {
 			t.Fatal(err)
 		}
@@ -41,15 +38,29 @@ func TestIntegrationAddApp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := eng.Up(ctx, UpRequest{Dir: dir})
-	if !errors.Is(err, ErrUnhealthy) || !strings.Contains(err.Error(), "shop ") {
-		t.Fatalf("up = %v, want ErrUnhealthy naming shop, which exits", err)
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatalf("up failed: %v\nshop logs:\n%s", err, strings.Join(logsOf(t, eng, dir, "shop"), "\n"))
 	}
 
-	t.Logf("up reported: %v", err)
-
 	logs := strings.Join(logsOf(t, eng, dir, "shop"), "\n")
-	if strings.Contains(logs, "cannot start") || strings.Contains(logs, "missing environment variables") {
-		t.Fatalf("shop's init check failed:\n%s", logs)
+	if !strings.Contains(logs, "shop: connected and ready") {
+		t.Fatalf("shop did not log connected and ready:\n%s", logs)
+	}
+
+	topics, err := eng.KafkaTopics(ctx, ExploreRequest{Dir: dir, Service: "kafka"})
+	if err != nil {
+		t.Fatalf("kafka topics: %v", err)
+	}
+
+	foundEvents := false
+
+	for _, topic := range topics.Topics {
+		if topic.Name == "events" && topic.Partitions == 3 {
+			foundEvents = true
+		}
+	}
+
+	if !foundEvents {
+		t.Fatalf("expected events topic with 3 partitions, got %+v", topics.Topics)
 	}
 }

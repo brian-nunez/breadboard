@@ -155,7 +155,7 @@ func (s *Server) addSpecTools() {
 
 	add(s, writeTool, false, &sdk.Tool{
 		Name:        "add_app",
-		Description: "Write a minimal, runnable Go program for the user's own code into a new directory and add it to experiment.yaml as an app (path, command, uses). main.go maps every variable each used service gives the app, blank-imports each service's official client library, checks the variables in init, and has an empty main, so up reports the app as exited until the user's code keeps running. Never writes into a directory that has files. Run up afterwards. Same as bb add app.",
+		Description: "Write a minimal, runnable Go program for the user's own code into a new directory and add it to experiment.yaml as an app (path, command, uses). main.go maps every variable each used service gives the app, checks them with requireEnv, auto-wires each service's official client library with startup connectivity checks, logs ready, and waits on SIGTERM so up succeeds immediately. Never writes into a directory that has files. Run up afterwards. Same as bb add app.",
 	}, func(ctx context.Context, _ *sdk.CallToolRequest, in addAppIn) (addAppOut, error) {
 		dir, err := s.dir(in.Dir)
 		if err != nil {

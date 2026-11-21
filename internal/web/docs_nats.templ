@@ -1,0 +1,194 @@
+package web
+
+// NATS & JetStream docs, written to the Kafka template (D-031, D-061).
+
+func init() {
+	registerTech(tech{
+		ID:      "nats",
+		Name:    "NATS",
+		Tagline: "Lightweight subject-based messaging, request-reply, JetStream work queues, and reactive Key-Value stores over TLS.",
+		Order:   59,
+		Intro:   natsIntro(),
+		GoodFit: []string{
+			"Ultra-low-latency pub/sub with hierarchical wildcard subjects (* and >)",
+			"Zero-config load balancing across worker replicas using queue groups",
+			"Built-in synchronous request-reply RPC without HTTP boilerplate or load balancers",
+			"JetStream durable work queues (delete on ack) and reactive Key-Value buckets with watch streams",
+		},
+		PoorFit: []string{
+			"Multi-terabyte long-term event warehousing with partition-local ordering guarantees across dozens of brokers (use Kafka)",
+			"Relational transactions, joins, and rich SQL queries (use Postgres)",
+			"Full-text BM25 search and faceted aggregations (use OpenSearch)",
+		},
+		Diagram: natsDiagram(),
+		Official: []link{
+			{"NATS documentation", "https://docs.nats.io/"},
+			{"nats.go Go client", "https://pkg.go.dev/github.com/nats-io/nats.go"},
+			{"JetStream Go package", "https://pkg.go.dev/github.com/nats-io/nats.go/jetstream"},
+			{"Core NATS concepts", "https://docs.nats.io/nats-concepts/core-nats"},
+			{"JetStream persistence", "https://docs.nats.io/nats-concepts/jetstream"},
+		},
+		Guides: []guide{
+			{
+				Slug: "core-messaging", Title: "Core NATS: subjects, queue groups, and request-reply", Summary: "At-most-once messaging with wildcards, load-balanced queue groups, and built-in RPC.",
+				Sections: []docSection{{"subjects", "Subjects and wildcards"}, {"queues", "Queue groups"}, {"reqreply", "Request-reply RPC"}},
+				Body:     natsCoreGuide(),
+			},
+			{
+				Slug: "jetstream-workqueues", Title: "JetStream streams and work queues", Summary: "Durable WorkQueue streams, message deduplication, pull consumers, Ack, and NakWithDelay.",
+				Sections: []docSection{{"workqueue", "WorkQueue retention vs Kafka"}, {"pull", "Durable pull consumers"}, {"retries", "Ack, NakWithDelay, and MaxDeliver"}},
+				Body:     natsWorkQueueGuide(),
+			},
+			{
+				Slug: "jetstream-kv", Title: "JetStream Key-Value and live watches", Summary: "Versioned distributed config, optimistic concurrency via revision checks, and push watches.",
+				Sections: []docSection{{"buckets", "KV buckets on JetStream"}, {"cas", "Optimistic concurrency with Update"}, {"watch", "Reactive Watch without polling"}},
+				Body:     natsKVGuide(),
+			},
+			{
+				Slug: "in-breadboard", Title: "NATS in Breadboard", Summary: "TLS on 4222, token auth, config.jetstream, loopback monitoring, and the Streams & stats tab.",
+				Sections: []docSection{{"tls", "TLS and token auth"}, {"env", "What your app receives"}, {"explore", "The Streams & stats tab"}},
+				Body:     natsInBreadboardGuide(),
+			},
+		},
+	})
+}
+
+const natsConnectCode = `// SSL_CERT_FILE is set by Breadboard, so tls:// verifies the lab CA automatically.
+nc, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")))
+if err != nil {
+    log.Fatal(err)
+}
+defer nc.Close()`
+
+const natsCoreCode = `// Queue group: only one responder replica handles each request.
+_, err := nc.QueueSubscribe("pricing.quote.*", "pricing-workers", func(m *nats.Msg) {
+    _ = m.Respond([]byte("{\"price\":19.99}"))
+})
+
+// Request-reply: NATS creates an ephemeral _INBOX reply subject automatically.
+reply, err := nc.Request("pricing.quote.us", []byte("sku-42"), 2*time.Second)`
+
+const natsWorkQueueCode = `js, _ := jetstream.New(nc)
+stream, _ := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
+    Name:      "JOBS",
+    Subjects:  []string{"jobs.*"},
+    Retention: jetstream.WorkQueuePolicy,
+})
+cons, _ := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
+    Durable:    "job-workers",
+    AckPolicy:  jetstream.AckExplicitPolicy,
+    MaxDeliver: 3,
+    AckWait:    5 * time.Second,
+})
+msgs, _ := cons.Fetch(5)
+for msg := range msgs.Messages() {
+    _ = msg.Ack() // Deletes the message from the WorkQueue stream.
+}`
+
+const natsKVCode = `js, _ := jetstream.New(nc)
+kv, _ := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
+    Bucket:  "flags",
+    History: 5,
+})
+entry, _ := kv.Get(ctx, "flags.checkout")
+// Update succeeds only if nobody modified the key since entry.Revision().
+_, err := kv.Update(ctx, "flags.checkout", []byte("v2"), entry.Revision())`
+
+const natsSpecYAML = `services:
+  nats:
+    type: nats
+    config:
+      jetstream: true    # true (default) enables persistence; false runs Core NATS only`
+
+templ natsIntro() {
+	<p>NATS is a single-binary, low-memory messaging and coordination system. At its core it provides ultra-fast, at-most-once subject-based pub/sub, queue groups, and request-reply RPC. Layered directly inside the same server, <strong>JetStream</strong> adds opt-in durable streams, work queues, and reactive Key-Value buckets.</p>
+	<p>Compared to Kafka's partitioned commit log (where consumers track offsets and messages stay until retention expires), NATS shines for service-to-service messaging, work queues where acknowledged jobs disappear immediately, and lightweight coordination.</p>
+}
+
+templ natsDiagram() {
+	<svg viewBox="0 0 640 156" class="w-full" role="img" aria-label="Services connecting to NATS over TLS 4222 with Core NATS subjects and JetStream streams">
+		<rect x="20" y="24" width="150" height="44" rx="8" fill="#eef2ff" stroke="#6366f1"></rect>
+		<text x="95" y="44" text-anchor="middle" font-size="12" font-weight="600" fill="#1e1b4b">Producers / Admins</text>
+		<text x="95" y="59" text-anchor="middle" font-size="10" fill="#4338ca">Publish / Request / KV</text>
+		<rect x="20" y="92" width="150" height="44" rx="8" fill="#eef2ff" stroke="#6366f1"></rect>
+		<text x="95" y="112" text-anchor="middle" font-size="12" font-weight="600" fill="#1e1b4b">Workers / Watchers</text>
+		<text x="95" y="127" text-anchor="middle" font-size="10" fill="#4338ca">Queue Groups / Pull</text>
+		<path d="M170 46 L250 72" stroke="#475569" stroke-width="1.5" fill="none"></path>
+		<path d="M170 114 L250 86" stroke="#475569" stroke-width="1.5" fill="none"></path>
+		<rect x="250" y="26" width="160" height="104" rx="8" fill="#ecfeff" stroke="#0284c7"></rect>
+		<text x="330" y="50" text-anchor="middle" font-size="12" font-weight="600" fill="#0c4a6e">NATS 2.15</text>
+		<text x="330" y="68" text-anchor="middle" font-size="10" fill="#0369a1">TLS :4222 (Token auth)</text>
+		<text x="330" y="84" text-anchor="middle" font-size="10" fill="#0369a1">128m RAM · Core + JS</text>
+		<text x="330" y="104" text-anchor="middle" font-size="10" fill="#64748b">Monitor 127.0.0.1:8222</text>
+		<path d="M410 78 L468 78" stroke="#475569" stroke-width="1.5" fill="none"></path>
+		<rect x="468" y="34" width="152" height="88" rx="8" fill="#f8fafc" stroke="#cbd5e1"></rect>
+		<text x="544" y="58" text-anchor="middle" font-size="12" font-weight="600" fill="#0f172a">JetStream (/data)</text>
+		<text x="544" y="76" text-anchor="middle" font-size="10" fill="#475569">WorkQueue Streams</text>
+		<text x="544" y="94" text-anchor="middle" font-size="10" fill="#475569">KV Buckets (KV_*)</text>
+	</svg>
+}
+
+templ natsCoreGuide() {
+	@docH2("subjects", "Subjects and wildcards")
+	@docP() {
+		Core NATS routes messages by dot-delimited subjects such as @docCodeWord("pricing.quote.us")&#46; Subscribers match one token with @docCodeWord("*") or any trailing tokens with @docCodeWord(">")&#46; Delivery is at-most-once: if no subscriber is listening when a message is published, NATS drops it immediately.
+	}
+	@docH2("queues", "Queue groups")
+	@docP() {
+		When multiple replicas subscribe with the same queue group name, NATS delivers each matching message to exactly one member of the group — giving you instant, location-transparent load balancing with zero broker configuration.
+	}
+	@docH2("reqreply", "Request-reply RPC")
+	@docP() {
+		Calling @docCodeWord("nc.Request(subject, data, timeout)") creates a unique ephemeral inbox subject, publishes the request with that reply-to address, and waits for the first responder to call @docCodeWord("m.Respond")&#46;
+	}
+	@docCode("core.go", natsCoreCode)
+}
+
+templ natsWorkQueueGuide() {
+	@docH2("workqueue", "WorkQueue retention vs Kafka")
+	@docP() {
+		In Kafka, consumers move a partition offset forward while historical messages remain on disk until retention expires. A JetStream stream with @docCodeWord("WorkQueuePolicy") behaves like a true durable queue: each message is delivered to a single consumer and deleted from the stream the instant it is acknowledged.
+	}
+	@docH2("pull", "Durable pull consumers")
+	@docP() {
+		Worker replicas share one durable pull consumer and call @docCodeWord("cons.Fetch") at their own pace, naturally providing backpressure without overwhelming slow workers.
+	}
+	@docH2("retries", "Ack, NakWithDelay, and MaxDeliver")
+	@docP() {
+		Call @docCodeWord("msg.Ack()") after work succeeds, or @docCodeWord("msg.NakWithDelay(d)") to schedule a retry on transient failures. If a worker crashes before acknowledging, JetStream automatically redelivers after @docCodeWord("AckWait") up to @docCodeWord("MaxDeliver") attempts.
+	}
+	@docCode("workqueue.go", natsWorkQueueCode)
+}
+
+templ natsKVGuide() {
+	@docH2("buckets", "KV buckets on JetStream")
+	@docP() {
+		A JetStream Key-Value bucket is backed by a compacted stream named @docCodeWord("KV_<bucket>")&#46; Setting @docCodeWord("History: 5") keeps the last 5 revisions of every key so you can audit changes or roll back.
+	}
+	@docH2("cas", "Optimistic concurrency with Update")
+	@docP() {
+		Every write increments a monotonic revision number. Using @docCodeWord("kv.Update(ctx, key, val, expectedRevision)") performs a compare-and-swap on the server and rejects conflicting writes with an error when another writer updated the key first.
+	}
+	@docH2("watch", "Reactive Watch without polling")
+	@docP() {
+		Subscribers call @docCodeWord("kv.WatchAll(ctx)") or watch a wildcard such as @docCodeWord("flags.>") to receive initial snapshots followed by real-time updates and deletes over the existing TLS connection.
+	}
+	@docCode("kv.go", natsKVCode)
+}
+
+templ natsInBreadboardGuide() {
+	@docH2("tls", "TLS and token auth")
+	@docP() {
+		Breadboard runs @docCodeWord("nats:2.15.3-alpine3.22") with TLS mandatory on client port @docCodeWord("4222") using the service's lab certificate and token auth supplied via @docCodeWord("--auth") so @docCodeWord("nats.conf") stays secret-free. Monitoring stays strictly on @docCodeWord("127.0.0.1:8222") inside the container.
+	}
+	@docCode("experiment.yaml", natsSpecYAML)
+	@docH2("env", "What your app receives")
+	@docP() {
+		Apps with @docCodeWord("nats") in @docCodeWord("uses") receive @docCodeWord("NATS_URL")&#44; @docCodeWord("NATS_TOKEN")&#44; and @docCodeWord("NATS_CA") — plus @docCodeWord("SSL_CERT_FILE") automatically:
+	}
+	@docCode("connect.go", natsConnectCode)
+	@docH2("explore", "The Streams & stats tab")
+	@docP() {
+		Open the NATS service page in @docCodeWord("bb serve") and switch to <strong>Streams &amp; stats</strong> (or call the @docCodeWord("nats_overview") MCP tool) to inspect live connections, message counters, JetStream streams, KV buckets, and consumer pending/ack-pending counts.
+	}
+}

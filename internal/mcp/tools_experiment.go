@@ -642,7 +642,84 @@ func (s *Server) addExplorers() {
 		}, nil
 	})
 
+	add(s, readTool, true, &sdk.Tool{
+		Name:        "nats_overview",
+		Description: "Live NATS server stats (version, connections, subscriptions, traffic) and JetStream streams, KV buckets, and consumers of a running NATS service.",
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in exploreIn) (natsOut, error) {
+		req, err := explore(in)
+		if err != nil {
+			return natsOut{}, err
+		}
+
+		res, err := s.eng.NatsOverview(ctx, req)
+		if err != nil {
+			return natsOut{}, err
+		}
+
+		return natsOut{
+			Version:       res.Version,
+			Connections:   res.Connections,
+			Subscriptions: res.Subscriptions,
+			InMsgs:        res.InMsgs,
+			OutMsgs:       res.OutMsgs,
+			InBytes:       res.InBytes,
+			OutBytes:      res.OutBytes,
+			JetStream:     res.JetStream,
+			MemoryBytes:   res.MemoryBytes,
+			StorageBytes:  res.StorageBytes,
+			Streams: mapSlice(res.Streams, func(st core.NatsStream) natsStream {
+				return natsStream{
+					Name:      st.Name,
+					Kind:      st.Kind,
+					Subjects:  orEmpty(st.Subjects),
+					Retention: st.Retention,
+					Messages:  st.Messages,
+					Bytes:     st.Bytes,
+					Consumers: mapSlice(st.Consumers, func(c core.NatsConsumer) natsConsumer {
+						return natsConsumer{
+							Name:       c.Name,
+							Pending:    c.Pending,
+							AckPending: c.AckPending,
+							Delivered:  c.Delivered,
+						}
+					}),
+				}
+			}),
+		}, nil
+	})
+
 	s.addProxyExplorers(explore)
+}
+
+type natsConsumer struct {
+	Name       string `json:"name"`
+	Pending    uint64 `json:"pending"`
+	AckPending int    `json:"ack_pending"`
+	Delivered  uint64 `json:"delivered"`
+}
+
+type natsStream struct {
+	Name      string         `json:"name"`
+	Kind      string         `json:"kind"`
+	Subjects  []string       `json:"subjects"`
+	Retention string         `json:"retention"`
+	Messages  uint64         `json:"messages"`
+	Bytes     uint64         `json:"bytes"`
+	Consumers []natsConsumer `json:"consumers"`
+}
+
+type natsOut struct {
+	Version       string       `json:"version"`
+	Connections   int          `json:"connections"`
+	Subscriptions int          `json:"subscriptions"`
+	InMsgs        int64        `json:"in_msgs"`
+	OutMsgs       int64        `json:"out_msgs"`
+	InBytes       int64        `json:"in_bytes"`
+	OutBytes      int64        `json:"out_bytes"`
+	JetStream     bool         `json:"jetstream"`
+	MemoryBytes   int64        `json:"memory_bytes"`
+	StorageBytes  int64        `json:"storage_bytes"`
+	Streams       []natsStream `json:"streams"`
 }
 
 type opensearchIndex struct {

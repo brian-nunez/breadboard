@@ -1074,3 +1074,175 @@ func applyOpenSearchAliases(indices []OpenSearchIndex, data []byte) {
 		indices[i].Aliases = aliases
 	}
 }
+
+// --- NATS -------------------------------------------------------------------
+
+// NatsOverview summarizes server stats and JetStream streams/KV buckets inside
+// a running NATS service.
+type NatsOverview struct {
+	Service       string
+	Version       string
+	Connections   int
+	Subscriptions int
+	InMsgs        int64
+	OutMsgs       int64
+	InBytes       int64
+	OutBytes      int64
+	JetStream     bool
+	MemoryBytes   int64
+	StorageBytes  int64
+	Streams       []NatsStream
+}
+
+// NatsStream is one JetStream stream (or KV bucket, Kind=="kv").
+type NatsStream struct {
+	Name      string
+	Kind      string // "stream" or "kv"
+	Subjects  []string
+	Retention string
+	Messages  uint64
+	Bytes     uint64
+	Consumers []NatsConsumer
+}
+
+// NatsConsumer is one durable or ephemeral consumer on a JetStream stream.
+type NatsConsumer struct {
+	Name       string
+	Pending    uint64
+	AckPending int
+	Delivered  uint64
+}
+
+// NatsOverview reads loopback /varz and /jsz monitoring endpoints inside the
+// NATS container through docker exec (ADR-0012).
+func (e *Engine) NatsOverview(ctx context.Context, req ExploreRequest) (*NatsOverview, error) {
+	svc, run, err := e.explore(ctx, req, "nats")
+	if err != nil {
+		return nil, err
+	}
+
+	base := fmt.Sprintf("http://127.0.0.1:%d", catalog.NatsMonitorPort)
+
+	varzOut, err := run("wget", "-qO-", base+"/varz")
+	if err != nil {
+		return nil, fmt.Errorf("nats varz: %w", err)
+	}
+
+	res, err := parseNatsVarz(svc.Name, varzOut)
+	if err != nil {
+		return nil, err
+	}
+
+	res.JetStream = svc.Config["jetstream"] != "false"
+	if res.JetStream {
+		jszOut, err := run("wget", "-qO-", base+"/jsz?streams=true&consumers=true&config=true")
+		if err != nil {
+			return nil, fmt.Errorf("nats jsz: %w", err)
+		}
+
+		if err := applyNatsJSZ(res, jszOut); err != nil {
+			return nil, err
+		}
+	}
+
+	return res, nil
+}
+
+func parseNatsVarz(service string, data []byte) (*NatsOverview, error) {
+	var doc struct {
+		Version       string `json:"version"`
+		Connections   int    `json:"connections"`
+		Subscriptions int    `json:"subscriptions"`
+		InMsgs        int64  `json:"in_msgs"`
+		OutMsgs       int64  `json:"out_msgs"`
+		InBytes       int64  `json:"in_bytes"`
+		OutBytes      int64  `json:"out_bytes"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("nats varz: %w", err)
+	}
+
+	return &NatsOverview{
+		Service:       service,
+		Version:       doc.Version,
+		Connections:   doc.Connections,
+		Subscriptions: doc.Subscriptions,
+		InMsgs:        doc.InMsgs,
+		OutMsgs:       doc.OutMsgs,
+		InBytes:       doc.InBytes,
+		OutBytes:      doc.OutBytes,
+	}, nil
+}
+
+func applyNatsJSZ(out *NatsOverview, data []byte) error {
+	var doc struct {
+		Memory         int64 `json:"memory"`
+		Storage        int64 `json:"storage"`
+		AccountDetails []struct {
+			StreamDetail []struct {
+				Name   string `json:"name"`
+				Config struct {
+					Subjects  []string `json:"subjects"`
+					Retention string   `json:"retention"`
+				} `json:"config"`
+				State struct {
+					Messages uint64 `json:"messages"`
+					Bytes    uint64 `json:"bytes"`
+				} `json:"state"`
+				ConsumerDetail []struct {
+					Name          string `json:"name"`
+					NumPending    uint64 `json:"num_pending"`
+					NumAckPending int    `json:"num_ack_pending"`
+					Delivered     struct {
+						StreamSeq uint64 `json:"stream_seq"`
+					} `json:"delivered"`
+				} `json:"consumer_detail"`
+			} `json:"stream_detail"`
+		} `json:"account_details"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("nats jsz: %w", err)
+	}
+
+	out.MemoryBytes = doc.Memory
+	out.StorageBytes = doc.Storage
+
+	for _, acc := range doc.AccountDetails {
+		for _, sd := range acc.StreamDetail {
+			kind := "stream"
+			if strings.HasPrefix(sd.Name, "KV_") {
+				kind = "kv"
+			}
+
+			consumers := make([]NatsConsumer, 0, len(sd.ConsumerDetail))
+			for _, cd := range sd.ConsumerDetail {
+				consumers = append(consumers, NatsConsumer{
+					Name:       cd.Name,
+					Pending:    cd.NumPending,
+					AckPending: cd.NumAckPending,
+					Delivered:  cd.Delivered.StreamSeq,
+				})
+			}
+
+			slices.SortFunc(consumers, func(a, b NatsConsumer) int {
+				return strings.Compare(a.Name, b.Name)
+			})
+
+			out.Streams = append(out.Streams, NatsStream{
+				Name:      sd.Name,
+				Kind:      kind,
+				Subjects:  sd.Config.Subjects,
+				Retention: sd.Config.Retention,
+				Messages:  sd.State.Messages,
+				Bytes:     sd.State.Bytes,
+				Consumers: consumers,
+			})
+		}
+	}
+
+	slices.SortFunc(out.Streams, func(a, b NatsStream) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	return nil
+}

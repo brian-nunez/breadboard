@@ -1,0 +1,42 @@
+// Command nats-audit subscribes to the multi-token wildcard pricing.> without
+// a queue group, observing every quote request and broadcast event in real time.
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
+
+	"github.com/nats-io/nats.go"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	nc, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.Name("nats-audit"))
+	if err != nil {
+		log.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Close()
+
+	var seen atomic.Int64
+	sub, err := nc.Subscribe("pricing.>", func(m *nats.Msg) {
+		n := seen.Add(1)
+		log.Printf("audit #%d subject=%s bytes=%d reply=%q", n, m.Subject, len(m.Data), m.Reply)
+	})
+	if err != nil {
+		log.Fatalf("subscribe pricing.>: %v", err)
+	}
+	defer func() { _ = sub.Drain() }()
+
+	if err := nc.Flush(); err != nil {
+		log.Fatalf("nats flush: %v", err)
+	}
+	log.Println("nats-audit observing all messages on pricing.>")
+
+	<-ctx.Done()
+}

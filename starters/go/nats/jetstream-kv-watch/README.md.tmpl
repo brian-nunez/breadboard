@@ -1,0 +1,21 @@
+# NATS JetStream: Key-Value store with CAS and live Watch
+
+Distributed configuration and feature flags backed by a versioned JetStream Key-Value bucket (`flags`, `History: 5`):
+
+- `kv-admin` seeds `flags.checkout` and `flags.rate_limit`, performs a compare-and-swap (`kv.Update` with expected revision), proves stale revisions are rejected by the server, and rotates `flags.checkout` every 4 seconds.
+- `kv-watcher` (2 replicas) streams initial snapshots and every live mutation via `kv.WatchAll` with zero polling.
+
+## Try this
+
+- Watch CAS validation and zero-polling fan-out to both watcher replicas:
+  ```sh
+  bb up
+  bb logs kv-admin
+  bb logs kv-watcher -f
+  ```
+- Open `bb serve`, click `nats`, and check **Streams & stats** to see `KV_flags` tagged as a **KV** bucket with its live message count and bytes.
+
+## Break this
+
+- **Restart one watcher replica:** Stop and restart `kv-watcher-1` while `kv-admin` keeps rotating `flags.checkout`. On reconnect, `kv.WatchAll` replays the latest value for every key before streaming live changes.
+- **Simulate a concurrent writer conflict:** Run two writers updating `flags.checkout` with the same revision — only one succeeds; the second receives a revision mismatch error instead of silently overwriting.

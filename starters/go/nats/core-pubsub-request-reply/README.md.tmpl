@@ -1,0 +1,22 @@
+# Core NATS: pub/sub, queue groups, and request-reply
+
+Three Go services using the official `github.com/nats-io/nats.go` client over verified TLS (`tls://nats.bb.internal:4222`):
+
+- `nats-responder` (2 replicas) joins queue group `pricing-workers` on `pricing.quote.*`. NATS automatically load-balances each request to one replica.
+- `nats-audit` subscribes to `pricing.>` (multi-token wildcard, no queue group) and sees every quote request and broadcast event.
+- `nats-requester` calls `nc.Request("pricing.quote.<region>", ...)` every 1.5s, prints the per-replica tally, and broadcasts `pricing.events.quoted`.
+
+## Try this
+
+- Watch load-balanced request-reply across both replicas and the wildcard audit stream:
+  ```sh
+  bb up
+  bb logs nats-requester -f
+  bb logs nats-audit
+  ```
+- Open `bb serve`, click `nats`, and check **Streams & stats** to see active connections, subscriptions, and live message counters.
+
+## Break this
+
+- **Stop one responder replica:** Stop `nats-responder-1` and watch `nats-requester`'s tally immediately shift 100% of calls to `nats-responder-2` with zero dropped requests.
+- **Observe at-most-once delivery:** Stop `nats-audit` for 10 seconds, then start it again — messages published while it was stopped are gone forever because Core NATS keeps no log (contrast with `nats/jetstream-workqueue`).

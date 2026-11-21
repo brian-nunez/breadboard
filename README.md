@@ -208,6 +208,14 @@ List them with `bb starters` and apply one with `bb starter <id>`. Each one adds
 | `opensearch/postgres-cdc-sync` | CQRS read-model projection (`postgres` → `kafka` → `opensearch`) on 40 Washington State EV registrations with manual Kafka offset commits and live lag checks. |
 | `opensearch/zero-downtime-reindex` | Immutable mapping migration (`v1` → `v2`) via server-side `_reindex` and atomic `_aliases` swap while live queries run with zero errors. |
 
+**NATS & JetStream**
+
+| Starter | What you see |
+| ------- | ------------ |
+| `nats/core-pubsub-request-reply` | Core NATS wildcards (`*`, `>`), queue-group load balancing across replicas and built-in request-reply RPC. |
+| `nats/jetstream-workqueue` | JetStream `WorkQueuePolicy` stream with `Nats-Msg-Id` deduplication, Pull Consumers, `NakWithDelay` retries and delete-on-ack. |
+| `nats/jetstream-kv-watch` | JetStream Key-Value bucket with optimistic concurrency (`kv.Update` revision checks) and zero-polling `WatchAll`. |
+
 **Sidecars**
 
 | Starter | What you see |
@@ -275,6 +283,7 @@ List them with `bb starters` and apply one with `bb starter <id>`. Each one adds
 | **`s3-compatible`** | Object storage speaking the S3 API (SeaweedFS): HTTPS on 8333, generated access keys. |
 | **`otel`** | OpenTelemetry Collector + Grafana LGTM (Loki, Prometheus, Tempo): OTLP TLS on 4317/4318, Grafana HTTPS on 3000; selective `config.signals`. |
 | **`opensearch`** | Distributed search and analytics engine (single-node OpenSearch 3.10): HTTPS on 9200, loopback transport, generated admin password, optional `config.indices`. |
+| **`nats`** | Lightweight messaging and JetStream persistence (`nats:2.15.3-alpine3.22`): TLS on 4222, token auth, loopback monitoring, configurable `config.jetstream`. |
 | **`haproxy`** | HAProxy load balancer and reverse proxy: TLS on 8443. |
 | **`envoy`** | Envoy proxy and load balancer: TLS on 8443, active health checks. |
 | **`traefik`** | Traefik router and load balancer from a file provider: TLS on 8443. |

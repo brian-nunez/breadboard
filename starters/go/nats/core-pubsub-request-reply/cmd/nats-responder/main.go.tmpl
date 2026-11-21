@@ -1,0 +1,80 @@
+// Command nats-responder runs in a NATS queue group ("pricing-workers")
+// answering request-reply quotes on pricing.quote.*. NATS load-balances
+// across every replica in the queue group with zero broker configuration.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"github.com/nats-io/nats.go"
+)
+
+type quoteRequest struct {
+	SKU string `json:"sku"`
+}
+
+type quoteReply struct {
+	SKU        string `json:"sku"`
+	Region     string `json:"region"`
+	PriceCents int    `json:"price_cents"`
+	Responder  string `json:"responder"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	instance := os.Getenv("BB_SERVICE")
+	if instance == "" {
+		instance = "nats-responder"
+	}
+
+	nc, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.Name(instance))
+	if err != nil {
+		log.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Close()
+
+	// All replicas share queue group "pricing-workers", so each request is
+	// answered by exactly one replica.
+	sub, err := nc.QueueSubscribe("pricing.quote.*", "pricing-workers", func(m *nats.Msg) {
+		var req quoteRequest
+		_ = json.Unmarshal(m.Data, &req)
+
+		parts := strings.Split(m.Subject, ".")
+		region := parts[len(parts)-1]
+		price := 1999
+		if region == "eu" {
+			price = 2199
+		}
+
+		body, _ := json.Marshal(quoteReply{
+			SKU:        req.SKU,
+			Region:     region,
+			PriceCents: price,
+			Responder:  instance,
+		})
+		if err := m.Respond(body); err != nil {
+			log.Printf("%s respond error: %v", instance, err)
+			return
+		}
+		log.Printf("%s handled subject=%s sku=%s price=%d", instance, m.Subject, req.SKU, price)
+	})
+	if err != nil {
+		log.Fatalf("queue subscribe: %v", err)
+	}
+	defer func() { _ = sub.Drain() }()
+
+	if err := nc.Flush(); err != nil {
+		log.Fatalf("nats flush: %v", err)
+	}
+	log.Printf("%s listening on pricing.quote.* in queue group pricing-workers", instance)
+
+	<-ctx.Done()
+}

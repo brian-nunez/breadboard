@@ -1,0 +1,21 @@
+# NATS JetStream: durable work queue with Pull Consumers
+
+A durable `WorkQueuePolicy` stream (`JOBS`) and a shared Pull Consumer (`job-workers`) across two worker replicas using `github.com/nats-io/nats.go/jetstream`:
+
+- `js-producer` publishes jobs on `jobs.<kind>` with `Nats-Msg-Id` deduplication headers, intentionally resending every 6th ID so you can see JetStream return `duplicate=true`.
+- `js-worker` (2 replicas) pulls batches from `job-workers` (`AckExplicit`, `MaxDeliver: 3`, `AckWait: 5s`), calls `msg.NakWithDelay(500ms)` on delivery 1 of every 5th job, and `msg.Ack()`s finished jobs (which immediately deletes them from the WorkQueue stream).
+
+## Try this
+
+- Watch deduplication, retries, and balanced work distribution:
+  ```sh
+  bb up
+  bb logs js-producer
+  bb logs js-worker -f
+  ```
+- Open `bb serve`, click `nats`, and check **Streams & stats** to watch stream `JOBS` and consumer `job-workers` (`pending`, `ack`, `delivered`).
+
+## Break this
+
+- **Stop both workers while the producer keeps publishing:** Stop `js-worker-1` and `js-worker-2`, watch `JOBS` messages and `pending` grow in **Streams & stats**, then start the workers again — every queued job drains cleanly without loss.
+- **Exceed `MaxDeliver`:** Edit `cmd/js-worker/main.go` to `NakWithDelay` unconditionally on a job and watch JetStream stop redelivering after attempt 3.

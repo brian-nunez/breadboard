@@ -1,0 +1,27 @@
+# otel/multi-service
+
+Full-stack observability—**correlated logs, metrics, and traces**—across four Go services, Postgres, and Kafka, exporting to Breadboard's `otel` (LGTM) service (`signals: logs,metrics,traces`).
+
+- `cmd/otel-obs-client`: drives checkouts every 2 seconds over HTTPS with `otelhttp`, creating the root trace and logging each outcome via `otelslog`.
+- `cmd/otel-obs-api`: HTTPS gateway (`otelhttp`) recording RED metrics (`api_orders_total`, `api_order_duration_seconds`) and forwarding to `otel-obs-orders`.
+- `cmd/otel-obs-orders` (2 replicas): persists each order to **Postgres** inside a custom `db.insert_order` span, records DB latency histograms, and publishes a JSON event to **Kafka** (`obs-orders`) with W3C `traceparent` injected into the Kafka record headers.
+- `cmd/otel-obs-worker`: consumes `obs-orders` from **Kafka**, extracts `traceparent` from the Kafka record headers so the async fulfillment span joins the exact same trace, updates the row in **Postgres**, records fulfillment metrics, and logs via `otelslog` with automatic `trace_id` / `span_id` correlation.
+
+Open Grafana at the host URL `bb status` prints (credentials in `bb creds otel`) or inspect live telemetry in `bb serve` under **otel → Telemetry**.
+
+```sh
+bb up
+bb status
+bb logs otel-obs-client -f
+```
+
+## Try this
+
+- **Trace HTTP + Postgres + async Kafka in one waterfall.** Open Grafana → Explore → Tempo and click any `POST /checkout` trace: it spans `otel-obs-client` → `otel-obs-api` → `otel-obs-orders` (including `db.insert_order` and `kafka.produce`) → `otel-obs-worker` (`kafka.consume` and `db.fulfill_order`).
+- **Jump from traces to logs.** Click **Logs for this span** in Tempo (or search Loki by `trace_id`) to see the exact `otelslog` lines emitted by every service for that single order.
+- **Correlate metrics with failures.** Every 6th order triggers a simulated payment failure in `otel-obs-worker`; watch `fulfillment_total{status="failed"}` climb in Prometheus, then open the failing trace and its correlated `ERROR` log line.
+
+## Break this
+
+- **Drop Kafka header propagation.** Remove `otel.GetTextMapPropagator().Inject(...)` in `cmd/otel-obs-orders/main.go` and run `bb up`. The worker still processes orders, but its spans detach from the checkout trace in Tempo.
+- **Pause the worker.** Run `docker stop bb-<experiment>-otel-obs-worker-1` for 10 seconds, then `bb up`. Watch consumer lag appear in Kafka and observe how the trace waterfall shows the exact queue delay between `kafka.produce` and `kafka.consume`.

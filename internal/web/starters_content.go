@@ -133,6 +133,19 @@ var starterContents = map[string]starterContent{
 		Covers: []string{"log/slog with otelslog", "Structured log attributes", "Severity filtering in Loki", "Cross-service request correlation"},
 		Guide:  "/docs/otel/logs",
 	},
+	"otel/multi-service": {
+		Area:  "otel",
+		About: "All three observability signals working together across four Go services, Postgres, and Kafka. A single checkout trace flows over HTTPS into Postgres, crosses Kafka via traceparent record headers into an async worker, and automatically correlates every otelslog log line and RED metric.",
+		Steps: []step{
+			{"HTTP + Postgres + async Kafka in one trace", "otel-obs-orders injects W3C traceparent into Kafka headers and otel-obs-worker extracts it, joining async fulfillment to the checkout trace."},
+			{"Automatic trace_id in otelslog logs", "Passing the span context to logger.InfoContext and ErrorContext attaches trace_id and span_id so Tempo jumps straight to Loki logs."},
+			{"RED metrics across services and replicas", "Counters and histograms measure API, DB, and worker outcomes; every 6th order fails settlement so you can follow a metric spike to its trace and ERROR log."},
+			{"Full LGTM enabled with host access", "config.signals: logs,metrics,traces starts Loki, Prometheus, Tempo, and Grafana with cross-datasource correlation pre-wired."},
+		},
+		KeyFile: "cmd/otel-obs-orders/main.go", KeyTitle: "Injecting trace context into Kafka headers",
+		Covers: []string{"Correlated logs, metrics, and traces", "Async Kafka trace propagation", "Database span instrumentation", "Full LGTM stack in Grafana"},
+		Guide:  "/docs/otel/correlation",
+	},
 	"sidecar/envoy-ambassador": {
 		Area:  "sidecars",
 		About: "A caller talks plain HTTP to 127.0.0.1 and its Envoy sidecar does the rest: picks one of three backend replicas, speaks verified TLS to it, applies a timeout and retries a failed attempt elsewhere. The backend has no TLS code either; its own sidecar terminates TLS. The caller's log tallies which replica answered.",

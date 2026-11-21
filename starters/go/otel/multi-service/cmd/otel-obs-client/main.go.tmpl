@@ -1,0 +1,154 @@
+// Command otel-obs-client drives checkouts over HTTPS against otel-obs-api,
+// exporting correlated traces, metrics, and otelslog logs over OTLP gRPC TLS.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	otellogglobal "go.opentelemetry.io/otel/log/global"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger, shutdown := initOtel(ctx, "otel-obs-client", "otel-obs-client")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	apiURL := fmt.Sprintf("https://otel-obs-api.%s:8443/checkout", labDomain())
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   5 * time.Second,
+	}
+	tracer := otel.Tracer("otel-obs-client")
+	meter := otel.Meter("otel-obs-client")
+	reqs, err := meter.Int64Counter("client_checkouts", metric.WithUnit("{checkout}"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	customers := []string{"alice", "bob", "carol"}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for n := 1; ; n++ {
+		customer := customers[n%len(customers)]
+		fail := n%6 == 0
+		orderID := fmt.Sprintf("ord-%d", n)
+		reqURL := fmt.Sprintf("%s?order=%s&customer=%s&fail=%t", apiURL, orderID, customer, fail)
+
+		reqCtx, span := tracer.Start(ctx, "checkout",
+			trace.WithAttributes(attribute.String("order.id", orderID), attribute.String("customer", customer)),
+		)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, reqURL, nil)
+		if err == nil {
+			resp, err := client.Do(req)
+			status := "ok"
+			if err != nil {
+				status = "error"
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				logger.ErrorContext(reqCtx, "checkout failed", "order_id", orderID, "err", err.Error())
+				log.Printf("order=%s trace_id=%s err=%v", orderID, span.SpanContext().TraceID(), err)
+			} else {
+				body, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				if resp.StatusCode >= 400 {
+					status = "error"
+					span.SetStatus(codes.Error, resp.Status)
+					logger.WarnContext(reqCtx, "checkout rejected", "order_id", orderID, "status", resp.StatusCode)
+				} else {
+					logger.InfoContext(reqCtx, "checkout accepted", "order_id", orderID, "customer", customer)
+				}
+				log.Printf("order=%s trace_id=%s status=%d body=%s",
+					orderID, span.SpanContext().TraceID(), resp.StatusCode, strings.TrimSpace(string(body)))
+			}
+			reqs.Add(reqCtx, 1, metric.WithAttributes(attribute.String("status", status)))
+		}
+		span.End()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func initOtel(ctx context.Context, service, instance string) (*slog.Logger, func(context.Context) error) {
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(service), semconv.ServiceInstanceID(instance)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+
+	traceExp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(endpoint))
+	if err != nil {
+		log.Fatalf("otel trace exporter: %v", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(traceExp), sdktrace.WithResource(res))
+	otel.SetTracerProvider(tp)
+
+	metricExp, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithEndpointURL(endpoint))
+	if err != nil {
+		log.Fatalf("otel metric exporter: %v", err)
+	}
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(3*time.Second))),
+		sdkmetric.WithResource(res),
+	)
+	otel.SetMeterProvider(mp)
+
+	logExp, err := otlploggrpc.New(ctx, otlploggrpc.WithEndpointURL(endpoint))
+	if err != nil {
+		log.Fatalf("otel log exporter: %v", err)
+	}
+	lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)), sdklog.WithResource(res))
+	otellogglobal.SetLoggerProvider(lp)
+
+	return otelslog.NewLogger(service), func(c context.Context) error {
+		return errors.Join(tp.Shutdown(c), mp.Shutdown(c), lp.Shutdown(c))
+	}
+}
+
+func labDomain() string {
+	if _, d, ok := strings.Cut(os.Getenv("BB_FQDN"), "."); ok && d != "" {
+		return d
+	}
+	return "{{.Domain}}"
+}

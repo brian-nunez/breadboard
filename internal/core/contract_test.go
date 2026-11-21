@@ -21,7 +21,7 @@ func TestCoreContractCatalogAndEnv(t *testing.T) {
 
 	wantTypes := []string{
 		"consul", "envoy", "haproxy", "kafka", "nginx",
-		"otel", "pgbouncer", "postgres", "redis", "s3-compatible", "traefik",
+		"opensearch", "otel", "pgbouncer", "postgres", "redis", "s3-compatible", "traefik",
 	}
 
 	gotTypes := make([]string, len(cat.Entries))

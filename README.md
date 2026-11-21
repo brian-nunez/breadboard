@@ -198,6 +198,7 @@ List them with `bb starters` and apply one with `bb starter <id>`. Each one adds
 | `otel/traces` | Multi-service W3C `traceparent` propagation over HTTPS (`otelhttp`), custom spans and errors in Tempo (`signals: traces`). |
 | `otel/metrics` | Counters, UpDownCounters, explicit-bucket Histograms, `otelhttp` and Go runtime metrics across replicas in Prometheus (`signals: metrics`). |
 | `otel/logs` | Multi-service `log/slog` structured logs bridged via `otelslog` to Loki (`signals: logs`). |
+| `otel/multi-service` | Correlated logs, metrics and traces across four Go services, Postgres and Kafka (with trace propagation in Kafka headers) in full LGTM. |
 
 **Sidecars**
 

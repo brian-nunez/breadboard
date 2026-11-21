@@ -37,7 +37,7 @@ func init() {
 			{"otelslog log bridge", "https://pkg.go.dev/go.opentelemetry.io/contrib/bridges/otelslog"},
 			{"Grafana docker-otel-lgtm", "https://github.com/grafana/docker-otel-lgtm"},
 		},
-		Starters: []string{"otel/traces", "otel/metrics", "otel/logs"},
+		Starters: []string{"otel/traces", "otel/metrics", "otel/logs", "otel/multi-service"},
 		Guides: []guide{
 			{
 				Slug: "traces", Title: "Traces and context propagation", Summary: "W3C traceparent across HTTP hops, child spans, and error recording.",
@@ -59,6 +59,7 @@ func init() {
 			},
 			{
 				Slug: "correlation", Title: "Correlating all three signals", Summary: "Joining HTTP, Postgres, and async Kafka hops into one trace with linked logs and metrics.",
+				Starter:  "otel/multi-service",
 				Sections: []docSection{{"async", "Propagating context over Kafka headers"}, {"log-link", "Automatic trace_id in otelslog"}, {"workflow", "Debugging from metric to trace to log"}},
 				Body:     otelCorrelationGuide(),
 			},

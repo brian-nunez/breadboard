@@ -222,6 +222,23 @@ var all = []Starter{
 		},
 	},
 	{
+		ID:             "otel/multi-service",
+		Title:          "OpenTelemetry multi-service observability",
+		Summary:        "Correlated logs, metrics, and traces across four Go services, Postgres, and Kafka (with W3C trace propagation in Kafka headers) into LGTM.",
+		Language:       "go",
+		Template:       "go/otel/multi-service",
+		Dir:            "otel-multi-service",
+		Requires:       []string{"otel", "postgres", "kafka"},
+		RequiresConfig: map[string]map[string]string{"otel": {"signals": "logs,metrics,traces"}},
+		RequiresHost:   []string{"otel"},
+		Apps: []App{
+			{Name: "otel-obs-orders", Command: []string{"otel-obs-orders"}, Uses: []string{"otel", "postgres", "kafka"}, Replicas: 2},
+			{Name: "otel-obs-worker", Command: []string{"otel-obs-worker"}, Uses: []string{"otel", "postgres", "kafka"}},
+			{Name: "otel-obs-api", Command: []string{"otel-obs-api"}, Uses: []string{"otel"}},
+			{Name: "otel-obs-client", Command: []string{"otel-obs-client"}, Uses: []string{"otel"}},
+		},
+	},
+	{
 		ID:       "sidecar/envoy-ambassador",
 		Title:    "Envoy ambassador",
 		Summary:  "An Envoy sidecar balances calls across three replicas over TLS, with retries and timeouts in config, not code.",

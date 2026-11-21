@@ -1,0 +1,217 @@
+// Command otel-obs-worker consumes order events from Kafka, extracts the W3C
+// traceparent from Kafka headers to continue the upstream trace, updates Postgres,
+// and records correlated metrics and otelslog logs.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"log"
+	"log/slog"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	otellogglobal "go.opentelemetry.io/otel/log/global"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+const topic = "obs-orders"
+
+type orderEvent struct {
+	OrderID  string `json:"order_id"`
+	Customer string `json:"customer"`
+	Fail     bool   `json:"fail"`
+}
+
+type kafkaHeaders []kgo.RecordHeader
+
+func (h *kafkaHeaders) Get(key string) string {
+	for _, kv := range *h {
+		if kv.Key == key {
+			return string(kv.Value)
+		}
+	}
+	return ""
+}
+
+func (h *kafkaHeaders) Set(key, val string) {
+	*h = append(*h, kgo.RecordHeader{Key: key, Value: []byte(val)})
+}
+
+func (h *kafkaHeaders) Keys() []string {
+	keys := make([]string, len(*h))
+	for i, kv := range *h {
+		keys[i] = kv.Key
+	}
+	return keys
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger, shutdown := initOtel(ctx, "otel-obs-worker", "otel-obs-worker")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatalf("postgres: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS obs_orders (
+			id TEXT PRIMARY KEY,
+			customer TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`); err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
+
+	kafkaClient, err := kgo.NewClient(
+		kgo.SeedBrokers(strings.Split(os.Getenv("KAFKA_BROKERS"), ",")...),
+		kgo.DialTLSConfig(new(tls.Config)),
+		kgo.ConsumerGroup("obs-fulfillment"),
+		kgo.ConsumeTopics(topic),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+	)
+	if err != nil {
+		log.Fatalf("kafka: %v", err)
+	}
+	defer kafkaClient.Close()
+
+	_, _ = kadm.NewClient(kafkaClient).CreateTopic(ctx, 3, 1, nil, topic)
+
+	tracer := otel.Tracer("otel-obs-worker")
+	meter := otel.Meter("otel-obs-worker")
+	fulfilled, err := meter.Int64Counter("fulfillment", metric.WithUnit("{order}"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("otel-obs-worker consuming obs-orders")
+
+	for {
+		fetches := kafkaClient.PollFetches(ctx)
+		if fetches.IsClientClosed() || ctx.Err() != nil {
+			return
+		}
+		fetches.EachRecord(func(r *kgo.Record) {
+			headers := kafkaHeaders(r.Headers)
+			parentCtx := otel.GetTextMapPropagator().Extract(ctx, &headers)
+
+			spanCtx, span := tracer.Start(parentCtx, "kafka.consume",
+				trace.WithSpanKind(trace.SpanKindConsumer),
+				trace.WithAttributes(
+					attribute.String("messaging.system", "kafka"),
+					attribute.String("messaging.destination.name", r.Topic),
+					attribute.Int64("messaging.kafka.offset", r.Offset),
+				),
+			)
+			defer span.End()
+
+			var ev orderEvent
+			if err := json.Unmarshal(r.Value, &ev); err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				return
+			}
+			span.SetAttributes(attribute.String("order.id", ev.OrderID), attribute.String("customer", ev.Customer))
+
+			time.Sleep(30 * time.Millisecond)
+
+			status := "fulfilled"
+			if ev.Fail {
+				status = "failed"
+				err := errors.New("payment settlement failed")
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				logger.ErrorContext(spanCtx, "fulfillment failed", "order_id", ev.OrderID, "customer", ev.Customer)
+			}
+
+			dbCtx, dbSpan := tracer.Start(spanCtx, "db.fulfill_order",
+				trace.WithSpanKind(trace.SpanKindClient),
+				trace.WithAttributes(attribute.String("db.system", "postgresql"), attribute.String("order.status", status)),
+			)
+			_, dbErr := db.Exec(dbCtx, `UPDATE obs_orders SET status = $1 WHERE id = $2`, status, ev.OrderID)
+			if dbErr != nil {
+				dbSpan.RecordError(dbErr)
+				dbSpan.SetStatus(codes.Error, dbErr.Error())
+			}
+			dbSpan.End()
+
+			fulfilled.Add(spanCtx, 1, metric.WithAttributes(attribute.String("status", status)))
+			if !ev.Fail {
+				logger.InfoContext(spanCtx, "order fulfilled", "order_id", ev.OrderID, "customer", ev.Customer)
+			}
+			log.Printf("order=%s status=%s trace_id=%s", ev.OrderID, status, span.SpanContext().TraceID())
+		})
+	}
+}
+
+func initOtel(ctx context.Context, service, instance string) (*slog.Logger, func(context.Context) error) {
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(service), semconv.ServiceInstanceID(instance)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+
+	traceExp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(endpoint))
+	if err != nil {
+		log.Fatalf("otel trace exporter: %v", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(traceExp), sdktrace.WithResource(res))
+	otel.SetTracerProvider(tp)
+
+	metricExp, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithEndpointURL(endpoint))
+	if err != nil {
+		log.Fatalf("otel metric exporter: %v", err)
+	}
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(3*time.Second))),
+		sdkmetric.WithResource(res),
+	)
+	otel.SetMeterProvider(mp)
+
+	logExp, err := otlploggrpc.New(ctx, otlploggrpc.WithEndpointURL(endpoint))
+	if err != nil {
+		log.Fatalf("otel log exporter: %v", err)
+	}
+	lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)), sdklog.WithResource(res))
+	otellogglobal.SetLoggerProvider(lp)
+
+	return otelslog.NewLogger(service), func(c context.Context) error {
+		return errors.Join(tp.Shutdown(c), mp.Shutdown(c), lp.Shutdown(c))
+	}
+}

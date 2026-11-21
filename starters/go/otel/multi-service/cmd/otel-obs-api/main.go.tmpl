@@ -1,0 +1,173 @@
+// Command otel-obs-api is the HTTPS API entry point: it records RED metrics,
+// emits trace-correlated logs via otelslog, and calls otel-obs-orders.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	otellogglobal "go.opentelemetry.io/otel/log/global"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger, shutdown := initOtel(ctx, "otel-obs-api", "otel-obs-api")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	meter := otel.Meter("otel-obs-api")
+	ordersTotal, err := meter.Int64Counter("api_orders", metric.WithUnit("{order}"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	orderDuration, err := meter.Float64Histogram("api_order_duration_seconds",
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1.0),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ordersURL := fmt.Sprintf("https://otel-obs-orders.%s:8443/orders", labDomain())
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   5 * time.Second,
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/checkout", func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		orderID := r.URL.Query().Get("order")
+		customer := r.URL.Query().Get("customer")
+
+		logger.InfoContext(r.Context(), "forwarding checkout to orders service",
+			"order_id", orderID, "customer", customer)
+
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, ordersURL+"?"+r.URL.RawQuery, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			trace.SpanFromContext(r.Context()).RecordError(err)
+			trace.SpanFromContext(r.Context()).SetStatus(codes.Error, err.Error())
+			logger.ErrorContext(r.Context(), "orders service unreachable", "order_id", orderID, "err", err.Error())
+			ordersTotal.Add(r.Context(), 1, metric.WithAttributes(attribute.String("status", "error")))
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(resp.Body)
+		status := "ok"
+		if resp.StatusCode >= 400 {
+			status = "error"
+			trace.SpanFromContext(r.Context()).SetStatus(codes.Error, resp.Status)
+			logger.WarnContext(r.Context(), "orders service returned error", "order_id", orderID, "status", resp.StatusCode)
+		}
+
+		attrs := metric.WithAttributes(attribute.String("status", status))
+		ordersTotal.Add(r.Context(), 1, attrs)
+		orderDuration.Record(r.Context(), time.Since(start).Seconds(), attrs)
+
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(body)
+	})
+
+	srv := &http.Server{
+		Addr:              ":8443",
+		Handler:           otelhttp.NewHandler(mux, "obs-api"),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(c)
+	}()
+
+	log.Printf("otel-obs-api listening on :8443 (forwarding to %s)", ordersURL)
+	if err := srv.ListenAndServeTLS(os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE")); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}
+
+func initOtel(ctx context.Context, service, instance string) (*slog.Logger, func(context.Context) error) {
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(service), semconv.ServiceInstanceID(instance)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+
+	traceExp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(endpoint))
+	if err != nil {
+		log.Fatalf("otel trace exporter: %v", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(traceExp), sdktrace.WithResource(res))
+	otel.SetTracerProvider(tp)
+
+	metricExp, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithEndpointURL(endpoint))
+	if err != nil {
+		log.Fatalf("otel metric exporter: %v", err)
+	}
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(3*time.Second))),
+		sdkmetric.WithResource(res),
+	)
+	otel.SetMeterProvider(mp)
+
+	logExp, err := otlploggrpc.New(ctx, otlploggrpc.WithEndpointURL(endpoint))
+	if err != nil {
+		log.Fatalf("otel log exporter: %v", err)
+	}
+	lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)), sdklog.WithResource(res))
+	otellogglobal.SetLoggerProvider(lp)
+
+	return otelslog.NewLogger(service), func(c context.Context) error {
+		return errors.Join(tp.Shutdown(c), mp.Shutdown(c), lp.Shutdown(c))
+	}
+}
+
+func labDomain() string {
+	if _, d, ok := strings.Cut(os.Getenv("BB_FQDN"), "."); ok && d != "" {
+		return d
+	}
+	return "{{.Domain}}"
+}

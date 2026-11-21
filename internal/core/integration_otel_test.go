@@ -279,3 +279,53 @@ func TestIntegrationStarterOtelLogs(t *testing.T) {
 		return len(tel.Logs) > 0, nil
 	})
 }
+
+func TestIntegrationStarterOtelMultiService(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := labName(t, "otelall")
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+
+		assertGone(t, name)
+	})
+
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.ApplyStarter(ctx, ApplyStarterRequest{Dir: dir, ID: "otel/multi-service"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatalf("up failed: %v", err)
+	}
+
+	wantServices := []string{"otel-obs-client", "otel-obs-api", "otel-obs-orders", "otel-obs-worker"}
+
+	pollUntil(t, 60*time.Second, "correlated traces, metrics, and logs across all 4 services", func() (bool, error) {
+		tel, err := eng.OtelTelemetry(ctx, ExploreRequest{Dir: dir, Service: "otel"})
+		if err != nil {
+			return false, err
+		}
+
+		for _, s := range wantServices {
+			if !slices.Contains(tel.TraceServices, s) {
+				return false, fmt.Errorf("missing trace service %s in %v", s, tel.TraceServices)
+			}
+
+			if !slices.Contains(tel.LogServices, s) {
+				return false, fmt.Errorf("missing log service %s in %v", s, tel.LogServices)
+			}
+		}
+
+		hasCorrelatedLog := slices.ContainsFunc(tel.Logs, func(l OtelLog) bool { return l.TraceID != "" })
+		if !hasCorrelatedLog || len(tel.Metrics) == 0 || len(tel.Traces) == 0 {
+			return false, fmt.Errorf("traces=%d metrics=%d logs=%d correlated=%v", len(tel.Traces), len(tel.Metrics), len(tel.Logs), hasCorrelatedLog)
+		}
+
+		return true, nil
+	})
+}

@@ -224,3 +224,4 @@ Each catalog type maps to one client package in `starters.sdkImports` (a test fa
 | `otel/traces` | 5+ | Multi-service W3C `traceparent` propagation over HTTPS with `otelhttp`, custom child spans, error recording, and Tempo (`signals: traces`, `host: true`). |
 | `otel/metrics` | 5+ | Counters, UpDownCounters, explicit-bucket Histograms, `otelhttp`, and Go runtime metrics across replicas into Prometheus (`signals: metrics`, `host: true`). |
 | `otel/logs` | 5+ | Multi-service `log/slog` structured logging bridged via `otelslog` to Loki (`signals: logs`, `host: true`). |
+| `otel/multi-service` | 5+ | Correlated logs, metrics, and traces across four Go services, Postgres, and Kafka (with W3C trace propagation in Kafka headers) into full LGTM (`signals: logs,metrics,traces`, `host: true`). |

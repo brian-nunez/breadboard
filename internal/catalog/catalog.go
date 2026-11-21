@@ -227,7 +227,7 @@ func notes(id string) string {
 	return string(data)
 }
 
-var entries = []*Entry{kafka(), postgres(), redis(), consul(), s3Compatible(), haproxy(), envoy(), traefik(), nginx(), pgbouncer()}
+var entries = []*Entry{kafka(), postgres(), redis(), consul(), s3Compatible(), otel(), haproxy(), envoy(), traefik(), nginx(), pgbouncer()}
 
 // All returns every entry, in display order.
 func All() []*Entry { return slices.Clone(entries) }

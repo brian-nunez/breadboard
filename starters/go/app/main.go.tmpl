@@ -35,8 +35,14 @@ import (
 {{- if .NeedKafka}}
 	"crypto/tls"
 {{- end}}
+{{- if .NeedOtel}}
+	"errors"
+{{- end}}
 	"fmt"
 	"log"
+{{- if .NeedOtel}}
+	"log/slog"
+{{- end}}
 {{- if .NeedHTTP}}
 	"net/http"
 {{- end}}
@@ -44,10 +50,10 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-{{- if .NeedHTTP}}
+{{- if or .NeedHTTP .NeedOtel}}
 	"time"
 {{- end}}
-{{- if or .NeedPostgres .NeedRedis .NeedKafka .NeedS3 .NeedConsul}}
+{{- if or .NeedPostgres .NeedRedis .NeedKafka .NeedS3 .NeedConsul .NeedOtel}}
 
 {{- if .NeedS3}}
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -67,6 +73,20 @@ import (
 {{- if .NeedKafka}}
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+{{- end}}
+{{- if .NeedOtel}}
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	otellogglobal "go.opentelemetry.io/otel/log/global"
+	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 {{- end}}
 {{- end}}
 )
@@ -115,6 +135,14 @@ func main() {
 
 	{{.Var}} := newConsul("{{index .Env "addr"}}", "{{index .Env "ca"}}")
 	_ = {{.Var}}
+{{- else if eq .Kind "otel"}}
+
+	{{.Var}} := newOtel(ctx, "{{index .Env "endpoint"}}", "{{index .Env "traces"}}", "{{index .Env "metrics"}}", "{{index .Env "logs"}}")
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = {{.Var}}(shutdownCtx)
+	}()
 {{- else if eq .Kind "http"}}
 
 	{{.Var}} := os.Getenv("{{index .Env "url"}}")
@@ -260,6 +288,88 @@ func newConsul(addrEnv, caEnv string) *consulapi.Client {
 		log.Fatalf("consul (%s) check: %v", addrEnv, err)
 	}
 	return client
+}
+{{- end}}
+{{- if .NeedOtel}}
+
+func newOtel(ctx context.Context, endpointEnv, tracesEnv, metricsEnv, logsEnv string) func(context.Context) error {
+	endpoint := os.Getenv(endpointEnv)
+	svcName := os.Getenv("BB_SERVICE")
+	if svcName == "" {
+		svcName = "{{.Name}}"
+	}
+
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(
+			semconv.ServiceName(svcName),
+			semconv.ServiceInstanceID(svcName),
+		),
+	)
+	if err != nil {
+		log.Fatalf("otel (%s) resource: %v", endpointEnv, err)
+	}
+
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	var shutdowns []func(context.Context) error
+
+	if os.Getenv(tracesEnv) == "otlp" {
+		exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(endpoint))
+		if err != nil {
+			log.Fatalf("otel traces (%s): %v", endpointEnv, err)
+		}
+		tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
+		otel.SetTracerProvider(tp)
+		_, span := tp.Tracer(svcName).Start(ctx, "startup")
+		span.End()
+		if err := tp.ForceFlush(ctx); err != nil {
+			log.Fatalf("otel traces (%s) flush: %v", endpointEnv, err)
+		}
+		shutdowns = append(shutdowns, tp.Shutdown)
+	}
+
+	if os.Getenv(metricsEnv) == "otlp" {
+		exp, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithEndpointURL(endpoint))
+		if err != nil {
+			log.Fatalf("otel metrics (%s): %v", endpointEnv, err)
+		}
+		mp := sdkmetric.NewMeterProvider(
+			sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exp, sdkmetric.WithInterval(5*time.Second))),
+			sdkmetric.WithResource(res),
+		)
+		otel.SetMeterProvider(mp)
+		if err := mp.ForceFlush(ctx); err != nil {
+			log.Fatalf("otel metrics (%s) flush: %v", endpointEnv, err)
+		}
+		shutdowns = append(shutdowns, mp.Shutdown)
+	}
+
+	if os.Getenv(logsEnv) == "otlp" {
+		exp, err := otlploggrpc.New(ctx, otlploggrpc.WithEndpointURL(endpoint))
+		if err != nil {
+			log.Fatalf("otel logs (%s): %v", endpointEnv, err)
+		}
+		lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(exp)), sdklog.WithResource(res))
+		otellogglobal.SetLoggerProvider(lp)
+		slog.SetDefault(otelslog.NewLogger(svcName))
+		slog.InfoContext(ctx, "connected to OpenTelemetry collector", "service", svcName)
+		if err := lp.ForceFlush(ctx); err != nil {
+			log.Fatalf("otel logs (%s) flush: %v", endpointEnv, err)
+		}
+		shutdowns = append(shutdowns, lp.Shutdown)
+	}
+
+	return func(c context.Context) error {
+		var errs []error
+		for _, fn := range shutdowns {
+			errs = append(errs, fn(c))
+		}
+		return errors.Join(errs...)
+	}
 }
 {{- end}}
 {{- if .NeedHTTP}}

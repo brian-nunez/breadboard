@@ -503,6 +503,25 @@ func (e *Engine) applyStarter(ctx context.Context, st starters.Starter, render r
 	for _, typ := range st.Requires {
 		if existingName := typeService(typ); existingName != "" {
 			idx := slices.IndexFunc(have, func(s spec.Service) bool { return s.Name == existingName })
+			if typ == "otel" && st.RequiresConfig[typ]["signals"] != "" && idx >= 0 {
+				// Empty signals means the default (logs,metrics,traces), which already covers everything.
+				if cur := have[idx].Config["signals"]; cur != "" {
+					merged := catalog.MergeOtelSignals(cur, st.RequiresConfig[typ]["signals"])
+					if merged != cur {
+						if err := doc.SetServiceConfig(existingName, map[string]string{"signals": merged}); err != nil {
+							return nil, err
+						}
+
+						if have[idx].Config == nil {
+							have[idx].Config = map[string]string{}
+						}
+
+						have[idx].Config["signals"] = merged
+						specChanged = true
+					}
+				}
+			}
+
 			if slices.Contains(st.RequiresHost, typ) && idx >= 0 && have[idx].Host == nil {
 				h := &spec.Host{}
 				if err := doc.SetServiceHost(existingName, *h); err != nil {

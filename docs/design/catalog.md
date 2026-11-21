@@ -34,6 +34,7 @@ Hostnames below use the default domain and a service named after its type. Image
 | `redis` | `redis:8.10.3-alpine3.23` | 256m, 0.25 cpu | none in v1 |
 | `consul` | `hashicorp/consul:1.22.7` | 256m, 0.5 cpu | 8500, bound to the segment address |
 | `s3-compatible` (Phase 2) | `chrislusf/seaweedfs:4.53` | 512m, 0.5 cpu | none |
+| `otel` | `grafana/otel-lgtm:0.41.1` | 1g, 1.0 cpu | none |
 
 Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/etc/bb/tls/tls.key`, both together at `/etc/bb/tls/keystore.pem`, the CA at `/etc/bb/ca.pem`, the trust bundle at `/etc/bb/trust-bundle.pem`, and entry configuration under `/etc/bb/config/`.
 
@@ -96,6 +97,19 @@ Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/et
 - Env contract (generic names first, plus the variables official AWS SDKs read, so S3 clients work with zero code config):
   - `S3_ENDPOINT=https://s3-compatible.bb.internal:8333`, `S3_REGION=us-east-1`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE=true`
   - `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+
+### `otel`
+
+- Displayed as **OpenTelemetry (LGTM)**: OpenTelemetry Collector bundled with Grafana, Loki (logs), Prometheus (metrics), and Tempo (traces) in one container (`grafana/otel-lgtm:0.41.1`, ADR-0018). Data lives under `/data`.
+- **Selective signals (`config.signals`).** Comma-separated subset of `logs`, `metrics`, `traces` (default `logs,metrics,traces`). Breadboard generates `/etc/bb/config/otelcol-config.yaml` with only the enabled pipelines, `/etc/bb/config/start.sh` starting only the enabled backends (Pyroscope is never started), and Grafana provisioned datasources matching those signals (with Tempo ↔ Loki and Prometheus correlation wired when both sides are enabled).
+- **Network listeners (TLS only).** `otlp-grpc` on `4317` (first listener, so `uses: [otel]` connects here over TLS), `grafana` (`https`) on `3000` (first HTTPS listener, so `host: true` routes `https://<name>.<experiment>.localhost:<port>` to Grafana), and `otlp-http` on `4318`. All three use the service's lab certificate (`/etc/bb/tls/tls.crt`, `/etc/bb/tls/tls.key`).
+- **Loopback-only storage APIs.** Loki (`3100`/`9095`), Tempo (`3200`/`9096`/`4418`), Prometheus (`9090`), and the collector health check (`13133`) bind strictly to `127.0.0.1` inside the container.
+- **Grafana auth & offline startup.** Generates `grafana-password` in `.bb/secrets.json` (`GF_AUTH_ANONYMOUS_ENABLED=false`, user `admin`) and disables update checks/plugin downloads so startup stays deterministic.
+- **Health check.** `curl --cacert /etc/bb/ca.pem` verifying Grafana HTTPS (`:3000/api/health`) and OTLP HTTP TLS (`:4318/v1/traces`), plus loopback ready checks for the collector (`13133/ready`) and every enabled backend (`3100`, `9090`, `3200`).
+- **Env contract** (standard OpenTelemetry spec names, so official SDKs connect over TLS via `SSL_CERT_FILE` / `OTEL_EXPORTER_OTLP_CERTIFICATE`):
+  - `OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.bb.internal:4317`, `OTEL_EXPORTER_OTLP_HTTP_ENDPOINT=https://otel.bb.internal:4318`, `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`, `OTEL_EXPORTER_OTLP_CERTIFICATE=/etc/bb/ca.pem`
+  - `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` (`otlp` when enabled, `none` otherwise)
+  - `GRAFANA_URL=https://otel.bb.internal:3000`, `GRAFANA_USER=admin`, `GRAFANA_PASSWORD` (secret)
 
 ### Proxies (Phase 5, wave B)
 

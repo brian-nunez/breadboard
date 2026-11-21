@@ -21,3 +21,4 @@ Decisions that shape this project, in [MADR](https://adr.github.io/madr/) format
 | [0015](0015-run-sidecars-in-a-pod-that-shares-the-apps-network-namespace.md) | Run sidecars in a pod that shares the app's network namespace | accepted | 2026-11-16 |
 | [0016](0016-run-replicas-as-named-instances.md) | Run replicas as named instances | accepted | 2026-11-16 |
 | [0017](0017-reach-lab-services-from-the-host-through-a-per-lab-host-router.md) | Reach lab services from the host through a per-lab `*.localhost` router with a host-only CA | accepted | 2026-11-17 |
+| [0018](0018-use-grafana-otel-lgtm-for-the-otel-catalog-entry.md) | Use Grafana otel-lgtm for the `otel` catalog entry | accepted | 2026-11-20 |

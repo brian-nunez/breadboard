@@ -44,6 +44,8 @@ templ exploreResult(p servicePage) {
 				@kafkaOverview(p.Dash.Experiment, p.Dash.Domain, p.Row.Name, x)
 			case *core.S3Buckets:
 				@s3Buckets(x)
+			case *core.OtelTelemetry:
+				@otelTelemetry(p.Row.Name, x)
 			case *core.EnvoyClusters:
 				@envoyClusters(p.Dash.Experiment, x)
 			case *core.PgBouncerPools:
@@ -738,4 +740,113 @@ templ nginxStatus(x *core.NginxStatus) {
 			</div>
 		}
 	</div>
+}
+
+templ otelTelemetry(name string, x *core.OtelTelemetry) {
+	<div class="flex flex-col gap-6">
+		@explorerCard("Enabled signals ("+strings.Join(x.Signals, ", ")+")", "curl 127.0.0.1") {
+			<div class="grid grid-cols-1 gap-4 px-5 pb-5 md:grid-cols-3">
+				@stat("Traces (Tempo)", otelCountText(x.TracesEnabled, len(x.Traces)))
+				@stat("Metrics (Prometheus)", otelCountText(x.MetricsEnabled, len(x.Metrics)))
+				@stat("Logs (Loki)", otelCountText(x.LogsEnabled, len(x.Logs)))
+			</div>
+			<div class="px-5 pb-5">
+				@terminal("bb creds " + name)
+			</div>
+		}
+		if x.TracesEnabled {
+			@explorerCard("Recent traces", "curl http://127.0.0.1:3200/api/search") {
+				if len(x.TraceServices) > 0 {
+					<p class="px-5 pb-3 text-xs text-slate-500">Services: <span class="font-mono text-slate-700">{ strings.Join(x.TraceServices, ", ") }</span></p>
+				}
+				<table class="w-full text-left text-sm">
+					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+						<tr>
+							@th("Trace ID")
+							@th("Root service")
+							@th("Operation")
+							@th("Duration")
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-200">
+						for _, tr := range x.Traces {
+							<tr>
+								<td class="px-5 py-2.5 font-mono text-xs">{ tr.TraceID }</td>
+								<td class="px-5 py-2.5 font-mono text-[13px]">{ tr.RootService }</td>
+								<td class="px-5 py-2.5 text-slate-700">{ tr.RootName }</td>
+								<td class="px-5 py-2.5 text-slate-600">{ fmt.Sprintf("%d ms", tr.DurationMS) }</td>
+							</tr>
+						}
+						if len(x.Traces) == 0 {
+							@emptyRow(4, "No traces ingested yet.")
+						}
+					</tbody>
+				</table>
+			}
+		}
+		if x.MetricsEnabled {
+			@explorerCard("Metrics", "curl http://127.0.0.1:9090/api/v1/label/__name__/values") {
+				if len(x.MetricServices) > 0 {
+					<p class="px-5 pb-3 text-xs text-slate-500">Services: <span class="font-mono text-slate-700">{ strings.Join(x.MetricServices, ", ") }</span></p>
+				}
+				<table class="w-full text-left text-sm">
+					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+						<tr>
+							@th("Metric name")
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-200">
+						for _, m := range x.Metrics {
+							<tr>
+								<td class="px-5 py-2.5 font-mono text-[13px]">{ m }</td>
+							</tr>
+						}
+						if len(x.Metrics) == 0 {
+							@emptyRow(1, "No metrics ingested yet.")
+						}
+					</tbody>
+				</table>
+				if x.MetricsMore {
+					<p class="px-5 py-3 text-xs text-slate-500">Showing the first { itoa(len(x.Metrics)) } metric names.</p>
+				}
+			}
+		}
+		if x.LogsEnabled {
+			@explorerCard("Recent structured logs", "curl http://127.0.0.1:3100/loki/api/v1/query_range") {
+				if len(x.LogServices) > 0 {
+					<p class="px-5 pb-3 text-xs text-slate-500">Services: <span class="font-mono text-slate-700">{ strings.Join(x.LogServices, ", ") }</span></p>
+				}
+				<table class="w-full text-left text-sm">
+					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+						<tr>
+							@th("Service")
+							@th("Severity")
+							@th("Trace ID")
+							@th("Message")
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-200">
+						for _, l := range x.Logs {
+							<tr>
+								<td class="px-5 py-2.5 font-mono text-[13px]">{ l.Service }</td>
+								<td class="px-5 py-2.5 font-mono text-xs text-slate-600">{ l.Severity }</td>
+								<td class="px-5 py-2.5 font-mono text-xs text-slate-500">{ l.TraceID }</td>
+								<td class="px-5 py-2.5 text-slate-700">{ l.Body }</td>
+							</tr>
+						}
+						if len(x.Logs) == 0 {
+							@emptyRow(4, "No logs ingested yet.")
+						}
+					</tbody>
+				</table>
+			}
+		}
+	</div>
+}
+
+func otelCountText(enabled bool, n int) string {
+	if !enabled {
+		return "disabled"
+	}
+	return commas(int64(n))
 }

@@ -573,5 +573,68 @@ func (s *Server) addExplorers() {
 		})}, nil
 	})
 
+	add(s, readTool, true, &sdk.Tool{
+		Name:        "otel_telemetry",
+		Description: "Live telemetry inside a running otel (LGTM) service: enabled signals, recent Tempo traces, Prometheus metric names and services, and recent Loki structured logs, read through loopback APIs inside the container.",
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in exploreIn) (otelOut, error) {
+		req, err := explore(in)
+		if err != nil {
+			return otelOut{}, err
+		}
+
+		res, err := s.eng.OtelTelemetry(ctx, req)
+		if err != nil {
+			return otelOut{}, err
+		}
+
+		return otelOut{
+			Signals:        orEmpty(res.Signals),
+			LogsEnabled:    res.LogsEnabled,
+			MetricsEnabled: res.MetricsEnabled,
+			TracesEnabled:  res.TracesEnabled,
+			TraceServices:  orEmpty(res.TraceServices),
+			Traces: mapSlice(res.Traces, func(t core.OtelTrace) otelTrace {
+				return otelTrace{TraceID: t.TraceID, RootService: t.RootService, RootName: t.RootName, DurationMS: t.DurationMS, Spans: t.Spans}
+			}),
+			MetricServices: orEmpty(res.MetricServices),
+			Metrics:        orEmpty(res.Metrics),
+			MetricsMore:    res.MetricsMore,
+			LogServices:    orEmpty(res.LogServices),
+			Logs: mapSlice(res.Logs, func(l core.OtelLog) otelLog {
+				return otelLog{Timestamp: l.Timestamp, Service: l.Service, Severity: l.Severity, TraceID: l.TraceID, Body: l.Body}
+			}),
+		}, nil
+	})
+
 	s.addProxyExplorers(explore)
+}
+
+type otelTrace struct {
+	TraceID     string `json:"trace_id"`
+	RootService string `json:"root_service"`
+	RootName    string `json:"root_name"`
+	DurationMS  int64  `json:"duration_ms"`
+	Spans       int    `json:"spans"`
+}
+
+type otelLog struct {
+	Timestamp string `json:"timestamp"`
+	Service   string `json:"service"`
+	Severity  string `json:"severity,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
+	Body      string `json:"body"`
+}
+
+type otelOut struct {
+	Signals        []string    `json:"signals"`
+	LogsEnabled    bool        `json:"logs_enabled"`
+	MetricsEnabled bool        `json:"metrics_enabled"`
+	TracesEnabled  bool        `json:"traces_enabled"`
+	TraceServices  []string    `json:"trace_services"`
+	Traces         []otelTrace `json:"traces"`
+	MetricServices []string    `json:"metric_services"`
+	Metrics        []string    `json:"metrics"`
+	MetricsMore    bool        `json:"metrics_more,omitempty"`
+	LogServices    []string    `json:"log_services"`
+	Logs           []otelLog   `json:"logs"`
 }

@@ -256,6 +256,7 @@ List them with `bb starters` and apply one with `bb starter <id>`. Each one adds
 | **`redis`** | Redis: TLS only on 6379, password auth. |
 | **`consul`** | HashiCorp Consul service catalog and KV store: one server, HTTPS on 8501. |
 | **`s3-compatible`** | Object storage speaking the S3 API (SeaweedFS): HTTPS on 8333, generated access keys. |
+| **`otel`** | OpenTelemetry Collector + Grafana LGTM (Loki, Prometheus, Tempo): OTLP TLS on 4317/4318, Grafana HTTPS on 3000; selective `config.signals`. |
 | **`haproxy`** | HAProxy load balancer and reverse proxy: TLS on 8443. |
 | **`envoy`** | Envoy proxy and load balancer: TLS on 8443, active health checks. |
 | **`traefik`** | Traefik router and load balancer from a file provider: TLS on 8443. |

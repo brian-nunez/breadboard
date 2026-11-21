@@ -223,9 +223,10 @@ func unknownType(typ string) error {
 
 // AddServiceRequest adds an infra service.
 type AddServiceRequest struct {
-	Dir  string
-	Type string
-	Name string // empty means the type id
+	Dir    string
+	Type   string
+	Name   string            // empty means the type id
+	Config map[string]string // optional type-specific config options
 }
 
 // AddServiceResult names the service added.
@@ -254,6 +255,16 @@ func (e *Engine) AddService(_ context.Context, req AddServiceRequest) (*AddServi
 
 	if err := p.doc.AddService(name, req.Type, defaultUpstreams(p.spec, entry)...); err != nil {
 		return nil, fmt.Errorf("%w; choose another name with --name", err)
+	}
+
+	if len(req.Config) > 0 {
+		if err := p.doc.SetServiceConfig(name, req.Config); err != nil {
+			return nil, err
+		}
+	}
+
+	if _, err := decodeAndValidate(p.doc); err != nil {
+		return nil, err
 	}
 
 	if err := p.save(p.doc); err != nil {
@@ -487,8 +498,21 @@ func (e *Engine) applyStarter(ctx context.Context, st starters.Starter, render r
 
 		return ""
 	}
+	specChanged := false
+
 	for _, typ := range st.Requires {
-		if typeService(typ) != "" {
+		if existingName := typeService(typ); existingName != "" {
+			idx := slices.IndexFunc(have, func(s spec.Service) bool { return s.Name == existingName })
+			if slices.Contains(st.RequiresHost, typ) && idx >= 0 && have[idx].Host == nil {
+				h := &spec.Host{}
+				if err := doc.SetServiceHost(existingName, *h); err != nil {
+					return nil, err
+				}
+
+				have[idx].Host = h
+				specChanged = true
+			}
+
 			continue
 		}
 
@@ -501,7 +525,25 @@ func (e *Engine) applyStarter(ctx context.Context, st starters.Starter, render r
 			return nil, err
 		}
 
-		have = append(have, spec.Service{Name: name, Type: typ})
+		added := spec.Service{Name: name, Type: typ}
+		if cfg := st.RequiresConfig[typ]; len(cfg) > 0 {
+			if err := doc.SetServiceConfig(name, cfg); err != nil {
+				return nil, err
+			}
+
+			added.Config = maps.Clone(cfg)
+		}
+
+		if slices.Contains(st.RequiresHost, typ) {
+			h := &spec.Host{}
+			if err := doc.SetServiceHost(name, *h); err != nil {
+				return nil, err
+			}
+
+			added.Host = h
+		}
+
+		have = append(have, added)
 		res.AddedServices = append(res.AddedServices, name)
 	}
 
@@ -630,7 +672,7 @@ func (e *Engine) applyStarter(ctx context.Context, st starters.Starter, render r
 		res.Written = append(res.Written, rel)
 	}
 
-	if len(res.AddedApps) > 0 || len(res.AddedServices) > 0 {
+	if len(res.AddedApps) > 0 || len(res.AddedServices) > 0 || specChanged {
 		if err := p.save(doc); err != nil {
 			return nil, err
 		}
@@ -793,10 +835,12 @@ type StarterDetailsRequest struct {
 // writing anything: for the web UI's starter pages.
 type StarterDetails struct {
 	StarterInfo
-	Dir      string // default directory the code is written to
-	Apps     []StarterApp
-	Services []StarterService
-	Files    []StarterFile
+	Dir            string // default directory the code is written to
+	RequiresConfig map[string]map[string]string
+	RequiresHost   []string
+	Apps           []StarterApp
+	Services       []StarterService
+	Files          []StarterFile
 }
 
 // StarterService is a proxy service the starter adds to experiment.yaml.
@@ -850,7 +894,18 @@ func (e *Engine) StarterDetails(ctx context.Context, req StarterDetailsRequest) 
 		return nil, err
 	}
 
-	d := &StarterDetails{StarterInfo: StarterInfo{ID: st.ID, Title: st.Title, Summary: st.Summary, Language: st.Language, Requires: st.Requires}, Dir: st.Dir}
+	d := &StarterDetails{
+		StarterInfo:  StarterInfo{ID: st.ID, Title: st.Title, Summary: st.Summary, Language: st.Language, Requires: st.Requires},
+		Dir:          st.Dir,
+		RequiresHost: slices.Clone(st.RequiresHost),
+	}
+	if len(st.RequiresConfig) > 0 {
+		d.RequiresConfig = make(map[string]map[string]string, len(st.RequiresConfig))
+		for k, v := range st.RequiresConfig {
+			d.RequiresConfig[k] = maps.Clone(v)
+		}
+	}
+
 	for _, a := range st.Apps {
 		d.StarterInfo.Apps = append(d.StarterInfo.Apps, a.Name)
 		d.Apps = append(d.Apps, StarterApp{Name: a.Name, Command: a.Command, Uses: a.Uses, Register: a.Register, Replicas: a.Replicas, Sidecars: a.Sidecars})

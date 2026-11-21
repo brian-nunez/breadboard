@@ -123,6 +123,59 @@ func (d *Document) AddService(name, typ string, upstreams ...string) error {
 	return nil
 }
 
+// SetServiceConfig sets or updates config keys on an existing infra service,
+// keeping comments and ordering intact.
+func (d *Document) SetServiceConfig(name string, cfg map[string]string) error {
+	if len(cfg) == 0 {
+		return nil
+	}
+
+	m := lookup(d.top(), "services")
+
+	body := lookup(m, name)
+	if body == nil || body.Kind != yaml.MappingNode {
+		return fmt.Errorf("service %q: %w", name, errs.ErrNotFound)
+	}
+
+	cnode := lookup(body, "config")
+	if cnode == nil || cnode.Kind != yaml.MappingNode {
+		cnode = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		body.Content = append(body.Content, scalar("config"), cnode)
+	} else {
+		cnode.Style = 0
+	}
+
+	for _, k := range slices.Sorted(maps.Keys(cfg)) {
+		val := scalar(cfg[k])
+		if existing := lookup(cnode, k); existing != nil {
+			*existing = *val
+		} else {
+			cnode.Content = append(cnode.Content, scalar(k), val)
+		}
+	}
+
+	return nil
+}
+
+// SetServiceHost sets or updates the host field on an existing infra service.
+func (d *Document) SetServiceHost(name string, h Host) error {
+	m := lookup(d.top(), "services")
+
+	body := lookup(m, name)
+	if body == nil || body.Kind != yaml.MappingNode {
+		return fmt.Errorf("service %q: %w", name, errs.ErrNotFound)
+	}
+
+	hn := hostNode(h)
+	if existing := lookup(body, "host"); existing != nil {
+		*existing = *hn
+	} else {
+		body.Content = append(body.Content, scalar("host"), hn)
+	}
+
+	return nil
+}
+
 // AddProxy appends a proxy service with its config (keys sorted),
 // upstreams, file and static_file. An upstream with only a service is
 // written in the short form; the others as mappings with the fields that

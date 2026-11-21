@@ -36,7 +36,13 @@ type Starter struct {
 	Dir string
 	// Requires lists catalog types the starter needs; missing ones are added.
 	Requires []string
-	Apps     []App
+	// RequiresConfig holds config options to apply to required catalog types
+	// (keyed by catalog type id).
+	RequiresConfig map[string]map[string]string
+	// RequiresHost lists required catalog types that get host: true so they
+	// are reachable in the browser through bb-host.
+	RequiresHost []string
+	Apps         []App
 	// Services are proxies the starter adds in front of its apps.
 	Services []Service
 }

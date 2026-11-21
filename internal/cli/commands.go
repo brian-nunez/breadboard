@@ -91,6 +91,9 @@ func (c *cli) add(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	name := fs.String("name", "", "service name (default: the type)")
 
+	var cfg configFlag
+	fs.Var(&cfg, "config", "service config option as key=value (repeatable)")
+
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -104,12 +107,36 @@ func (c *cli) add(args []string) error {
 		return usagef("put app first: bb add app <name> [--uses a,b] [--dir path]")
 	}
 
-	res, err := c.eng.AddService(c.ctx, core.AddServiceRequest{Dir: c.dir, Type: pos[0], Name: *name})
+	res, err := c.eng.AddService(c.ctx, core.AddServiceRequest{Dir: c.dir, Type: pos[0], Name: *name, Config: cfg.values})
 	if err != nil {
 		return err
 	}
 
 	_, _ = fmt.Fprintf(c.out, "Added %s (%s) to experiment.yaml. Run bb up to start it.\n", res.Name, res.Type)
+
+	return nil
+}
+
+// configFlag collects repeatable --config key=value pairs.
+type configFlag struct {
+	values map[string]string
+}
+
+func (c *configFlag) String() string { return "" }
+
+func (c *configFlag) Set(v string) error {
+	k, val, ok := strings.Cut(v, "=")
+
+	k = strings.TrimSpace(k)
+	if !ok || k == "" {
+		return fmt.Errorf("config %q: expected key=value", v)
+	}
+
+	if c.values == nil {
+		c.values = map[string]string{}
+	}
+
+	c.values[k] = val
 
 	return nil
 }

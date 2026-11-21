@@ -28,9 +28,10 @@ type initOut struct {
 }
 
 type addIn struct {
-	Dir  string `json:"dir,omitempty" jsonschema:"directory of the experiment, inside the one bb mcp was started in; empty means that directory"`
-	Type string `json:"type" jsonschema:"catalog type, such as kafka, postgres, redis, consul or s3-compatible"`
-	Name string `json:"name,omitempty" jsonschema:"service name; empty means the type"`
+	Dir    string            `json:"dir,omitempty" jsonschema:"directory of the experiment, inside the one bb mcp was started in; empty means that directory"`
+	Type   string            `json:"type" jsonschema:"catalog type, such as kafka, postgres, redis, consul or s3-compatible"`
+	Name   string            `json:"name,omitempty" jsonschema:"service name; empty means the type"`
+	Config map[string]string `json:"config,omitempty" jsonschema:"optional type-specific config options"`
 }
 
 type addOut struct {
@@ -145,7 +146,7 @@ func (s *Server) addSpecTools() {
 			return addOut{}, err
 		}
 
-		res, err := s.eng.AddService(ctx, core.AddServiceRequest{Dir: dir, Type: in.Type, Name: in.Name})
+		res, err := s.eng.AddService(ctx, core.AddServiceRequest{Dir: dir, Type: in.Type, Name: in.Name, Config: in.Config})
 		if err != nil {
 			return addOut{}, err
 		}

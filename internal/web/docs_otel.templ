@@ -1,0 +1,274 @@
+package web
+
+// OpenTelemetry (LGTM) docs, written to the Kafka template (D-031, D-061).
+
+func init() {
+	registerTech(tech{
+		ID:      "otel",
+		Name:    "OpenTelemetry (LGTM)",
+		Tagline: "Correlated traces, metrics, and logs over OTLP TLS with Grafana.",
+		Order:   55,
+		Intro:   otelIntro(),
+		GoodFit: []string{
+			"Following a single request across HTTP services, databases, and async queues",
+			"Measuring request rates, error rates, and p95/p99 latency per service and replica",
+			"Collecting structured slog records correlated with trace_id and span_id",
+			"Learning standard OpenTelemetry SDK instrumentation without vendor lock-in",
+		},
+		PoorFit: []string{
+			"Business analytics or long-term warehousing (use Postgres or an OLAP store)",
+			"Application messaging or event delivery (use Kafka)",
+			"Unbounded high-cardinality attributes like user_id or order_id as metric labels",
+		},
+		Diagram: otelDiagram(),
+		Official: []link{
+			{"OpenTelemetry Go documentation", "https://opentelemetry.io/docs/languages/go/"},
+			{"OpenTelemetry Go SDK packages", "https://pkg.go.dev/go.opentelemetry.io/otel"},
+			{"otelhttp instrumentation", "https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"},
+			{"otelslog log bridge", "https://pkg.go.dev/go.opentelemetry.io/contrib/bridges/otelslog"},
+			{"Grafana docker-otel-lgtm", "https://github.com/grafana/docker-otel-lgtm"},
+		},
+		Starters: nil,
+		Guides: []guide{
+			{
+				Slug: "traces", Title: "Traces and context propagation", Summary: "W3C traceparent across HTTP hops, child spans, and error recording.",
+				Sections: []docSection{{"spans", "Spans and trace trees"}, {"propagation", "Context propagation with otelhttp"}, {"errors", "Recording errors"}, {"run", "Run it"}},
+				Body:     otelTracesGuide(),
+			},
+			{
+				Slug: "metrics", Title: "Metrics and RED signals", Summary: "Counters, UpDownCounters, explicit-bucket histograms, and Go runtime metrics.",
+				Sections: []docSection{{"instruments", "Choosing an instrument"}, {"buckets", "Histograms and buckets"}, {"instances", "Multi-replica identity"}, {"cardinality", "Avoiding cardinality traps"}},
+				Body:     otelMetricsGuide(),
+			},
+			{
+				Slug: "logs", Title: "Structured logs with otelslog", Summary: "Bridging Go's log/slog into OTLP and Loki without regex parsing.",
+				Sections: []docSection{{"bridge", "Bridging log/slog"}, {"attributes", "Structured attributes and severity"}, {"query", "Querying in Loki"}},
+				Body:     otelLogsGuide(),
+			},
+			{
+				Slug: "correlation", Title: "Correlating all three signals", Summary: "Joining HTTP, Postgres, and async Kafka hops into one trace with linked logs and metrics.",
+				Sections: []docSection{{"async", "Propagating context over Kafka headers"}, {"log-link", "Automatic trace_id in otelslog"}, {"workflow", "Debugging from metric to trace to log"}},
+				Body:     otelCorrelationGuide(),
+			},
+			{
+				Slug: "in-breadboard", Title: "OpenTelemetry in Breadboard", Summary: "Selective LGTM signals, OTLP TLS, Grafana host access, and env vars.",
+				Sections: []docSection{{"lgtm", "One LGTM container, selective backends"}, {"tls", "TLS on OTLP and Grafana, loopback for storage"}, {"env", "What your app receives"}, {"explore", "The Telemetry tab"}},
+				Body:     otelInBreadboard(),
+			},
+		},
+	})
+}
+
+const otelTraceInitCode = `// WithEndpointURL uses TLS automatically for https:// endpoints and reads SSL_CERT_FILE.
+exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")))
+tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
+otel.SetTracerProvider(tp)
+otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+    propagation.TraceContext{},
+    propagation.Baggage{},
+))`
+
+const otelHTTPCode = `// Server: extracts traceparent and opens a server span per request.
+srv := &http.Server{
+    Addr:    ":8443",
+    Handler: otelhttp.NewHandler(mux, "orders"),
+}
+
+// Client: creates a client span and injects traceparent into outbound headers.
+client := &http.Client{
+    Transport: otelhttp.NewTransport(http.DefaultTransport),
+}`
+
+const otelMetricsCode = `ordersTotal, _ := meter.Int64Counter("orders_processed", metric.WithUnit("{order}"))
+inFlight, _ := meter.Int64UpDownCounter("orders_in_flight", metric.WithUnit("{order}"))
+duration, _ := meter.Float64Histogram("order_duration_seconds",
+    metric.WithUnit("s"),
+    metric.WithExplicitBucketBoundaries(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
+)
+
+// Export Go runtime GC, goroutine, and heap metrics automatically.
+_ = runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second))`
+
+const otelLogsCode = `exp, _ := otlploggrpc.New(ctx, otlploggrpc.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")))
+lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(exp)), sdklog.WithResource(res))
+otellogglobal.SetLoggerProvider(lp)
+
+logger := otelslog.NewLogger("otel-log-api")
+logger.InfoContext(r.Context(), "received job", "request_id", reqID, "customer", customer)`
+
+const otelKafkaPropCode = `// Producer: inject the active traceparent into Kafka record headers.
+var headers kafkaHeaders
+otel.GetTextMapPropagator().Inject(pubCtx, &headers)
+rec := &kgo.Record{Topic: "obs-orders", Key: []byte(customer), Value: payload, Headers: headers}
+
+// Consumer: extract traceparent so the worker span joins the upstream trace.
+headers := kafkaHeaders(r.Headers)
+parentCtx := otel.GetTextMapPropagator().Extract(ctx, &headers)
+spanCtx, span := tracer.Start(parentCtx, "kafka.consume", trace.WithSpanKind(trace.SpanKindConsumer))`
+
+const otelSpecYAML = `services:
+  otel:
+    type: otel
+    config:
+      signals: traces        # logs, metrics, traces (comma-separated)
+    host: true               # Grafana at https://otel.<experiment>.localhost:<port>`
+
+templ otelIntro() {
+	@docP() {
+		OpenTelemetry is a vendor-neutral standard for collecting three telemetry signals—traces, metrics, and logs—over one wire protocol (OTLP). Breadboard pairs the official OpenTelemetry Go SDKs with Grafana's LGTM backend (Loki, Grafana, Tempo, and Prometheus) in a single container, enabling only the backends your experiment asks for.
+	}
+	@docP() {
+		Your apps talk to the collector over verified TLS on ports 4317 (gRPC) and 4318 (HTTP), while Grafana serves over HTTPS on 3000 with pre-wired datasources and cross-signal links.
+	}
+}
+
+templ otelDiagram() {
+	<figure class="my-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
+		<svg viewBox="0 0 640 190" class="w-full" role="img" aria-label="Apps send traces, metrics, and logs over OTLP TLS to the OpenTelemetry Collector, which routes traces to Tempo, metrics to Prometheus, and logs to Loki behind Grafana">
+			<rect x="16" y="48" width="136" height="94" rx="10" class="fill-white stroke-slate-300"></rect>
+			<text x="84" y="78" text-anchor="middle" class="fill-slate-900 text-[13px] font-semibold">Your Go apps</text>
+			<text x="84" y="98" text-anchor="middle" class="fill-slate-500 text-[11px]">otelhttp · otelslog</text>
+			<text x="84" y="116" text-anchor="middle" class="fill-slate-500 text-[11px]">OTLP gRPC TLS</text>
+
+			<line x1="152" y1="95" x2="226" y2="95" class="stroke-indigo-500" stroke-width="2"></line>
+			<text x="189" y="85" text-anchor="middle" class="fill-indigo-600 text-[11px] font-mono">:4317</text>
+
+			<rect x="226" y="56" width="132" height="78" rx="10" class="fill-indigo-50 stroke-indigo-300"></rect>
+			<text x="292" y="88" text-anchor="middle" class="fill-indigo-900 text-[13px] font-semibold">OTel Collector</text>
+			<text x="292" y="108" text-anchor="middle" class="fill-indigo-700 text-[11px]">enabled pipelines</text>
+
+			<line x1="358" y1="74" x2="430" y2="36" class="stroke-slate-400" stroke-width="1.5"></line>
+			<line x1="358" y1="95" x2="430" y2="95" class="stroke-slate-400" stroke-width="1.5"></line>
+			<line x1="358" y1="116" x2="430" y2="154" class="stroke-slate-400" stroke-width="1.5"></line>
+
+			<rect x="430" y="16" width="104" height="40" rx="8" class="fill-white stroke-slate-300"></rect>
+			<text x="482" y="40" text-anchor="middle" class="fill-slate-800 text-[12px] font-medium">Tempo :3200</text>
+			<rect x="430" y="75" width="104" height="40" rx="8" class="fill-white stroke-slate-300"></rect>
+			<text x="482" y="99" text-anchor="middle" class="fill-slate-800 text-[12px] font-medium">Prom :9090</text>
+			<rect x="430" y="134" width="104" height="40" rx="8" class="fill-white stroke-slate-300"></rect>
+			<text x="482" y="158" text-anchor="middle" class="fill-slate-800 text-[12px] font-medium">Loki :3100</text>
+
+			<line x1="534" y1="36" x2="558" y2="95" class="stroke-slate-300" stroke-width="1.5"></line>
+			<line x1="534" y1="95" x2="558" y2="95" class="stroke-slate-300" stroke-width="1.5"></line>
+			<line x1="534" y1="154" x2="558" y2="95" class="stroke-slate-300" stroke-width="1.5"></line>
+
+			<rect x="558" y="60" width="70" height="70" rx="10" class="fill-amber-50 stroke-amber-300"></rect>
+			<text x="593" y="92" text-anchor="middle" class="fill-amber-900 text-[12px] font-semibold">Grafana</text>
+			<text x="593" y="110" text-anchor="middle" class="fill-amber-700 text-[11px] font-mono">:3000</text>
+		</svg>
+	</figure>
+}
+
+templ otelTracesGuide() {
+	@docLead() {
+		A trace is a tree of spans sharing one trace ID across every process a request touches. Each span records a start time, duration, attributes, events, and an OK or Error status.
+	}
+	@docH2("spans", "Spans and trace trees")
+	@docP() {
+		Configure a @docCodeWord("TracerProvider") with an OTLP gRPC exporter and a shared resource carrying @docCodeWord("service.name") and @docCodeWord("service.instance.id")&#46; Always register the W3C @docCodeWord("TraceContext") propagator and call @docCodeWord("tp.Shutdown") before exit so buffered batches flush.
+	}
+	@docCode("initTracer", otelTraceInitCode)
+	@docH2("propagation", "Context propagation with otelhttp")
+	@docP() {
+		Wrapping servers with @docCodeWord("otelhttp.NewHandler") and clients with @docCodeWord("otelhttp.NewTransport") automatically extracts and injects the W3C @docCodeWord("traceparent") header across HTTPS hops.
+	}
+	@docCode("HTTP instrumentation", otelHTTPCode)
+	@docH2("errors", "Recording errors")
+	@docP() {
+		Call @docCodeWord("span.RecordError(err)") and @docCodeWord("span.SetStatus(codes.Error, msg)") on failing spans so Tempo highlights the exact downstream service that failed instead of only showing a 500 at the edge.
+	}
+	@docH2("run", "Run it")
+	@docTerminal("bb starter otel/traces", "bb up", "bb status")
+}
+
+templ otelMetricsGuide() {
+	@docLead() {
+		Metrics aggregate counts, concurrency, and latency distributions over time so you can spot error spikes and slow replicas at a glance.
+	}
+	@docH2("instruments", "Choosing an instrument")
+	@docList(
+		"Counter (Int64Counter): monotonically increasing totals like orders_processed; query with rate().",
+		"UpDownCounter (Int64UpDownCounter): values that go up and down, such as orders_in_flight.",
+		"Histogram (Float64Histogram): distributions like request latency; query percentiles with histogram_quantile().",
+	)
+	@docCode("instruments", otelMetricsCode)
+	@docH2("buckets", "Histograms and buckets")
+	@docP() {
+		Always set explicit bucket boundaries around your service's real latency SLOs (for example 10 ms to 1 s) so p95 and p99 estimates stay accurate.
+	}
+	@docH2("instances", "Multi-replica identity")
+	@docP() {
+		When an app runs with @docCodeWord("replicas: 2")&#44; give every replica the same @docCodeWord("service.name") and set @docCodeWord("service.instance.id") to @docCodeWord("BB_SERVICE") — such as @docCodeWord("otel-metrics-api-1") and @docCodeWord("otel-metrics-api-2")&#46; Prometheus promotes both into labels.
+	}
+	@docH2("cardinality", "Avoiding cardinality traps")
+	@docP() {
+		Keep metric attribute values bounded (status, tier, method). Unbounded identifiers like @docCodeWord("order_id") or @docCodeWord("trace_id") belong on spans and logs, never as metric labels.
+	}
+}
+
+templ otelLogsGuide() {
+	@docLead() {
+		Instead of writing ad-hoc text lines to stdout and parsing them later with regexes, bridge Go's standard @docCodeWord("log/slog") straight into OpenTelemetry Logs.
+	}
+	@docH2("bridge", "Bridging log/slog")
+	@docP() {
+		@docCodeWord("otelslog.NewLogger") returns a standard @docCodeWord("*slog.Logger") backed by your @docCodeWord("LoggerProvider")&#46; Every @docCodeWord("InfoContext")&#44; @docCodeWord("WarnContext")&#44; and @docCodeWord("ErrorContext") call emits a structured OTLP log record to Loki.
+	}
+	@docCode("otelslog", otelLogsCode)
+	@docH2("attributes", "Structured attributes and severity")
+	@docP() {
+		Key-value pairs passed to @docCodeWord("slog") arrive as structured metadata in Loki, and severity levels map directly to @docCodeWord("INFO")&#44; @docCodeWord("WARN")&#44; and @docCodeWord("ERROR")&#46;
+	}
+	@docH2("query", "Querying in Loki")
+	@docP() {
+		Filter across all services in one timeline with LogQL, for example @docCodeWord(`{service_name=~"otel-log-.+"} | request_id="req-5"`)&#46;
+	}
+}
+
+templ otelCorrelationGuide() {
+	@docLead() {
+		Logs, metrics, and traces are strongest when linked: a metric spike tells you something is wrong, a trace shows which hop slowed down or failed, and correlated logs explain why.
+	}
+	@docH2("async", "Propagating context over Kafka headers")
+	@docP() {
+		HTTP libraries propagate @docCodeWord("traceparent") automatically through @docCodeWord("otelhttp")&#46; Across an async broker like Kafka, inject the active context into the record headers on produce and extract it on consume so the worker's span stays attached to the caller's trace.
+	}
+	@docCode("Kafka context propagation", otelKafkaPropCode)
+	@docH2("log-link", "Automatic trace_id in otelslog")
+	@docP() {
+		Because @docCodeWord("otelslog") reads the @docCodeWord("context.Context") passed to @docCodeWord("InfoContext") and @docCodeWord("ErrorContext")&#44; it attaches the active @docCodeWord("trace_id") and @docCodeWord("span_id") to every log record automatically. Breadboard pre-wires Tempo's @docCodeWord("tracesToLogsV2") and Loki's derived fields so you can jump between them in one click.
+	}
+	@docH2("workflow", "Debugging from metric to trace to log")
+	@docTerminal("bb starter otel/multi-service", "bb up", "bb status")
+}
+
+templ otelInBreadboard() {
+	@docLead() {
+		What Breadboard runs when you add @docCodeWord("otel")&#44; how selective signals work, and what your apps receive.
+	}
+	@docH2("lgtm", "One LGTM container, selective backends")
+	@docP() {
+		The @docCodeWord("otel") catalog entry runs the pinned @docCodeWord("grafana/otel-lgtm:0.41.1") image. Set @docCodeWord("config.signals") to any comma-separated subset of @docCodeWord("logs")&#44; @docCodeWord("metrics")&#44; and @docCodeWord("traces") — all three are enabled by default. Breadboard generates a collector config and launcher that start only the backends you asked for; Pyroscope is not started.
+	}
+	@docCode("experiment.yaml", otelSpecYAML)
+	@docP() {
+		You can also configure signals from the CLI with @docCodeWord("bb add otel --config signals=traces,metrics")&#46; When you apply a second @docCodeWord("otel/*") starter to the same lab, Breadboard unions its required signals into the existing @docCodeWord("otel") service.
+	}
+	@docH2("tls", "TLS on OTLP and Grafana, loopback for storage")
+	@docP() {
+		The collector listens over TLS on OTLP gRPC @docCodeWord("4317") and OTLP HTTP @docCodeWord("4318")&#44; and Grafana serves HTTPS on @docCodeWord("3000") with a generated password in @docCodeWord(".bb/secrets.json") via @docCodeWord("bb creds otel")&#46; Loki on @docCodeWord("3100")&#44; Tempo on @docCodeWord("3200")&#44; and Prometheus on @docCodeWord("9090") bind strictly to @docCodeWord("127.0.0.1") inside the container. Setting @docCodeWord("host: true") exposes Grafana at @docCodeWord("https://otel.<experiment>.localhost:<port>")&#46;
+	}
+	@docH2("env", "What your app receives")
+	@docList(
+		"OTEL_EXPORTER_OTLP_ENDPOINT: https://otel.<domain>:4317 (OTLP gRPC over TLS).",
+		"OTEL_EXPORTER_OTLP_HTTP_ENDPOINT: https://otel.<domain>:4318 (OTLP HTTP over TLS).",
+		"OTEL_EXPORTER_OTLP_PROTOCOL: grpc.",
+		"OTEL_EXPORTER_OTLP_CERTIFICATE: /etc/bb/ca.pem (plus SSL_CERT_FILE for Go's TLS stack).",
+		"OTEL_TRACES_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_LOGS_EXPORTER: otlp when enabled, none when disabled.",
+		"GRAFANA_URL, GRAFANA_USER, GRAFANA_PASSWORD: Grafana HTTPS address and generated admin login.",
+	)
+	@docH2("explore", "The Telemetry tab")
+	@docP() {
+		The service page's Telemetry tab reads Tempo, Prometheus, and Loki over loopback inside the container via @docCodeWord("docker exec"), showing only the signals currently enabled on that service.
+	}
+}

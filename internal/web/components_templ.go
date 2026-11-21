@@ -286,7 +286,7 @@ func bar(used, limit float64, warn bool) templ.Component {
 var logoFiles = map[string]string{
 	"kafka": "kafka", "postgres": "postgres", "redis": "redis", "consul": "consul", "consul-agent": "consul",
 	"envoy": "envoy", "traefik": "traefik", "nginx": "nginx", "fluent-bit": "fluent-bit",
-	"haproxy": "haproxy", "pgbouncer": "pgbouncer", "s3-compatible": "s3-compatible",
+	"haproxy": "haproxy", "pgbouncer": "pgbouncer", "s3-compatible": "s3-compatible", "otel": "otel",
 }
 
 // logoSrc is a catalog or sidecar type's logo URL, or "" for an app or an

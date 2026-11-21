@@ -62,6 +62,7 @@ var sdkImports = map[string]string{
 	"kafka":         "github.com/twmb/franz-go/pkg/kgo",
 	"s3-compatible": "github.com/aws/aws-sdk-go-v2/service/s3",
 	"consul":        "github.com/hashicorp/consul/api",
+	"otel":          "go.opentelemetry.io/otel",
 	"haproxy":       "",
 	"envoy":         "",
 	"traefik":       "",
@@ -79,28 +80,38 @@ func SDKImport(typ string) (string, bool) {
 // envHelp says what each variable of a catalog env contract holds.
 // TestEveryContractVariableIsDescribed fails when one is missing.
 var envHelp = map[string]string{
-	"DATABASE_URL":            "connection URL: user, password, host, port, database, sslmode",
-	"PGHOST":                  "host name",
-	"PGPORT":                  "port",
-	"PGUSER":                  "user",
-	"PGPASSWORD":              "password",
-	"PGDATABASE":              "database",
-	"PGSSLMODE":               "TLS mode",
-	"PGSSLROOTCERT":           "CA file that signed the server's certificate",
-	"REDIS_URL":               "connection URL with the password; rediss:// means TLS",
-	"KAFKA_BROKERS":           "broker addresses, host:port, comma-separated",
-	"KAFKA_SECURITY_PROTOCOL": "SSL (TLS) or PLAINTEXT",
-	"S3_ENDPOINT":             "S3 API endpoint",
-	"S3_REGION":               "region",
-	"S3_ACCESS_KEY_ID":        "access key id",
-	"S3_SECRET_ACCESS_KEY":    "secret access key",
-	"S3_FORCE_PATH_STYLE":     "address buckets by path, not by subdomain",
-	"AWS_ENDPOINT_URL_S3":     "S3 endpoint, read by the AWS SDKs",
-	"AWS_REGION":              "region, read by the AWS SDKs",
-	"AWS_ACCESS_KEY_ID":       "access key id, read by the AWS SDKs",
-	"AWS_SECRET_ACCESS_KEY":   "secret access key, read by the AWS SDKs",
-	"CONSUL_HTTP_ADDR":        "HTTP API address, read by the Consul API client",
-	"CONSUL_CACERT":           "CA bundle the Consul API client verifies with",
+	"DATABASE_URL":                     "connection URL: user, password, host, port, database, sslmode",
+	"PGHOST":                           "host name",
+	"PGPORT":                           "port",
+	"PGUSER":                           "user",
+	"PGPASSWORD":                       "password",
+	"PGDATABASE":                       "database",
+	"PGSSLMODE":                        "TLS mode",
+	"PGSSLROOTCERT":                    "CA file that signed the server's certificate",
+	"REDIS_URL":                        "connection URL with the password; rediss:// means TLS",
+	"KAFKA_BROKERS":                    "broker addresses, host:port, comma-separated",
+	"KAFKA_SECURITY_PROTOCOL":          "SSL (TLS) or PLAINTEXT",
+	"S3_ENDPOINT":                      "S3 API endpoint",
+	"S3_REGION":                        "region",
+	"S3_ACCESS_KEY_ID":                 "access key id",
+	"S3_SECRET_ACCESS_KEY":             "secret access key",
+	"S3_FORCE_PATH_STYLE":              "address buckets by path, not by subdomain",
+	"AWS_ENDPOINT_URL_S3":              "S3 endpoint, read by the AWS SDKs",
+	"AWS_REGION":                       "region, read by the AWS SDKs",
+	"AWS_ACCESS_KEY_ID":                "access key id, read by the AWS SDKs",
+	"AWS_SECRET_ACCESS_KEY":            "secret access key, read by the AWS SDKs",
+	"CONSUL_HTTP_ADDR":                 "HTTP API address, read by the Consul API client",
+	"CONSUL_CACERT":                    "CA bundle the Consul API client verifies with",
+	"OTEL_EXPORTER_OTLP_ENDPOINT":      "OTLP gRPC endpoint over TLS (4317), read by official OTel SDKs",
+	"OTEL_EXPORTER_OTLP_HTTP_ENDPOINT": "OTLP HTTP endpoint over TLS (4318)",
+	"OTEL_EXPORTER_OTLP_PROTOCOL":      "default OTLP wire protocol (grpc)",
+	"OTEL_EXPORTER_OTLP_CERTIFICATE":   "CA file verifying the OTLP collector certificate",
+	"OTEL_TRACES_EXPORTER":             "otlp when traces are enabled on the otel service, else none",
+	"OTEL_METRICS_EXPORTER":            "otlp when metrics are enabled on the otel service, else none",
+	"OTEL_LOGS_EXPORTER":               "otlp when logs are enabled on the otel service, else none",
+	"GRAFANA_URL":                      "Grafana HTTPS address inside the lab",
+	"GRAFANA_USER":                     "Grafana admin username",
+	"GRAFANA_PASSWORD":                 "password",
 }
 
 // EnvHelp says what a contract variable holds. Proxy variables are named
@@ -171,13 +182,14 @@ type appData struct {
 	NeedKafka                         bool
 	NeedS3                            bool
 	NeedConsul                        bool
+	NeedOtel                          bool
 	NeedHTTP                          bool
 	Example                           string // the README's add-a-service type, free as a name; empty for a generic example
 }
 
 // exampleTypes are the types the README may suggest adding, in order:
 // each works on its own, so the example is valid in any lab.
-var exampleTypes = []string{"redis", "postgres", "kafka", "consul", "s3-compatible"}
+var exampleTypes = []string{"redis", "postgres", "kafka", "consul", "s3-compatible", "otel"}
 
 // exampleType is the first of exampleTypes whose name no service or app in
 // the lab (or in the app's uses) takes, so `bb add <type>` and the uses it
@@ -401,6 +413,25 @@ func buildWire(u AppUse, taken map[string]bool, d *appData) (appWire, error) {
 				"ca":   byBase["CONSUL_CACERT"],
 			},
 		}, nil
+	case "otel":
+		d.NeedOtel = true
+
+		base := camel + "Shutdown"
+		if u.Service == "otel" {
+			base = "shutdownOtel"
+		}
+
+		return appWire{
+			Service: u.Service,
+			Kind:    "otel",
+			Var:     claimVar(taken, base),
+			Env: map[string]string{
+				"endpoint": byBase["OTEL_EXPORTER_OTLP_ENDPOINT"],
+				"traces":   byBase["OTEL_TRACES_EXPORTER"],
+				"metrics":  byBase["OTEL_METRICS_EXPORTER"],
+				"logs":     byBase["OTEL_LOGS_EXPORTER"],
+			},
+		}, nil
 	case "haproxy", "envoy", "traefik", "nginx":
 		d.NeedHTTP = true
 
@@ -423,11 +454,14 @@ func reservedAppVars() map[string]bool {
 		// Locals and helpers in main.go
 		"ctx", "stop", "httpClient", "main", "init", "requireEnv",
 		"newPostgres", "newRedis", "newKafkaProducer", "newKafkaConsumer",
-		"newS3", "newConsul", "newHTTPClient",
+		"newS3", "newConsul", "newOtel", "newHTTPClient",
 		// Imported package identifiers
-		"context", "tls", "fmt", "log", "http", "os", "signal", "strings",
+		"context", "errors", "tls", "fmt", "log", "slog", "http", "os", "signal", "strings",
 		"syscall", "time", "aws", "config", "credentials", "s3", "consulapi",
 		"pgxpool", "redis", "kadm", "kgo",
+		"otelslog", "otel", "otlploggrpc", "otlpmetricgrpc", "otlptracegrpc",
+		"otellogglobal", "propagation", "sdklog", "sdkmetric", "resource",
+		"sdktrace", "semconv",
 		// Common Go predeclared identifiers
 		"any", "append", "bool", "byte", "cap", "clear", "close", "complex",
 		"copy", "delete", "error", "false", "imag", "int", "len", "make",

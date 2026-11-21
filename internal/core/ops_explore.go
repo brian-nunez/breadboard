@@ -630,3 +630,266 @@ func parseS3Objects(data []byte) (S3Bucket, error) {
 
 	return b, nil
 }
+
+// --- OpenTelemetry (LGTM) ---------------------------------------------------
+
+// OtelMetricLimit caps how many metric names the OTel explorer returns.
+const OtelMetricLimit = 200
+
+// OtelTelemetry summarizes live telemetry in an otel (LGTM) service, reading
+// only the loopback backends whose signals are enabled.
+type OtelTelemetry struct {
+	Signals        []string // enabled signals: logs, metrics, traces
+	LogsEnabled    bool
+	MetricsEnabled bool
+	TracesEnabled  bool
+	TraceServices  []string
+	Traces         []OtelTrace
+	MetricServices []string
+	Metrics        []string
+	MetricsMore    bool
+	LogServices    []string
+	Logs           []OtelLog
+}
+
+// OtelTrace is one recent trace from Tempo.
+type OtelTrace struct {
+	TraceID     string
+	RootService string
+	RootName    string
+	DurationMS  int64
+	Spans       int
+}
+
+// OtelLog is one recent structured log record from Loki.
+type OtelLog struct {
+	Timestamp string
+	Service   string
+	Severity  string
+	TraceID   string
+	Body      string
+}
+
+// OtelTelemetry queries the enabled loopback backends (Tempo, Prometheus,
+// Loki) inside the otel container through docker exec (ADR-0012).
+func (e *Engine) OtelTelemetry(ctx context.Context, req ExploreRequest) (*OtelTelemetry, error) {
+	svc, run, err := e.explore(ctx, req, "otel")
+	if err != nil {
+		return nil, err
+	}
+
+	logsOn, metricsOn, tracesOn := catalog.OtelSignals(svc.Config["signals"])
+	res := &OtelTelemetry{
+		LogsEnabled:    logsOn,
+		MetricsEnabled: metricsOn,
+		TracesEnabled:  tracesOn,
+	}
+
+	if logsOn {
+		res.Signals = append(res.Signals, "logs")
+	}
+
+	if metricsOn {
+		res.Signals = append(res.Signals, "metrics")
+	}
+
+	if tracesOn {
+		res.Signals = append(res.Signals, "traces")
+	}
+
+	if tracesOn {
+		out, err := run("curl", "-sf", "http://127.0.0.1:3200/api/search?limit=20")
+		if err != nil {
+			return nil, fmt.Errorf("tempo search: %w", err)
+		}
+
+		res.Traces, err = parseTempoTraces(out)
+		if err != nil {
+			return nil, err
+		}
+
+		tagOut, err := run("curl", "-sf", "http://127.0.0.1:3200/api/search/tag/service.name/values")
+		if err == nil {
+			res.TraceServices = parseTempoTagValues(tagOut)
+		}
+	}
+
+	if metricsOn {
+		out, err := run("curl", "-sf", "http://127.0.0.1:9090/api/v1/label/__name__/values")
+		if err != nil {
+			return nil, fmt.Errorf("prometheus metrics: %w", err)
+		}
+
+		names, err := parsePromLabelValues(out)
+		if err != nil {
+			return nil, err
+		}
+
+		slices.Sort(names)
+
+		if len(names) > OtelMetricLimit {
+			res.Metrics = names[:OtelMetricLimit]
+			res.MetricsMore = true
+		} else {
+			res.Metrics = names
+		}
+
+		svcOut, err := run("curl", "-sf", "http://127.0.0.1:9090/api/v1/label/service_name/values")
+		if err == nil {
+			if svcs, err := parsePromLabelValues(svcOut); err == nil {
+				slices.Sort(svcs)
+				res.MetricServices = svcs
+			}
+		}
+	}
+
+	if logsOn {
+		svcOut, err := run("curl", "-sf", "http://127.0.0.1:3100/loki/api/v1/label/service_name/values")
+		if err != nil {
+			return nil, fmt.Errorf("loki services: %w", err)
+		}
+
+		svcs, err := parsePromLabelValues(svcOut)
+		if err != nil {
+			return nil, err
+		}
+
+		slices.Sort(svcs)
+		res.LogServices = svcs
+
+		if len(svcs) > 0 {
+			logOut, err := run("curl", "-sf", "-G", "http://127.0.0.1:3100/loki/api/v1/query_range",
+				"--data-urlencode", `query={service_name=~".+"}`,
+				"--data-urlencode", "limit=30",
+				"--data-urlencode", "direction=backward",
+			)
+			if err != nil {
+				return nil, fmt.Errorf("loki query_range: %w", err)
+			}
+
+			res.Logs, err = parseLokiLogs(logOut)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return res, nil
+}
+
+func parseTempoTraces(data []byte) ([]OtelTrace, error) {
+	var doc struct {
+		Traces []struct {
+			TraceID         string `json:"traceID"`
+			RootServiceName string `json:"rootServiceName"`
+			RootTraceName   string `json:"rootTraceName"`
+			DurationMS      int64  `json:"durationMs"`
+			SpanSet         *struct {
+				Matched int `json:"matched"`
+			} `json:"spanSet"`
+			SpanSets []struct {
+				Matched int `json:"matched"`
+			} `json:"spanSets"`
+		} `json:"traces"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("tempo search: %w", err)
+	}
+
+	out := make([]OtelTrace, 0, len(doc.Traces))
+	for _, tr := range doc.Traces {
+		spans := 0
+		if tr.SpanSet != nil {
+			spans = tr.SpanSet.Matched
+		} else {
+			for _, ss := range tr.SpanSets {
+				spans += ss.Matched
+			}
+		}
+
+		out = append(out, OtelTrace{
+			TraceID:     tr.TraceID,
+			RootService: tr.RootServiceName,
+			RootName:    tr.RootTraceName,
+			DurationMS:  tr.DurationMS,
+			Spans:       spans,
+		})
+	}
+
+	return out, nil
+}
+
+func parseTempoTagValues(data []byte) []string {
+	var doc struct {
+		TagValues []string `json:"tagValues"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+
+	slices.Sort(doc.TagValues)
+
+	return doc.TagValues
+}
+
+func parsePromLabelValues(data []byte) ([]string, error) {
+	var doc struct {
+		Status string   `json:"status"`
+		Data   []string `json:"data"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("label values: %w", err)
+	}
+
+	return doc.Data, nil
+}
+
+func parseLokiLogs(data []byte) ([]OtelLog, error) {
+	var doc struct {
+		Data struct {
+			Result []struct {
+				Stream map[string]string `json:"stream"`
+				Values [][]string        `json:"values"`
+			} `json:"result"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("loki logs: %w", err)
+	}
+
+	var out []OtelLog
+
+	for _, r := range doc.Data.Result {
+		svc := r.Stream["service_name"]
+
+		sev := r.Stream["severity_text"]
+		if sev == "" {
+			sev = r.Stream["detected_level"]
+		}
+
+		tid := r.Stream["trace_id"]
+		for _, pair := range r.Values {
+			if len(pair) < 2 {
+				continue
+			}
+
+			out = append(out, OtelLog{
+				Timestamp: pair[0],
+				Service:   svc,
+				Severity:  sev,
+				TraceID:   tid,
+				Body:      pair[1],
+			})
+		}
+	}
+
+	slices.SortFunc(out, func(a, b OtelLog) int {
+		return strings.Compare(b.Timestamp, a.Timestamp)
+	})
+
+	if len(out) > 30 {
+		out = out[:30]
+	}
+
+	return out, nil
+}

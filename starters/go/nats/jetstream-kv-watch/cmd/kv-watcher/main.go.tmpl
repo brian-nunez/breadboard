@@ -1,0 +1,71 @@
+// Command kv-watcher runs two replicas streaming real-time updates from the
+// JetStream KV bucket "flags" using kv.WatchAll — zero polling required.
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	instance := os.Getenv("BB_SERVICE")
+	if instance == "" {
+		instance = "kv-watcher"
+	}
+
+	nc, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.Name(instance))
+	if err != nil {
+		log.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Close()
+
+	js, err := jetstream.New(nc)
+	if err != nil {
+		log.Fatalf("jetstream init: %v", err)
+	}
+
+	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
+		Bucket:  "flags",
+		History: 5,
+		Storage: jetstream.FileStorage,
+	})
+	if err != nil {
+		log.Fatalf("open kv bucket flags: %v", err)
+	}
+
+	watcher, err := kv.WatchAll(ctx)
+	if err != nil {
+		log.Fatalf("watch kv bucket flags: %v", err)
+	}
+	defer func() { _ = watcher.Stop() }()
+
+	log.Printf("%s watching KV bucket flags (zero polling)", instance)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case entry, ok := <-watcher.Updates():
+			if !ok {
+				time.Sleep(time.Second)
+				return
+			}
+			if entry == nil {
+				log.Printf("%s initial KV snapshot complete", instance)
+				continue
+			}
+			log.Printf("%s watch op=%s key=%s value=%q rev=%d",
+				instance, entry.Operation(), entry.Key(), string(entry.Value()), entry.Revision())
+		}
+	}
+}

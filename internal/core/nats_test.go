@@ -81,3 +81,40 @@ func TestNatsOverviewExplorer(t *testing.T) {
 		t.Fatalf("unexpected KV stream: %+v", got.Streams[1])
 	}
 }
+
+func TestApplyNatsStarters(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+
+	for _, id := range []string{"nats/core-pubsub-request-reply", "nats/jetstream-workqueue", "nats/jetstream-kv-watch"} {
+		res, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: id})
+		if err != nil {
+			t.Fatalf("apply %s: %v", id, err)
+		}
+
+		if len(res.Written) == 0 {
+			t.Errorf("%s wrote no files", id)
+		}
+	}
+
+	raw, err := os.ReadFile(filepath.Join(h.dir, "experiment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	specText := string(raw)
+	for _, want := range []string{
+		"type: nats",
+		"nats-responder:",
+		"nats-audit:",
+		"nats-requester:",
+		"js-producer:",
+		"js-worker:",
+		"kv-admin:",
+		"kv-watcher:",
+	} {
+		if !strings.Contains(specText, want) {
+			t.Errorf("experiment.yaml missing %q:\n%s", want, specText)
+		}
+	}
+}

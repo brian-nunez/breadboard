@@ -37,19 +37,23 @@ func init() {
 			{"Core NATS concepts", "https://docs.nats.io/nats-concepts/core-nats"},
 			{"JetStream persistence", "https://docs.nats.io/nats-concepts/jetstream"},
 		},
+		Starters: []string{"nats/core-pubsub-request-reply", "nats/jetstream-workqueue", "nats/jetstream-kv-watch"},
 		Guides: []guide{
 			{
 				Slug: "core-messaging", Title: "Core NATS: subjects, queue groups, and request-reply", Summary: "At-most-once messaging with wildcards, load-balanced queue groups, and built-in RPC.",
+				Starter:  "nats/core-pubsub-request-reply",
 				Sections: []docSection{{"subjects", "Subjects and wildcards"}, {"queues", "Queue groups"}, {"reqreply", "Request-reply RPC"}},
 				Body:     natsCoreGuide(),
 			},
 			{
 				Slug: "jetstream-workqueues", Title: "JetStream streams and work queues", Summary: "Durable WorkQueue streams, message deduplication, pull consumers, Ack, and NakWithDelay.",
+				Starter:  "nats/jetstream-workqueue",
 				Sections: []docSection{{"workqueue", "WorkQueue retention vs Kafka"}, {"pull", "Durable pull consumers"}, {"retries", "Ack, NakWithDelay, and MaxDeliver"}},
 				Body:     natsWorkQueueGuide(),
 			},
 			{
 				Slug: "jetstream-kv", Title: "JetStream Key-Value and live watches", Summary: "Versioned distributed config, optimistic concurrency via revision checks, and push watches.",
+				Starter:  "nats/jetstream-kv-watch",
 				Sections: []docSection{{"buckets", "KV buckets on JetStream"}, {"cas", "Optimistic concurrency with Update"}, {"watch", "Reactive Watch without polling"}},
 				Body:     natsKVGuide(),
 			},

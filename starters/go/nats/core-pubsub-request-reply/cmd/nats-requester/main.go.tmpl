@@ -1,0 +1,77 @@
+// Command nats-requester sends synchronous request-reply RPCs to
+// pricing.quote.<region>, tallies which responder replica answered each call,
+// and publishes a fire-and-forget event on pricing.events.quoted.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"slices"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/nats-io/nats.go"
+)
+
+type quoteReply struct {
+	SKU        string `json:"sku"`
+	Region     string `json:"region"`
+	PriceCents int    `json:"price_cents"`
+	Responder  string `json:"responder"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	nc, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.Name("nats-requester"))
+	if err != nil {
+		log.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Close()
+
+	regions := []string{"us", "eu", "apac"}
+	tally := map[string]int{}
+	seq := 0
+
+	ticker := time.NewTicker(1500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		seq++
+		region := regions[seq%len(regions)]
+		sku := fmt.Sprintf("EV-CHARGER-%03d", seq)
+		payload, _ := json.Marshal(map[string]string{"sku": sku})
+
+		msg, err := nc.Request("pricing.quote."+region, payload, 2*time.Second)
+		if err != nil {
+			log.Printf("request #%d pricing.quote.%s failed: %v", seq, region, err)
+		} else {
+			var reply quoteReply
+			_ = json.Unmarshal(msg.Data, &reply)
+			tally[reply.Responder]++
+
+			// Publish an asynchronous broadcast event observed by nats-audit.
+			_ = nc.Publish("pricing.events.quoted", msg.Data)
+
+			var counts []string
+			for k, v := range tally {
+				counts = append(counts, fmt.Sprintf("%s=%d", k, v))
+			}
+			slices.Sort(counts)
+			log.Printf("quote #%d subject=pricing.quote.%s sku=%s price=%d responder=%s tally=[%s]",
+				seq, region, reply.SKU, reply.PriceCents, reply.Responder, strings.Join(counts, ", "))
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}

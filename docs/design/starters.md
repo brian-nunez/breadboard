@@ -230,3 +230,6 @@ Each catalog type maps to one client package in `starters.sdkImports` (a test fa
 | `opensearch/search-basics` | 5+ | Explicit `text`/`keyword`/numeric mappings, bulk indexing of 40 Washington State DOL EV registrations (`data.wa.gov`), typo-tolerant BM25 queries, cached filters, and faceted aggregations (`host: true`). |
 | `opensearch/postgres-cdc-sync` | 5+ | CQRS search read-model projection (`postgres` → `kafka` → `opensearch`) on 40 Washington State EV registrations with manual Kafka offset commits and live lag tracking (`host: true`). |
 | `opensearch/zero-downtime-reindex` | 5+ | Immutable mapping migration on 40 Washington State EV registrations (`v1` → `v2`) via server-side `_reindex` and atomic `_aliases` swap while live queries run with zero errors (`host: true`). |
+| `nats/core-pubsub-request-reply` | 5+ | Core NATS subject wildcards (`*`, `>`), zero-config load balancing via queue groups across replicas, and built-in request-reply RPC over TLS. |
+| `nats/jetstream-workqueue` | 5+ | JetStream `WorkQueuePolicy` stream with `Nats-Msg-Id` deduplication, a shared Pull Consumer across replicas, `NakWithDelay` retries, and delete-on-ack. |
+| `nats/jetstream-kv-watch` | 5+ | JetStream Key-Value bucket with revision history, optimistic concurrency (`kv.Update` CAS conflict rejection), and zero-polling `WatchAll` across replicas. |

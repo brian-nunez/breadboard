@@ -1,0 +1,109 @@
+// Command js-worker runs two replicas sharing one durable JetStream Pull
+// Consumer ("job-workers") on stream JOBS. Every 5th job simulates a transient
+// error on delivery 1 using NakWithDelay so learners can watch automatic
+// redelivery and explicit Ack deletion from the WorkQueue stream.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+)
+
+type job struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Attempt int    `json:"seq"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	instance := os.Getenv("BB_SERVICE")
+	if instance == "" {
+		instance = "js-worker"
+	}
+
+	nc, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.Name(instance))
+	if err != nil {
+		log.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Close()
+
+	js, err := jetstream.New(nc)
+	if err != nil {
+		log.Fatalf("jetstream init: %v", err)
+	}
+
+	// Ensure stream exists even if worker starts before producer.
+	stream, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
+		Name:       "JOBS",
+		Subjects:   []string{"jobs.*"},
+		Retention:  jetstream.WorkQueuePolicy,
+		Storage:    jetstream.FileStorage,
+		Duplicates: 2 * time.Minute,
+	})
+	if err != nil {
+		log.Fatalf("ensure stream JOBS: %v", err)
+	}
+
+	cons, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
+		Durable:       "job-workers",
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		AckWait:       5 * time.Second,
+		MaxDeliver:    3,
+		MaxAckPending: 10,
+	})
+	if err != nil {
+		log.Fatalf("create consumer job-workers: %v", err)
+	}
+	log.Printf("%s pulling from stream=JOBS consumer=job-workers", instance)
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		batch, err := cons.Fetch(4, jetstream.FetchMaxWait(2*time.Second))
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, nats.ErrTimeout) {
+				continue
+			}
+			log.Printf("%s fetch warning: %v", instance, err)
+			time.Sleep(time.Second)
+			continue
+		}
+
+		for msg := range batch.Messages() {
+			var j job
+			_ = json.Unmarshal(msg.Data(), &j)
+			meta, _ := msg.Metadata()
+			delivered := uint64(1)
+			if meta != nil {
+				delivered = meta.NumDelivered
+			}
+
+			// Simulate a transient failure on delivery 1 for every 5th job.
+			if j.Attempt%5 == 0 && delivered == 1 {
+				_ = msg.NakWithDelay(500 * time.Millisecond)
+				log.Printf("%s nak_retry id=%s kind=%s delivered=%d (transient error)", instance, j.ID, j.Kind, delivered)
+				continue
+			}
+
+			if err := msg.Ack(); err != nil {
+				log.Printf("%s ack error id=%s: %v", instance, j.ID, err)
+				continue
+			}
+			log.Printf("%s acked id=%s kind=%s delivered=%d", instance, j.ID, j.Kind, delivered)
+		}
+	}
+}

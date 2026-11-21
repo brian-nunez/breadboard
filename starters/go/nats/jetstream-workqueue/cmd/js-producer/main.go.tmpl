@@ -1,0 +1,88 @@
+// Command js-producer creates a JetStream WorkQueue stream ("JOBS") and
+// publishes jobs with Nats-Msg-Id deduplication headers. Every 6th publish
+// intentionally resends the previous message ID to demonstrate server-side
+// deduplication (ack.Duplicate == true).
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
+)
+
+type job struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Attempt int    `json:"seq"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	nc, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.Name("js-producer"))
+	if err != nil {
+		log.Fatalf("nats connect: %v", err)
+	}
+	defer nc.Close()
+
+	js, err := jetstream.New(nc)
+	if err != nil {
+		log.Fatalf("jetstream init: %v", err)
+	}
+
+	// WorkQueuePolicy deletes each message from the stream once acknowledged by
+	// a consumer, ensuring every job is processed by at most one worker pool.
+	if _, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
+		Name:       "JOBS",
+		Subjects:   []string{"jobs.*"},
+		Retention:  jetstream.WorkQueuePolicy,
+		Storage:    jetstream.FileStorage,
+		Duplicates: 2 * time.Minute,
+	}); err != nil {
+		log.Fatalf("create stream JOBS: %v", err)
+	}
+	log.Println("stream JOBS (WorkQueuePolicy) ready")
+
+	kinds := []string{"invoice", "thumbnail", "report"}
+	seq := 0
+	lastID := ""
+
+	ticker := time.NewTicker(1500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		seq++
+		kind := kinds[seq%len(kinds)]
+		msgID := fmt.Sprintf("job-%04d", seq)
+		if seq%6 == 0 && lastID != "" {
+			// Resend the previous ID to prove JetStream deduplicates within the window.
+			msgID = lastID
+		} else {
+			lastID = msgID
+		}
+
+		payload, _ := json.Marshal(job{ID: msgID, Kind: kind, Attempt: seq})
+		ack, err := js.Publish(ctx, "jobs."+kind, payload, jetstream.WithMsgID(msgID))
+		if err != nil {
+			log.Printf("publish %s failed: %v", msgID, err)
+		} else {
+			log.Printf("published subject=jobs.%s id=%s stream=%s seq=%d duplicate=%v",
+				kind, msgID, ack.Stream, ack.Sequence, ack.Duplicate)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}

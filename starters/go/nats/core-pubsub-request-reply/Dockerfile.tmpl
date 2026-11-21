@@ -1,0 +1,18 @@
+FROM golang:{{.GoImage}} AS dev
+ENV CGO_ENABLED=0
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/go-build go build -o /usr/local/bin/ ./cmd/...
+
+FROM alpine:{{.AlpineVersion}} AS prod
+ARG APP=nats-responder
+LABEL maintainer="Your Name <you@example.com>" \
+      version="0.1.0" \
+      description="Core NATS pub/sub, queue groups, and request-reply RPC" \
+      platform="linux"
+RUN adduser -D -u 10001 app
+COPY --from=dev /usr/local/bin/${APP} /usr/local/bin/app
+USER app
+ENTRYPOINT ["/usr/local/bin/app"]

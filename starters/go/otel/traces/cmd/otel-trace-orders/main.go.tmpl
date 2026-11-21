@@ -1,0 +1,136 @@
+// Command otel-trace-orders handles order creation and calls otel-trace-inventory
+// over HTTPS, carrying the incoming trace context into the downstream hop.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	shutdown := initTracer(ctx, "otel-trace-orders")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	invURL := fmt.Sprintf("https://otel-trace-inventory.%s:8443/reserve", labDomain())
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   5 * time.Second,
+	}
+	tracer := otel.Tracer("otel-trace-orders")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/orders", func(w http.ResponseWriter, r *http.Request) {
+		orderID := r.URL.Query().Get("order")
+		sku := r.URL.Query().Get("sku")
+
+		spanCtx, span := tracer.Start(r.Context(), "orders.create",
+			trace.WithAttributes(
+				attribute.String("order.id", orderID),
+				attribute.String("item.sku", sku),
+			),
+		)
+		defer span.End()
+
+		req, err := http.NewRequestWithContext(spanCtx, http.MethodPost, invURL+"?"+r.URL.RawQuery, nil)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 400 {
+			err := fmt.Errorf("inventory rejected order %s: %s", orderID, strings.TrimSpace(string(body)))
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			http.Error(w, err.Error(), resp.StatusCode)
+			return
+		}
+
+		span.AddEvent("order confirmed")
+		fmt.Fprintf(w, "order=%s confirmed (%s)\n", orderID, strings.TrimSpace(string(body)))
+	})
+
+	srv := &http.Server{
+		Addr:              ":8443",
+		Handler:           otelhttp.NewHandler(mux, "orders"),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(c)
+	}()
+
+	log.Printf("otel-trace-orders listening on :8443 (calling %s)", invURL)
+	if err := srv.ListenAndServeTLS(os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE")); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}
+
+func initTracer(ctx context.Context, fallback string) func(context.Context) error {
+	name := os.Getenv("BB_SERVICE")
+	if name == "" {
+		name = fallback
+	}
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(name), semconv.ServiceInstanceID(name)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")))
+	if err != nil {
+		log.Fatalf("otel trace exporter: %v", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	return tp.Shutdown
+}
+
+func labDomain() string {
+	if _, d, ok := strings.Cut(os.Getenv("BB_FQDN"), "."); ok && d != "" {
+		return d
+	}
+	return "{{.Domain}}"
+}

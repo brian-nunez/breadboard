@@ -1,0 +1,26 @@
+# otel/logs
+
+Multi-service structured logging in Go using `log/slog` bridged to OpenTelemetry via [`otelslog`](https://pkg.go.dev/go.opentelemetry.io/contrib/bridges/otelslog), exported over OTLP gRPC TLS to Breadboard's `otel` (LGTM) service (`signals: logs`).
+
+- `cmd/otel-log-client`: sends a job request every 2 seconds with an `X-Request-Id` header and emits structured `INFO` / `WARN` logs.
+- `cmd/otel-log-api`: receives the HTTPS request, logs structured attributes (`request_id`, `customer`, `amount`), and dispatches to `otel-log-worker`.
+- `cmd/otel-log-worker`: processes the job and logs `INFO` on success, `WARN` on retries, and `ERROR` when `fail=true` — all tagged with the same `request_id` across all three services.
+
+Open Grafana at the host URL `bb status` prints (credentials in `bb creds otel`) → Explore → Loki, or inspect recent logs in `bb serve` under **otel → Telemetry**.
+
+```sh
+bb up
+bb status
+bb logs otel-log-client -f
+```
+
+## Try this
+
+- **Filter across services by `request_id`.** In Grafana → Explore → Loki, run `{service_name=~"otel-log-.+"} | request_id="req-5"` to follow one request across client, API, and worker.
+- **Filter by severity.** Run `{service_name="otel-log-worker"} | severity_text="ERROR"` to isolate failed jobs without grepping container stdout.
+- **Compare with file shipping.** Contrast OTLP push logging here with `sidecar/log-shipper` (Fluent Bit tailing log files into S3).
+
+## Break this
+
+- **Drop the logger shutdown.** Remove `lp.Shutdown(...)` before exit and stop a service; records sitting in `sdklog.NewBatchProcessor` are lost.
+- **Add traces alongside logs.** Run `bb starter otel/traces` in the same lab — Breadboard merges `traces` into `otel`'s `config.signals` automatically without overwriting `logs`.

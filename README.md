@@ -191,6 +191,14 @@ List them with `bb starters` and apply one with `bb starter <id>`. Each one adds
 | `consul/service-discovery` | Recommended: a Consul sidecar agent registers each service; resolving services by name. |
 | `consul/self-registration` | The alternative: each service registers and deregisters itself through the Consul API. |
 
+**OpenTelemetry (LGTM)**
+
+| Starter | What you see |
+| ------- | ------------ |
+| `otel/traces` | Multi-service W3C `traceparent` propagation over HTTPS (`otelhttp`), custom spans and errors in Tempo (`signals: traces`). |
+| `otel/metrics` | Counters, UpDownCounters, explicit-bucket Histograms, `otelhttp` and Go runtime metrics across replicas in Prometheus (`signals: metrics`). |
+| `otel/logs` | Multi-service `log/slog` structured logs bridged via `otelslog` to Loki (`signals: logs`). |
+
 **Sidecars**
 
 | Starter | What you see |

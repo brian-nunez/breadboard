@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -37,6 +38,58 @@ func TestAddServiceWithConfig(t *testing.T) {
 		Config: map[string]string{"signals": "invalid"},
 	}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("invalid config error = %v, want ErrValidation", err)
+	}
+}
+
+func TestApplyOtelStartersAndSignalMerging(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+
+	// 1. Apply otel/traces -> creates otel with signals: traces and host: true.
+	res, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: "otel/traces"})
+	if err != nil {
+		t.Fatalf("apply otel/traces: %v", err)
+	}
+
+	if !slices.Contains(res.AddedServices, "otel") {
+		t.Fatalf("expected otel in AddedServices, got %v", res.AddedServices)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(h.dir, "experiment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(raw), "signals: traces") || !strings.Contains(string(raw), "host: true") {
+		t.Fatalf("expected signals: traces and host: true:\n%s", raw)
+	}
+
+	// 2. Apply otel/metrics in the same lab -> merges metrics into existing otel.
+	if _, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: "otel/metrics"}); err != nil {
+		t.Fatalf("apply otel/metrics: %v", err)
+	}
+
+	raw, err = os.ReadFile(filepath.Join(h.dir, "experiment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(raw), "signals: metrics,traces") {
+		t.Fatalf("expected merged signals: metrics,traces:\n%s", raw)
+	}
+
+	// 3. Apply otel/logs -> merges all three signals.
+	if _, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: "otel/logs"}); err != nil {
+		t.Fatalf("apply otel/logs: %v", err)
+	}
+
+	raw, err = os.ReadFile(filepath.Join(h.dir, "experiment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(raw), "signals: logs,metrics,traces") {
+		t.Fatalf("expected merged signals: logs,metrics,traces:\n%s", raw)
 	}
 }
 

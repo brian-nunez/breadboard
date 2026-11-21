@@ -1,0 +1,127 @@
+// Command otel-trace-client drives multi-service checkouts over HTTPS,
+// creating the root span and propagating W3C traceparent headers via otelhttp.
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	shutdown := initTracer(ctx, "otel-trace-client")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	domain := labDomain()
+	gatewayURL := fmt.Sprintf("https://otel-trace-gateway.%s:8443/checkout", domain)
+
+	// otelhttp.NewTransport wraps http.DefaultTransport (which trusts SSL_CERT_FILE)
+	// so every outbound request creates a client span and injects traceparent.
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   5 * time.Second,
+	}
+	tracer := otel.Tracer("otel-trace-client")
+	skus := []string{"widget-a", "widget-b", "gadget-c"}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for n := 1; ; n++ {
+		sku := skus[n%len(skus)]
+		fail := n%5 == 0
+		reqURL := fmt.Sprintf("%s?order=%d&sku=%s&fail=%t", gatewayURL, n, sku, fail)
+
+		reqCtx, span := tracer.Start(ctx, "checkout.request",
+			trace.WithAttributes(
+				attribute.Int("order.id", n),
+				attribute.String("item.sku", sku),
+			),
+		)
+
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, reqURL, nil)
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			span.End()
+			log.Printf("build request: %v", err)
+		} else {
+			resp, err := client.Do(req)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				log.Printf("order=%d trace_id=%s err=%v", n, span.SpanContext().TraceID(), err)
+			} else {
+				body, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				if resp.StatusCode >= 400 {
+					span.SetStatus(codes.Error, resp.Status)
+				}
+				log.Printf("order=%d sku=%s status=%d trace_id=%s body=%s",
+					n, sku, resp.StatusCode, span.SpanContext().TraceID(), strings.TrimSpace(string(body)))
+			}
+			span.End()
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func initTracer(ctx context.Context, fallback string) func(context.Context) error {
+	name := os.Getenv("BB_SERVICE")
+	if name == "" {
+		name = fallback
+	}
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(name), semconv.ServiceInstanceID(name)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	// WithEndpointURL uses TLS automatically for https:// endpoints and reads SSL_CERT_FILE.
+	exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")))
+	if err != nil {
+		log.Fatalf("otel trace exporter: %v", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	return tp.Shutdown
+}
+
+func labDomain() string {
+	if _, d, ok := strings.Cut(os.Getenv("BB_FQDN"), "."); ok && d != "" {
+		return d
+	}
+	return "{{.Domain}}"
+}

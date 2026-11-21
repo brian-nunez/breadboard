@@ -1,0 +1,104 @@
+// Command otel-log-client sends requests with an X-Request-Id header and emits
+// structured slog records bridged to OTLP/Loki via otelslog.
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	otellogglobal "go.opentelemetry.io/otel/log/global"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger, shutdown := initLogger(ctx, "otel-log-client")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	apiURL := fmt.Sprintf("https://otel-log-api.%s:8443/jobs", labDomain())
+	client := &http.Client{Timeout: 5 * time.Second}
+	customers := []string{"alice", "bob", "carol"}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for n := 1; ; n++ {
+		reqID := fmt.Sprintf("req-%d", n)
+		customer := customers[n%len(customers)]
+		fail := n%4 == 0
+		reqURL := fmt.Sprintf("%s?customer=%s&amount=%d&fail=%t", apiURL, customer, n*10, fail)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, nil)
+		if err == nil {
+			req.Header.Set("X-Request-Id", reqID)
+			logger.InfoContext(ctx, "submitting job", "request_id", reqID, "customer", customer)
+			resp, err := client.Do(req)
+			if err != nil {
+				logger.ErrorContext(ctx, "job request failed", "request_id", reqID, "err", err.Error())
+				log.Printf("request_id=%s err=%v", reqID, err)
+			} else {
+				body, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				if resp.StatusCode >= 400 {
+					logger.WarnContext(ctx, "job rejected", "request_id", reqID, "status", resp.StatusCode)
+				} else {
+					logger.InfoContext(ctx, "job accepted", "request_id", reqID, "status", resp.StatusCode)
+				}
+				log.Printf("request_id=%s status=%d body=%s", reqID, resp.StatusCode, strings.TrimSpace(string(body)))
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func initLogger(ctx context.Context, fallback string) (*slog.Logger, func(context.Context) error) {
+	name := os.Getenv("BB_SERVICE")
+	if name == "" {
+		name = fallback
+	}
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(name), semconv.ServiceInstanceID(name)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	exp, err := otlploggrpc.New(ctx, otlploggrpc.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")))
+	if err != nil {
+		log.Fatalf("otel log exporter: %v", err)
+	}
+	lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(exp)), sdklog.WithResource(res))
+	otellogglobal.SetLoggerProvider(lp)
+	return otelslog.NewLogger(name), lp.Shutdown
+}
+
+func labDomain() string {
+	if _, d, ok := strings.Cut(os.Getenv("BB_FQDN"), "."); ok && d != "" {
+		return d
+	}
+	return "{{.Domain}}"
+}

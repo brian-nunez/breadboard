@@ -1,0 +1,94 @@
+// Command otel-log-worker executes jobs and emits structured INFO/WARN/ERROR
+// logs bridged to Loki via otelslog, preserving X-Request-Id for cross-service queries.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/contrib/bridges/otelslog"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	otellogglobal "go.opentelemetry.io/otel/log/global"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger, shutdown := initLogger(ctx, "otel-log-worker")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/work", func(w http.ResponseWriter, r *http.Request) {
+		reqID := r.Header.Get("X-Request-Id")
+		customer := r.URL.Query().Get("customer")
+		amount := r.URL.Query().Get("amount")
+
+		time.Sleep(25 * time.Millisecond)
+
+		if r.URL.Query().Get("fail") == "true" {
+			logger.ErrorContext(r.Context(), "payment authorization declined",
+				"request_id", reqID, "customer", customer, "amount", amount, "reason", "card_declined")
+			http.Error(w, "card declined", http.StatusPaymentRequired)
+			return
+		}
+
+		logger.InfoContext(r.Context(), "payment captured",
+			"request_id", reqID, "customer", customer, "amount", amount)
+		fmt.Fprintf(w, "captured request_id=%s customer=%s\n", reqID, customer)
+	})
+
+	srv := &http.Server{
+		Addr:              ":8443",
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(c)
+	}()
+
+	log.Println("otel-log-worker listening on :8443")
+	if err := srv.ListenAndServeTLS(os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE")); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}
+
+func initLogger(ctx context.Context, fallback string) (*slog.Logger, func(context.Context) error) {
+	name := os.Getenv("BB_SERVICE")
+	if name == "" {
+		name = fallback
+	}
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(name), semconv.ServiceInstanceID(name)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	exp, err := otlploggrpc.New(ctx, otlploggrpc.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")))
+	if err != nil {
+		log.Fatalf("otel log exporter: %v", err)
+	}
+	lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(exp)), sdklog.WithResource(res))
+	otellogglobal.SetLoggerProvider(lp)
+	return otelslog.NewLogger(name), lp.Shutdown
+}

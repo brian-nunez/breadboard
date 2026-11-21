@@ -221,3 +221,6 @@ Each catalog type maps to one client package in `starters.sdkImports` (a test fa
 | `gw/forward-auth` | 5 | Delegated authentication with Traefik `forwardAuth`: an auth service decides every request, returns identity headers, and revokes sessions at once. |
 | `gw/bff-aggregation` | 5 | Backend for frontend behind Traefik: one call fanned out to two services concurrently and trimmed to the screen, vs gateway routing. |
 | `gw/grpc-routing` | 5 | gRPC through Envoy over HTTP/2: routing by service and method, per-call balancing, a per-method deadline ending in `DEADLINE_EXCEEDED`. |
+| `otel/traces` | 5+ | Multi-service W3C `traceparent` propagation over HTTPS with `otelhttp`, custom child spans, error recording, and Tempo (`signals: traces`, `host: true`). |
+| `otel/metrics` | 5+ | Counters, UpDownCounters, explicit-bucket Histograms, `otelhttp`, and Go runtime metrics across replicas into Prometheus (`signals: metrics`, `host: true`). |
+| `otel/logs` | 5+ | Multi-service `log/slog` structured logging bridged via `otelslog` to Loki (`signals: logs`, `host: true`). |

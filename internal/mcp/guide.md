@@ -1,6 +1,6 @@
 # Breadboard for agents
 
-Breadboard (`bb`) is a local lab for practising system design with real services. An **experiment** is a directory with an `experiment.yaml`; bb turns it into a Docker Compose project where every service is the real thing (Kafka, Postgres, Redis, Consul, an S3 compatible store, OpenTelemetry LGTM), with TLS on by default, plus the user's own app code.
+Breadboard (`bb`) is a local lab for practising system design with real services. An **experiment** is a directory with an `experiment.yaml`; bb turns it into a Docker Compose project where every service is the real thing (Kafka, Postgres, Redis, Consul, an S3 compatible store, OpenTelemetry LGTM, OpenSearch), with TLS on by default, plus the user's own app code.
 
 ## The pieces
 
@@ -8,7 +8,7 @@ Breadboard (`bb`) is a local lab for practising system design with real services
 - **Infra services** come from the catalog (`catalog`). Each runs an exact image pin with a health check and memory and CPU limits.
 - **Apps** are the user's code: a directory with a `Dockerfile` whose `dev` stage compiles the program; the binary named in `command` runs as the container's main process.
 - **Starters** (`starters`, `starter_details`) are working example apps that use each technology's official client library. `apply_starter` writes the code and adds the apps and services they need.
-- **`add_app`** starts the user's own program instead of a lesson: a minimal Go module in a new directory (`main.go`, `go.mod`, `go.sum`, `Dockerfile`, `README.md`) added to `experiment.yaml` with `path`, `command` and `uses` (default: every infra service; `uses: []` for none). `main.go` maps each used service with the exact variables `up` injects, checks them with `requireEnv`, auto-wires each service's official client (`newPostgres`, `newRedis`, `newKafkaProducer`/`newKafkaConsumer` with demo topic `events`, `newS3`, `newConsul`, `newOtel`, `newHTTPClient`) with startup connectivity verification, logs ready, and waits on `SIGTERM` so `up` succeeds immediately. The result returns the same variables. It never writes into a directory that has files.
+- **`add_app`** starts the user's own program instead of a lesson: a minimal Go module in a new directory (`main.go`, `go.mod`, `go.sum`, `Dockerfile`, `README.md`) added to `experiment.yaml` with `path`, `command` and `uses` (default: every infra service; `uses: []` for none). `main.go` maps each used service with the exact variables `up` injects, checks them with `requireEnv`, auto-wires each service's official client (`newPostgres`, `newRedis`, `newKafkaProducer`/`newKafkaConsumer` with demo topic `events`, `newS3`, `newConsul`, `newOtel`, `newOpenSearch`, `newHTTPClient`) with startup connectivity verification, logs ready, and waits on `SIGTERM` so `up` succeeds immediately. The result returns the same variables. It never writes into a directory that has files.
 - **`.bb/`** in the project holds generated state: secrets (`secrets.json`), certificates, and the rendered compose files. It is never committed. Deleting it resets credentials.
 
 ## Networking and TLS
@@ -40,7 +40,7 @@ Host access: `host: true` on an infra service with an HTTPS listener (a proxy, C
 1. `init` creates the experiment (or restores `.bb/` in a fresh clone).
 2. `add_service` adds infra; then `add_app` scaffolds the user's own program, or `apply_starter` adds a working example with its infra.
 3. `up` builds apps, starts everything and waits until every service is healthy and stays healthy. It fails if a service is unhealthy or restarts while starting.
-4. Inspect: `status` (state, health, CPU, memory, sidecars, replicas), `logs`, `creds`, `service_details`, and the explorers: `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets`, `otel_telemetry`, for proxies `haproxy_stats`, `traefik_routes` and `nginx_status`, and for Envoy and PgBouncer (sidecars or infra services) `envoy_clusters` and `pgbouncer_pools`.
+4. Inspect: `status` (state, health, CPU, memory, sidecars, replicas), `logs`, `creds`, `service_details`, and the explorers: `postgres_tables`, `redis_keys`, `consul_catalog`, `kafka_topics`, `s3_buckets`, `otel_telemetry`, `opensearch_indices`, for proxies `haproxy_stats`, `traefik_routes` and `nginx_status`, and for Envoy and PgBouncer (sidecars or infra services) `envoy_clusters` and `pgbouncer_pools`.
 5. `down` stops it; `down` with `volumes` also deletes the data.
 
 Editing `experiment.yaml` or app code takes effect on the next `up`.

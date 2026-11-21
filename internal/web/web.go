@@ -291,6 +291,8 @@ func (s *Server) explore(ctx context.Context, tab, typ, name string) (any, error
 		return s.eng.S3Buckets(ctx, req)
 	case "otel":
 		return s.eng.OtelTelemetry(ctx, req)
+	case "opensearch":
+		return s.eng.OpenSearchIndices(ctx, req)
 	case "haproxy":
 		return s.eng.HAProxyStats(ctx, req)
 	case "traefik":

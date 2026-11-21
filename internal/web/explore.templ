@@ -46,6 +46,8 @@ templ exploreResult(p servicePage) {
 				@s3Buckets(x)
 			case *core.OtelTelemetry:
 				@otelTelemetry(p.Row.Name, x)
+			case *core.OpenSearchOverview:
+				@opensearchOverview(p.Row.Name, x)
 			case *core.EnvoyClusters:
 				@envoyClusters(p.Dash.Experiment, x)
 			case *core.PgBouncerPools:
@@ -849,4 +851,80 @@ func otelCountText(enabled bool, n int) string {
 		return "disabled"
 	}
 	return commas(int64(n))
+}
+
+templ opensearchOverview(name string, x *core.OpenSearchOverview) {
+	<div class="flex flex-col gap-6">
+		@explorerCard("Cluster "+x.ClusterName, "GET /_cluster/health and /_cat/indices") {
+			<div class="grid grid-cols-1 gap-4 px-5 pb-5 md:grid-cols-4">
+				@stat("Status", x.Status)
+				@stat("Version", opensearchVersionText(x.Version))
+				@stat("Active shards", commas(int64(x.ActiveShards)))
+				@stat("Unassigned shards", commas(int64(x.UnassignedShards)))
+			</div>
+			<table class="w-full text-left text-sm">
+				<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+					<tr>
+						@th("Index")
+						@th("Aliases")
+						@th("Health")
+						@th("Shards (pri / rep)")
+						@th("Docs")
+						@th("Size")
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-slate-200">
+					for _, idx := range x.Indices {
+						<tr>
+							<td class="px-5 py-2.5 font-mono text-[13px] font-medium text-slate-900">{ idx.Name }</td>
+							<td class="px-5 py-2.5 font-mono text-xs text-slate-600">
+								if len(idx.Aliases) > 0 {
+									{ strings.Join(idx.Aliases, ", ") }
+								} else {
+									<span class="text-slate-400">—</span>
+								}
+							</td>
+							<td class="px-5 py-2.5">
+								@statusWord(opensearchHealthStatus(idx.Health))
+							</td>
+							<td class="px-5 py-2.5 font-mono text-xs text-slate-600">{ fmt.Sprintf("%d / %d", idx.Primaries, idx.Replicas) }</td>
+							<td class="px-5 py-2.5">
+								{ commas(idx.Docs) }
+								if idx.Deleted > 0 {
+									<div class="text-xs text-slate-500">{ commas(idx.Deleted) } deleted</div>
+								}
+							</td>
+							<td class="px-5 py-2.5 text-slate-600">{ size(idx.Bytes) }</td>
+						</tr>
+					}
+					if len(x.Indices) == 0 {
+						@emptyRow(6, "No user indices yet (system indices starting with '.' are hidden).")
+					}
+				</tbody>
+			</table>
+			<div class="p-5">
+				@terminal("bb creds " + name)
+			</div>
+		}
+	</div>
+}
+
+func opensearchVersionText(v string) string {
+	if v == "" {
+		return "unknown"
+	}
+	return v
+}
+
+func opensearchHealthStatus(h string) status {
+	switch h {
+	case "green":
+		return status{Word: "green", Color: "green"}
+	case "yellow":
+		return status{Word: "yellow", Color: "amber"}
+	case "red":
+		return status{Word: "red", Color: "red"}
+	default:
+		return status{Word: h, Color: "grey"}
+	}
 }

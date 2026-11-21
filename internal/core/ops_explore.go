@@ -893,3 +893,184 @@ func parseLokiLogs(data []byte) ([]OtelLog, error) {
 
 	return out, nil
 }
+
+// --- OpenSearch -------------------------------------------------------------
+
+// OpenSearchOverview summarizes cluster health and user indices inside an
+// OpenSearch service.
+type OpenSearchOverview struct {
+	Service          string
+	ClusterName      string
+	Status           string
+	Version          string
+	ActiveShards     int
+	UnassignedShards int
+	Indices          []OpenSearchIndex
+}
+
+// OpenSearchIndex is one user index (system dot-indices omitted) with its
+// health, shard counts, doc count, storage size, and aliases.
+type OpenSearchIndex struct {
+	Name      string
+	Health    string
+	Status    string
+	Primaries int
+	Replicas  int
+	Docs      int64
+	Deleted   int64
+	Bytes     int64
+	Aliases   []string
+}
+
+// OpenSearchIndices reads cluster health, user indices, and aliases over HTTPS
+// inside the OpenSearch container through docker exec (ADR-0012).
+func (e *Engine) OpenSearchIndices(ctx context.Context, req ExploreRequest) (*OpenSearchOverview, error) {
+	svc, run, err := e.explore(ctx, req, "opensearch")
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint := fmt.Sprintf("https://%s:%d", svc.FQDN, catalog.OpenSearchHTTPPort)
+	fetch := func(path string) ([]byte, error) {
+		script := fmt.Sprintf(`curl -sf --cacert %s -u "admin:$OPENSEARCH_PASSWORD" "%s%s"`, catalog.CAFile, endpoint, path)
+
+		return run("sh", "-c", script)
+	}
+
+	healthOut, err := fetch("/_cluster/health")
+	if err != nil {
+		return nil, fmt.Errorf("opensearch health: %w", err)
+	}
+
+	res, err := parseOpenSearchHealth(svc.Name, healthOut)
+	if err != nil {
+		return nil, err
+	}
+
+	if infoOut, err := fetch("/"); err == nil {
+		res.Version = parseOpenSearchVersion(infoOut)
+	}
+
+	idxOut, err := fetch("/_cat/indices?format=json&bytes=b")
+	if err != nil {
+		return nil, fmt.Errorf("opensearch indices: %w", err)
+	}
+
+	indices, err := parseOpenSearchIndices(idxOut)
+	if err != nil {
+		return nil, err
+	}
+
+	if aliasOut, err := fetch("/_cat/aliases?format=json"); err == nil {
+		applyOpenSearchAliases(indices, aliasOut)
+	}
+
+	res.Indices = indices
+
+	return res, nil
+}
+
+func parseOpenSearchHealth(service string, data []byte) (*OpenSearchOverview, error) {
+	var doc struct {
+		ClusterName      string `json:"cluster_name"`
+		Status           string `json:"status"`
+		ActiveShards     int    `json:"active_shards"`
+		UnassignedShards int    `json:"unassigned_shards"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("opensearch health: %w", err)
+	}
+
+	return &OpenSearchOverview{
+		Service:          service,
+		ClusterName:      doc.ClusterName,
+		Status:           doc.Status,
+		ActiveShards:     doc.ActiveShards,
+		UnassignedShards: doc.UnassignedShards,
+	}, nil
+}
+
+func parseOpenSearchVersion(data []byte) string {
+	var doc struct {
+		Version struct {
+			Number string `json:"number"`
+		} `json:"version"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+
+	return doc.Version.Number
+}
+
+func parseOpenSearchIndices(data []byte) ([]OpenSearchIndex, error) {
+	var rows []struct {
+		Index       string `json:"index"`
+		Health      string `json:"health"`
+		Status      string `json:"status"`
+		Pri         string `json:"pri"`
+		Rep         string `json:"rep"`
+		DocsCount   string `json:"docs.count"`
+		DocsDeleted string `json:"docs.deleted"`
+		StoreSize   string `json:"store.size"`
+	}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, fmt.Errorf("opensearch indices: %w", err)
+	}
+
+	out := make([]OpenSearchIndex, 0, len(rows))
+	for _, r := range rows {
+		if r.Index == "" || strings.HasPrefix(r.Index, ".") {
+			continue
+		}
+
+		pri, _ := strconv.Atoi(r.Pri)
+		rep, _ := strconv.Atoi(r.Rep)
+		docs, _ := strconv.ParseInt(r.DocsCount, 10, 64)
+		deleted, _ := strconv.ParseInt(r.DocsDeleted, 10, 64)
+		size, _ := strconv.ParseInt(r.StoreSize, 10, 64)
+
+		out = append(out, OpenSearchIndex{
+			Name:      r.Index,
+			Health:    r.Health,
+			Status:    r.Status,
+			Primaries: pri,
+			Replicas:  rep,
+			Docs:      docs,
+			Deleted:   deleted,
+			Bytes:     size,
+		})
+	}
+
+	slices.SortFunc(out, func(a, b OpenSearchIndex) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	return out, nil
+}
+
+func applyOpenSearchAliases(indices []OpenSearchIndex, data []byte) {
+	var rows []struct {
+		Alias string `json:"alias"`
+		Index string `json:"index"`
+	}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return
+	}
+
+	byIndex := map[string][]string{}
+
+	for _, r := range rows {
+		if r.Alias == "" || r.Index == "" || strings.HasPrefix(r.Index, ".") {
+			continue
+		}
+
+		byIndex[r.Index] = append(byIndex[r.Index], r.Alias)
+	}
+
+	for i := range indices {
+		aliases := byIndex[indices[i].Name]
+		slices.Sort(aliases)
+		indices[i].Aliases = aliases
+	}
+}

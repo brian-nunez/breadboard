@@ -107,9 +107,13 @@ func TestIntegrationSinkToPostgres(t *testing.T) {
 	eventually(t, time.Minute, "5 stored orders", func() bool {
 		return len(matches(logsOf(t, eng, dir, "sink"), stored)) >= 5
 	})
-	// Kill the sink between writes and commits, then bring it back.
-	docker(t, "kill", containerOf(t, name, "sink"))
-	upHealthy(t, eng, dir)
+	// Kill the sink between writes and commits, then bring it back without
+	// rebuilding/recreating sink-producer (Docker Compose <v5.5 can recreate
+	// unchanged built services on `up --build`, discarding earlier producer
+	// logs while Kafka keeps their records).
+	sinkID := containerOf(t, name, "sink")
+	docker(t, "kill", sinkID)
+	docker(t, "start", sinkID)
 	before := len(matches(logsOf(t, eng, dir, "sink"), stored))
 	eventually(t, time.Minute, "the restarted sink to store more", func() bool {
 		return len(matches(logsOf(t, eng, dir, "sink"), stored)) > before

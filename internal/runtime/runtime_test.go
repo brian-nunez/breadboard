@@ -162,8 +162,10 @@ func TestParsePublishedPorts(t *testing.T) {
 func TestOnlyMissingContainers(t *testing.T) {
 	for stderr, want := range map[string]bool{
 		"Error: No such object: 0123abc\n":                         true,
+		"error: no such object: 0123abc\n":                         true,
 		"Error response from daemon: No such container: 0123abc\n": true,
 		"Error: No such object: a\nError: No such container: b":    true,
+		"error: no such object: a\nerror: no such container: b":    true,
 		"":                               false,
 		"permission denied":              false,
 		"Error: No such object: a\nboom": false,

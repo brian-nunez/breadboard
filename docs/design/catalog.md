@@ -35,6 +35,7 @@ Hostnames below use the default domain and a service named after its type. Image
 | `consul` | `hashicorp/consul:1.22.7` | 256m, 0.5 cpu | 8500, bound to the segment address |
 | `s3-compatible` (Phase 2) | `chrislusf/seaweedfs:4.53` | 512m, 0.5 cpu | none |
 | `otel` | `grafana/otel-lgtm:0.41.1` | 1g, 1.0 cpu | none |
+| `opensearch` | `opensearchproject/opensearch:3.10.0` | 1536m, 1.0 cpu | none |
 
 Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/etc/bb/tls/tls.key`, both together at `/etc/bb/tls/keystore.pem`, the CA at `/etc/bb/ca.pem`, the trust bundle at `/etc/bb/trust-bundle.pem`, and entry configuration under `/etc/bb/config/`.
 
@@ -110,6 +111,16 @@ Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/et
   - `OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.bb.internal:4317`, `OTEL_EXPORTER_OTLP_HTTP_ENDPOINT=https://otel.bb.internal:4318`, `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`, `OTEL_EXPORTER_OTLP_CERTIFICATE=/etc/bb/ca.pem`
   - `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` (`otlp` when enabled, `none` otherwise)
   - `GRAFANA_URL=https://otel.bb.internal:3000`, `GRAFANA_USER=admin`, `GRAFANA_PASSWORD` (secret)
+
+### `opensearch`
+
+- Displayed as **OpenSearch**: single-node OpenSearch (`opensearchproject/opensearch:3.10.0`, ADR-0019) with the Security plugin enabled, TLS on HTTP (`9200`) and loopback transport (`127.0.0.1:9300`), and data persisted at `/usr/share/opensearch/data`.
+- **TLS & credentials.** `DISABLE_INSTALL_DEMO_CONFIG=true` and `DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI=true` skip demo certificates/passwords and the unencrypted Performance Analyzer port. `start.sh` stages the service's lab certificate and CA into `/usr/share/opensearch/config/bb-certs/` (`0600` key) and hashes the generated `.bb/secrets.json` `password` secret via `hash.sh` into `internal_users.yml` for the `admin` user. `http.publish_host` is set to `<fqdn>` so client node discovery (`/_nodes/http`) resolves the verified TLS name; `plugins.security.nodes_dn` matches `CN=<fqdn>,O=Breadboard`.
+- **Network listener (TLS only).** `https` on `9200` (so `host: true` routes `https://<name>.<experiment>.localhost:<port>` to the REST API). No plaintext listener (`tls.mode: off` refused).
+- **Pre-created indices (`config.indices`).** Optional comma-separated index names created at startup (`1` primary shard, `0` replicas for single-node `green` status).
+- **Health check.** `curl --cacert /etc/bb/ca.pem -u "admin:$OPENSEARCH_PASSWORD" "https://<fqdn>:9200/_cluster/health?wait_for_status=yellow&timeout=5s"`.
+- **Env contract:**
+  - `OPENSEARCH_URL=https://opensearch.bb.internal:9200`, `OPENSEARCH_USER=admin`, `OPENSEARCH_PASSWORD` (secret), `OPENSEARCH_CACERT=/etc/bb/ca.pem`
 
 ### Proxies (Phase 5, wave B)
 

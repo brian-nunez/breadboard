@@ -63,6 +63,7 @@ var sdkImports = map[string]string{
 	"s3-compatible": "github.com/aws/aws-sdk-go-v2/service/s3",
 	"consul":        "github.com/hashicorp/consul/api",
 	"otel":          "go.opentelemetry.io/otel",
+	"opensearch":    "github.com/opensearch-project/opensearch-go/v5/opensearchapi",
 	"haproxy":       "",
 	"envoy":         "",
 	"traefik":       "",
@@ -112,6 +113,10 @@ var envHelp = map[string]string{
 	"GRAFANA_URL":                      "Grafana HTTPS address inside the lab",
 	"GRAFANA_USER":                     "Grafana admin username",
 	"GRAFANA_PASSWORD":                 "password",
+	"OPENSEARCH_URL":                   "OpenSearch HTTPS REST endpoint (9200)",
+	"OPENSEARCH_USER":                  "OpenSearch admin username",
+	"OPENSEARCH_PASSWORD":              "password",
+	"OPENSEARCH_CACERT":                "CA file verifying the OpenSearch TLS certificate",
 }
 
 // EnvHelp says what a contract variable holds. Proxy variables are named
@@ -183,13 +188,14 @@ type appData struct {
 	NeedS3                            bool
 	NeedConsul                        bool
 	NeedOtel                          bool
+	NeedOpenSearch                    bool
 	NeedHTTP                          bool
 	Example                           string // the README's add-a-service type, free as a name; empty for a generic example
 }
 
 // exampleTypes are the types the README may suggest adding, in order:
 // each works on its own, so the example is valid in any lab.
-var exampleTypes = []string{"redis", "postgres", "kafka", "consul", "s3-compatible", "otel"}
+var exampleTypes = []string{"redis", "postgres", "kafka", "consul", "s3-compatible", "otel", "opensearch"}
 
 // exampleType is the first of exampleTypes whose name no service or app in
 // the lab (or in the app's uses) takes, so `bb add <type>` and the uses it
@@ -432,6 +438,24 @@ func buildWire(u AppUse, taken map[string]bool, d *appData) (appWire, error) {
 				"logs":     byBase["OTEL_LOGS_EXPORTER"],
 			},
 		}, nil
+	case "opensearch":
+		d.NeedOpenSearch = true
+
+		base := camel + "Search"
+		if u.Service == "opensearch" {
+			base = "search"
+		}
+
+		return appWire{
+			Service: u.Service,
+			Kind:    "opensearch",
+			Var:     claimVar(taken, base),
+			Env: map[string]string{
+				"url":      byBase["OPENSEARCH_URL"],
+				"user":     byBase["OPENSEARCH_USER"],
+				"password": byBase["OPENSEARCH_PASSWORD"],
+			},
+		}, nil
 	case "haproxy", "envoy", "traefik", "nginx":
 		d.NeedHTTP = true
 
@@ -454,11 +478,11 @@ func reservedAppVars() map[string]bool {
 		// Locals and helpers in main.go
 		"ctx", "stop", "httpClient", "main", "init", "requireEnv",
 		"newPostgres", "newRedis", "newKafkaProducer", "newKafkaConsumer",
-		"newS3", "newConsul", "newOtel", "newHTTPClient",
+		"newS3", "newConsul", "newOtel", "newOpenSearch", "newHTTPClient",
 		// Imported package identifiers
 		"context", "errors", "tls", "fmt", "log", "slog", "http", "os", "signal", "strings",
 		"syscall", "time", "aws", "config", "credentials", "s3", "consulapi",
-		"pgxpool", "redis", "kadm", "kgo",
+		"pgxpool", "redis", "kadm", "kgo", "opensearch", "opensearchapi",
 		"otelslog", "otel", "otlploggrpc", "otlpmetricgrpc", "otlptracegrpc",
 		"otellogglobal", "propagation", "sdklog", "sdkmetric", "resource",
 		"sdktrace", "semconv",

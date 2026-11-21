@@ -424,8 +424,8 @@ func parsePublishedPorts(data []byte) ([]PublishedPort, error) {
 }
 
 // missingContainer is the daemon's message for a container that does not
-// exist.
-var missingContainer = regexp.MustCompile(`^Error(: No such (object|container)| response from daemon: No such container): \S+$`)
+// exist (Docker 29+ lowercases "error: no such object: ...").
+var missingContainer = regexp.MustCompile(`(?i)^Error(: No such (object|container)| response from daemon: No such container): \S+$`)
 
 // onlyMissingContainers reports whether every line of an inspect's stderr
 // says a container does not exist.

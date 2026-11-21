@@ -87,9 +87,9 @@ func (s *Server) Connect(ctx context.Context, t sdk.Transport) (*sdk.ServerSessi
 	return s.srv.Connect(ctx, t, nil)
 }
 
-const instructions = `Breadboard (bb) runs real system design experiments locally: real services (Kafka, Postgres, Redis, Consul, S3 compatible, OpenTelemetry LGTM, OpenSearch) in Docker Compose with TLS on by default, plus app code from starters. experiment.yaml is the source of truth; every tool reads or edits it.
+const instructions = `Breadboard (bb) runs real system design experiments locally: real services (Kafka, Postgres, Redis, Consul, S3 compatible, OpenTelemetry LGTM, OpenSearch, NATS) in Docker Compose with TLS on by default, plus app code from starters. experiment.yaml is the source of truth; every tool reads or edits it.
 
-Call "guide" first for how bb works and the usual workflow. Typical flow: init, add_service, then add_app (the user's own program) or apply_starter (a working example), up, then status, logs, creds and the explorers (postgres_tables, redis_keys, consul_catalog, kafka_topics, s3_buckets, otel_telemetry, opensearch_indices; for proxies and sidecars haproxy_stats, traefik_routes, nginx_status, envoy_clusters, pgbouncer_pools) to inspect it, and down when done. Tools act on the experiment containing the directory bb mcp was started in; pass "dir" to choose another one inside it.`
+Call "guide" first for how bb works and the usual workflow. Typical flow: init, add_service, then add_app (the user's own program) or apply_starter (a working example), up, then status, logs, creds and the explorers (postgres_tables, redis_keys, consul_catalog, kafka_topics, s3_buckets, otel_telemetry, opensearch_indices, nats_overview; for proxies and sidecars haproxy_stats, traefik_routes, nginx_status, envoy_clusters, pgbouncer_pools) to inspect it, and down when done. Tools act on the experiment containing the directory bb mcp was started in; pass "dir" to choose another one inside it.`
 
 // kind is how a tool affects the system, which sets its annotations and
 // whether --read-only keeps it.

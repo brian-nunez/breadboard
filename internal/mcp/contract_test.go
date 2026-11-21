@@ -44,6 +44,7 @@ func TestMCPContractToolCatalog(t *testing.T) {
 		"s3_buckets":         {readOnly: true, idempotent: true, inReadOnly: true},
 		"otel_telemetry":     {readOnly: true, idempotent: true, inReadOnly: true},
 		"opensearch_indices": {readOnly: true, idempotent: true, inReadOnly: true},
+		"nats_overview":      {readOnly: true, idempotent: true, inReadOnly: true},
 		"haproxy_stats":      {readOnly: true, idempotent: true, inReadOnly: true},
 		"traefik_routes":     {readOnly: true, idempotent: true, inReadOnly: true},
 		"nginx_status":       {readOnly: true, idempotent: true, inReadOnly: true},

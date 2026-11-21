@@ -48,6 +48,8 @@ templ exploreResult(p servicePage) {
 				@otelTelemetry(p.Row.Name, x)
 			case *core.OpenSearchOverview:
 				@opensearchOverview(p.Row.Name, x)
+			case *core.NatsOverview:
+				@natsOverview(p.Row.Name, x)
 			case *core.EnvoyClusters:
 				@envoyClusters(p.Dash.Experiment, x)
 			case *core.PgBouncerPools:
@@ -927,4 +929,71 @@ func opensearchHealthStatus(h string) status {
 	default:
 		return status{Word: h, Color: "grey"}
 	}
+}
+
+templ natsOverview(name string, x *core.NatsOverview) {
+	<div class="flex flex-col gap-6">
+		@explorerCard("Server "+name+" (v"+x.Version+")", "GET http://127.0.0.1:8222/varz") {
+			<div class="grid grid-cols-2 gap-4 px-5 pb-5 md:grid-cols-4">
+				@stat("Connections", commas(int64(x.Connections)))
+				@stat("Subscriptions", commas(int64(x.Subscriptions)))
+				@stat("Messages (in / out)", fmt.Sprintf("%s / %s", commas(x.InMsgs), commas(x.OutMsgs)))
+				@stat("JetStream", natsJetStreamText(x))
+			</div>
+			<div class="px-5 pb-5">
+				@terminal("bb creds " + name)
+			</div>
+		}
+		if x.JetStream {
+			@explorerCard("JetStream streams & KV buckets", "GET http://127.0.0.1:8222/jsz?streams=true&consumers=true") {
+				<table class="w-full text-left text-sm">
+					<thead class="border-y border-slate-200 bg-slate-50 text-slate-500">
+						<tr>
+							@th("Name")
+							@th("Subjects")
+							@th("Retention")
+							@th("Messages")
+							@th("Size")
+							@th("Consumers")
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-200">
+						for _, st := range x.Streams {
+							<tr>
+								<td class="px-5 py-2.5 font-mono text-[13px] font-medium text-slate-900">
+									{ st.Name }
+									if st.Kind == "kv" {
+										<span class="ml-1.5 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">KV</span>
+									}
+								</td>
+								<td class="px-5 py-2.5 font-mono text-xs text-slate-600">{ strings.Join(st.Subjects, ", ") }</td>
+								<td class="px-5 py-2.5 font-mono text-xs text-slate-600">{ st.Retention }</td>
+								<td class="px-5 py-2.5">{ commas(int64(st.Messages)) }</td>
+								<td class="px-5 py-2.5 text-slate-600">{ size(int64(st.Bytes)) }</td>
+								<td class="px-5 py-2.5 text-xs text-slate-600">
+									if len(st.Consumers) == 0 {
+										<span class="text-slate-400">—</span>
+									} else {
+										for _, c := range st.Consumers {
+											<div class="font-mono">{ fmt.Sprintf("%s (pending %d, ack %d, delivered %d)", c.Name, c.Pending, c.AckPending, c.Delivered) }</div>
+										}
+									}
+								</td>
+							</tr>
+						}
+						if len(x.Streams) == 0 {
+							@emptyRow(6, "No JetStream streams or KV buckets created yet.")
+						}
+					</tbody>
+				</table>
+			}
+		}
+	</div>
+}
+
+func natsJetStreamText(x *core.NatsOverview) string {
+	if !x.JetStream {
+		return "disabled"
+	}
+	return fmt.Sprintf("enabled (%s file)", size(x.StorageBytes))
 }

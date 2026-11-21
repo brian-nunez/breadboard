@@ -1,0 +1,24 @@
+# OpenSearch: zero-downtime reindexing with index aliases
+
+Two Go services demonstrating why OpenSearch mappings are immutable and how production teams migrate field types without downtime, seeded with 40 real registrations from the **Washington State Department of Licensing Electric Vehicle Population Data** (`https://data.wa.gov/Transportation/Electric-Vehicle-Population-Data/f6w7-q2d2`).
+
+- `ev-reindex-migrator` creates `ev-registry-v1` (mapping `postal_code` as `integer` and `city` as `text`), attaches the `ev-registry` alias, seeds all 40 EV rows, waits 6 seconds while live queries run, creates `ev-registry-v2` with corrected `keyword` mappings, copies documents server-side with `_reindex`, and swaps `ev-registry` from `v1` to `v2` in one atomic `_aliases` call.
+- `ev-reindex-reader` queries the `ev-registry` alias every 2 seconds and logs the backing physical index (`ev-registry-v1` → `ev-registry-v2`) and cumulative error count (`errors=0`).
+
+## Try this
+
+- Watch the live cutover happen with zero errors:
+  ```sh
+  bb up
+  bb logs ev-reindex-reader -f
+  ```
+- Open `bb serve`, click `opensearch`, and view the **Indices** tab — you will see both `ev-registry-v1` and `ev-registry-v2` with 40 docs each, and the `ev-registry` alias attached to `ev-registry-v2`.
+- Inspect the mapping difference between `v1` and `v2`:
+  ```sh
+  bb logs ev-reindex-migrator
+  ```
+
+## Break this
+
+- **Try mutating a mapping in place:** Attempt to change `postal_code` from `integer` to `keyword` directly on `ev-registry-v1` with `PUT /ev-registry-v1/_mapping` — OpenSearch refuses with `illegal_argument_exception` because Lucene segments cannot reinterpret already-indexed field types.
+- **Query a keyword prefix on `v1` vs `v2`:** Run a `prefix` query on `postal_code: "981"` against `ev-registry-v1` (fails or errors on an `integer` field) vs `ev-registry-v2` (returns Seattle EVs cleanly).

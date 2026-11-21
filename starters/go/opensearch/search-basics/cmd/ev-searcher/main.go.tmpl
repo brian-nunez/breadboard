@@ -1,0 +1,201 @@
+// Command ev-searcher runs BM25 full-text queries (with typo fuzziness),
+// cached filter-context bool queries, and faceted aggregations against the
+// ev-vehicles index seeded from Washington State DOL open data.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/opensearch-project/opensearch-go/v5"
+	"github.com/opensearch-project/opensearch-go/v5/opensearchapi"
+)
+
+const indexName = "ev-vehicles"
+
+// 1. Full-text search with field boosting and typo tolerance ("tesal" -> TESLA).
+const fuzzyQuery = `{
+  "size": 3,
+  "query": {
+    "multi_match": {
+      "query": "tesal model",
+      "fields": ["make^2", "model^3", "electric_utility"],
+      "fuzziness": "AUTO"
+    }
+  }
+}`
+
+// 2. Bool query separating scoring (must) from Lucene's filter cache (filter).
+const boolFilterQuery = `{
+  "size": 5,
+  "query": {
+    "bool": {
+      "must": [
+        { "match": { "cafv_eligibility": "Clean Alternative Fuel" } }
+      ],
+      "filter": [
+        { "term":  { "ev_type": "Battery Electric Vehicle (BEV)" } },
+        { "range": { "electric_range": { "gte": 200 } } }
+      ]
+    }
+  },
+  "sort": [
+    { "electric_range": { "order": "desc" } }
+  ]
+}`
+
+// 3. Faceted aggregations over keyword and numeric doc values.
+const facetsQuery = `{
+  "size": 0,
+  "aggs": {
+    "top_makes": {
+      "terms": { "field": "make", "size": 5 }
+    },
+    "range_bands": {
+      "range": {
+        "field": "electric_range",
+        "ranges": [
+          { "key": "unreported (0)", "to": 1 },
+          { "key": "short (1-149 mi)", "from": 1, "to": 150 },
+          { "key": "long (150-249 mi)", "from": 150, "to": 250 },
+          { "key": "extended (250+ mi)", "from": 250 }
+        ]
+      }
+    }
+  }
+}`
+
+type vehicleHit struct {
+	Make          string `json:"make"`
+	Model         string `json:"model"`
+	ModelYear     int    `json:"model_year"`
+	City          string `json:"city"`
+	ElectricRange int    `json:"electric_range"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	client, err := opensearchapi.NewClient(opensearchapi.Config{
+		Client: opensearch.Config{
+			Addresses: []string{os.Getenv("OPENSEARCH_URL")},
+			Username:  os.Getenv("OPENSEARCH_USER"),
+			Password:  os.Getenv("OPENSEARCH_PASSWORD"),
+		},
+	})
+	if err != nil {
+		log.Fatalf("opensearch client: %v", err)
+	}
+
+	ticker := time.NewTicker(8 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		runQueries(ctx, client)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runQueries(ctx context.Context, client *opensearchapi.Client) {
+	fuzzyResp, err := client.Search(ctx, &opensearchapi.SearchReq{
+		Indices:    []string{indexName},
+		BodyReader: strings.NewReader(fuzzyQuery),
+	})
+	if err != nil {
+		log.Printf("waiting for %s index: %v", indexName, err)
+		return
+	}
+	if totalHits(fuzzyResp.Hits.Total) == 0 {
+		log.Printf("waiting for %s documents to be indexed", indexName)
+		return
+	}
+
+	var topFuzzy []string
+	for _, h := range fuzzyResp.Hits.Hits {
+		var v vehicleHit
+		_ = json.Unmarshal(h.Source, &v)
+		score := 0.0
+		if h.Score != nil {
+			score = *h.Score
+		}
+		topFuzzy = append(topFuzzy, fmt.Sprintf("%d %s %s (score=%.2f)", v.ModelYear, v.Make, v.Model, score))
+	}
+	log.Printf("[fuzzy BM25] query=\"tesal model\" hits=%d top=[%s]", totalHits(fuzzyResp.Hits.Total), strings.Join(topFuzzy, ", "))
+
+	boolResp, err := client.Search(ctx, &opensearchapi.SearchReq{
+		Indices:    []string{indexName},
+		BodyReader: strings.NewReader(boolFilterQuery),
+	})
+	if err != nil {
+		log.Printf("bool filter query: %v", err)
+		return
+	}
+	var topRange []string
+	for _, h := range boolResp.Hits.Hits {
+		var v vehicleHit
+		_ = json.Unmarshal(h.Source, &v)
+		topRange = append(topRange, fmt.Sprintf("%s %s %dmi (%s)", v.Make, v.Model, v.ElectricRange, v.City))
+	}
+	log.Printf("[bool must+filter] BEV >=200mi hits=%d top=[%s]", totalHits(boolResp.Hits.Total), strings.Join(topRange, ", "))
+
+	aggResp, err := client.Search(ctx, &opensearchapi.SearchReq{
+		Indices:    []string{indexName},
+		BodyReader: strings.NewReader(facetsQuery),
+	})
+	if err != nil {
+		log.Printf("facets query: %v", err)
+		return
+	}
+	var raw struct {
+		Aggregations struct {
+			TopMakes struct {
+				Buckets []struct {
+					Key      string `json:"key"`
+					DocCount int64  `json:"doc_count"`
+				} `json:"buckets"`
+			} `json:"top_makes"`
+			RangeBands struct {
+				Buckets []struct {
+					Key      string `json:"key"`
+					DocCount int64  `json:"doc_count"`
+				} `json:"buckets"`
+			} `json:"range_bands"`
+		} `json:"aggregations"`
+	}
+	_ = json.NewDecoder(aggResp.RawBody()).Decode(&raw)
+
+	var makes, bands []string
+	for _, b := range raw.Aggregations.TopMakes.Buckets {
+		makes = append(makes, fmt.Sprintf("%s=%d", b.Key, b.DocCount))
+	}
+	for _, b := range raw.Aggregations.RangeBands.Buckets {
+		bands = append(bands, fmt.Sprintf("%s:%d", b.Key, b.DocCount))
+	}
+	log.Printf("[facets] total=%d makes=[%s] ranges=[%s]", totalHits(aggResp.Hits.Total), strings.Join(makes, ", "), strings.Join(bands, ", "))
+}
+
+func totalHits(t *opensearchapi.SearchHitsMetadataTotal) int64 {
+	if t == nil {
+		return 0
+	}
+	if th, err := t.TotalHits(); err == nil {
+		return th.Value
+	}
+	if n, err := t.Int64(); err == nil {
+		return n
+	}
+	return 0
+}

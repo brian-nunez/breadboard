@@ -88,3 +88,41 @@ func TestOpenSearchIndicesExplorer(t *testing.T) {
 		t.Fatalf("v2 aliases = %v", got.Indices[1].Aliases)
 	}
 }
+
+func TestApplyOpenSearchStarters(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+
+	for _, id := range []string{"opensearch/search-basics", "opensearch/postgres-cdc-sync", "opensearch/zero-downtime-reindex"} {
+		res, err := h.eng.ApplyStarter(h.ctx(), ApplyStarterRequest{Dir: h.dir, ID: id})
+		if err != nil {
+			t.Fatalf("apply %s: %v", id, err)
+		}
+
+		if len(res.Written) == 0 {
+			t.Errorf("%s wrote no files", id)
+		}
+	}
+
+	raw, err := os.ReadFile(filepath.Join(h.dir, "experiment.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	specText := string(raw)
+	for _, want := range []string{
+		"type: opensearch",
+		"host: true",
+		"ev-indexer:",
+		"ev-searcher:",
+		"ev-catalog-writer:",
+		"ev-search-projector:",
+		"ev-cdc-verifier:",
+		"ev-reindex-migrator:",
+		"ev-reindex-reader:",
+	} {
+		if !strings.Contains(specText, want) {
+			t.Errorf("experiment.yaml missing %q:\n%s", want, specText)
+		}
+	}
+}

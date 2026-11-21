@@ -226,3 +226,6 @@ Each catalog type maps to one client package in `starters.sdkImports` (a test fa
 | `otel/metrics` | 5+ | Counters, UpDownCounters, explicit-bucket Histograms, `otelhttp`, and Go runtime metrics across replicas into Prometheus (`signals: metrics`, `host: true`). |
 | `otel/logs` | 5+ | Multi-service `log/slog` structured logging bridged via `otelslog` to Loki (`signals: logs`, `host: true`). |
 | `otel/multi-service` | 5+ | Correlated logs, metrics, and traces across four Go services, Postgres, and Kafka (with W3C trace propagation in Kafka headers) into full LGTM (`signals: logs,metrics,traces`, `host: true`). |
+| `opensearch/search-basics` | 5+ | Explicit `text`/`keyword`/numeric mappings, bulk indexing of 40 Washington State DOL EV registrations (`data.wa.gov`), typo-tolerant BM25 queries, cached filters, and faceted aggregations (`host: true`). |
+| `opensearch/postgres-cdc-sync` | 5+ | CQRS search read-model projection (`postgres` → `kafka` → `opensearch`) on 40 Washington State EV registrations with manual Kafka offset commits and live lag tracking (`host: true`). |
+| `opensearch/zero-downtime-reindex` | 5+ | Immutable mapping migration on 40 Washington State EV registrations (`v1` → `v2`) via server-side `_reindex` and atomic `_aliases` swap while live queries run with zero errors (`host: true`). |

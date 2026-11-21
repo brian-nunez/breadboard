@@ -1,0 +1,198 @@
+// Command ev-reindex-migrator demonstrates zero-downtime OpenSearch mapping
+// migration using real Washington State DOL EV data:
+//  1. Create ev-registry-v1 (with postal_code mapped as integer — a common bug)
+//     and point the ev-registry alias at v1.
+//  2. Bulk-index 40 EV registrations into v1 while ev-reindex-reader queries
+//     the alias continuously.
+//  3. Create ev-registry-v2 with the corrected mapping (postal_code as keyword
+//     plus city/county keyword facets), copy all documents via _reindex, and
+//     atomically swap ev-registry from v1 to v2 with zero dropped queries.
+package main
+
+import (
+	"bytes"
+	"context"
+	_ "embed"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/opensearch-project/opensearch-go/v5"
+	"github.com/opensearch-project/opensearch-go/v5/opensearchapi"
+)
+
+//go:embed ev_population.json
+var seedData []byte
+
+const (
+	aliasName = "ev-registry"
+	v1Index   = "ev-registry-v1"
+	v2Index   = "ev-registry-v2"
+)
+
+// v1 maps postal_code as integer (breaks leading zeros and prefix queries).
+// Because existing field types are immutable in Lucene, fixing this requires
+// creating a new index, copying data with _reindex, and swapping the alias.
+const v1Mapping = `{
+  "settings": { "number_of_shards": 1, "number_of_replicas": 0 },
+  "mappings": {
+    "properties": {
+      "id":             { "type": "keyword" },
+      "make":           { "type": "keyword" },
+      "model":          { "type": "text" },
+      "model_year":     { "type": "integer" },
+      "ev_type":        { "type": "keyword" },
+      "electric_range": { "type": "integer" },
+      "city":           { "type": "text" },
+      "county":         { "type": "text" },
+      "postal_code":    { "type": "integer" }
+    }
+  }
+}`
+
+// v2 fixes postal_code, city, and county to keyword so prefix queries and exact
+// aggregations work cleanly.
+const v2Mapping = `{
+  "settings": { "number_of_shards": 1, "number_of_replicas": 0 },
+  "mappings": {
+    "properties": {
+      "id":             { "type": "keyword" },
+      "make":           { "type": "keyword" },
+      "model":          { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
+      "model_year":     { "type": "integer" },
+      "ev_type":        { "type": "keyword" },
+      "electric_range": { "type": "integer" },
+      "city":           { "type": "keyword" },
+      "county":         { "type": "keyword" },
+      "postal_code":    { "type": "keyword" }
+    }
+  }
+}`
+
+type vehicle struct {
+	ID              string `json:"id"`
+	VINPrefix       string `json:"vin_prefix"`
+	Make            string `json:"make"`
+	Model           string `json:"model"`
+	ModelYear       int    `json:"model_year"`
+	EVType          string `json:"ev_type"`
+	CAFVEligibility string `json:"cafv_eligibility"`
+	ElectricRange   int    `json:"electric_range"`
+	City            string `json:"city"`
+	County          string `json:"county"`
+	State           string `json:"state"`
+	PostalCode      string `json:"postal_code"`
+	ElectricUtility string `json:"electric_utility"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	client, err := opensearchapi.NewClient(opensearchapi.Config{
+		Client: opensearch.Config{
+			Addresses: []string{os.Getenv("OPENSEARCH_URL")},
+			Username:  os.Getenv("OPENSEARCH_USER"),
+			Password:  os.Getenv("OPENSEARCH_PASSWORD"),
+		},
+	})
+	if err != nil {
+		log.Fatalf("opensearch client: %v", err)
+	}
+
+	// Step 1: Create v1 and seed 40 real Washington State DOL EV records.
+	if !indexExists(ctx, client, v1Index) {
+		if _, err := client.Indices.Create(ctx, opensearchapi.IndicesCreateReq{
+			Index:      v1Index,
+			BodyReader: strings.NewReader(v1Mapping),
+		}); err != nil {
+			log.Fatalf("create %s: %v", v1Index, err)
+		}
+
+		var vehicles []vehicle
+		if err := json.Unmarshal(seedData, &vehicles); err != nil {
+			log.Fatalf("decode seed data: %v", err)
+		}
+
+		var bulk bytes.Buffer
+		for _, v := range vehicles {
+			fmt.Fprintf(&bulk, `{"index":{"_index":%q,"_id":%q}}`+"\n", v1Index, v.ID)
+			b, err := json.Marshal(v)
+			if err != nil {
+				log.Fatalf("marshal %s: %v", v.ID, err)
+			}
+			bulk.Write(b)
+			bulk.WriteByte('\n')
+		}
+
+		if _, err := client.Bulk(ctx, opensearchapi.BulkReq{
+			Index:  v1Index,
+			Body:   &bulk,
+			Params: &opensearchapi.BulkParams{Refresh: "wait_for"},
+		}); err != nil {
+			log.Fatalf("bulk index %s: %v", v1Index, err)
+		}
+
+		// Point alias ev-registry -> v1 so ev-reindex-reader immediately serves traffic.
+		attachV1 := fmt.Sprintf(`{"actions":[{"add":{"index":%q,"alias":%q}}]}`, v1Index, aliasName)
+		if _, err := client.Indices.UpdateAliases(ctx, &opensearchapi.IndicesUpdateAliasesReq{
+			BodyReader: strings.NewReader(attachV1),
+		}); err != nil {
+			log.Fatalf("attach alias to %s: %v", v1Index, err)
+		}
+		log.Printf("step 1 complete: seeded %d EV docs into %s and attached alias %s -> %s", len(vehicles), v1Index, aliasName, v1Index)
+	}
+
+	// Give ev-reindex-reader a few seconds to serve live queries against v1.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(6 * time.Second):
+	}
+
+	// Step 2: Create v2 with corrected keyword mappings and reindex server-side.
+	if !indexExists(ctx, client, v2Index) {
+		if _, err := client.Indices.Create(ctx, opensearchapi.IndicesCreateReq{
+			Index:      v2Index,
+			BodyReader: strings.NewReader(v2Mapping),
+		}); err != nil {
+			log.Fatalf("create %s: %v", v2Index, err)
+		}
+
+		reindexBody := fmt.Sprintf(`{"source":{"index":%q},"dest":{"index":%q}}`, v1Index, v2Index)
+		waitTrue := true
+		if _, err := client.Reindex(ctx, &opensearchapi.ReindexReq{
+			BodyReader: strings.NewReader(reindexBody),
+			Params: &opensearchapi.ReindexParams{
+				Refresh:           "true",
+				WaitForCompletion: &waitTrue,
+			},
+		}); err != nil {
+			log.Fatalf("reindex %s -> %s: %v", v1Index, v2Index, err)
+		}
+		log.Printf("step 2 complete: reindexed documents from %s -> %s", v1Index, v2Index)
+
+		// Step 3: Atomic alias swap — remove v1 and add v2 in a single cluster state update.
+		swapBody := fmt.Sprintf(`{"actions":[{"remove":{"index":%q,"alias":%q}},{"add":{"index":%q,"alias":%q}}]}`,
+			v1Index, aliasName, v2Index, aliasName)
+		if _, err := client.Indices.UpdateAliases(ctx, &opensearchapi.IndicesUpdateAliasesReq{
+			BodyReader: strings.NewReader(swapBody),
+		}); err != nil {
+			log.Fatalf("atomic alias swap %s -> %s: %v", v1Index, v2Index, err)
+		}
+		log.Printf("step 3 complete: atomically swapped alias %s from %s -> %s (zero downtime)", aliasName, v1Index, v2Index)
+	}
+
+	<-ctx.Done()
+}
+
+func indexExists(ctx context.Context, client *opensearchapi.Client, index string) bool {
+	resp, err := client.Indices.Exists(ctx, &opensearchapi.IndicesExistsReq{Indices: []string{index}})
+	return err == nil && resp != nil && resp.StatusCode == http.StatusOK
+}

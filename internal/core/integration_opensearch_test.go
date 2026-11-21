@@ -144,3 +144,181 @@ func TestIntegrationOpenSearchServiceAndHostAccess(t *testing.T) {
 		return ov.Version == "3.10.0" && (ov.Status == "green" || ov.Status == "yellow") && hasDemo, nil
 	})
 }
+
+func TestIntegrationStarterOpenSearchSearchBasics(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := labName(t, "osbasic")
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+
+		assertGone(t, name)
+	})
+
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.ApplyStarter(ctx, ApplyStarterRequest{Dir: dir, ID: "opensearch/search-basics"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatalf("up failed: %v\nopensearch logs:\n%s\nev-indexer logs:\n%s",
+			err,
+			strings.Join(logsOf(t, eng, dir, "opensearch"), "\n"),
+			strings.Join(logsOf(t, eng, dir, "ev-indexer"), "\n"),
+		)
+	}
+
+	pollUntil(t, 60*time.Second, "ev-vehicles indexed 40 EV docs and ev-searcher logged fuzzy/filter/facets", func() (bool, error) {
+		ov, err := eng.OpenSearchIndices(ctx, ExploreRequest{Dir: dir, Service: "opensearch"})
+		if err != nil {
+			return false, err
+		}
+
+		has40 := slices.ContainsFunc(ov.Indices, func(idx OpenSearchIndex) bool {
+			return idx.Name == "ev-vehicles" && idx.Docs == 40
+		})
+		if !has40 {
+			return false, nil
+		}
+
+		logs, err := opensearchServiceLogs(ctx, eng, dir, "ev-searcher")
+		if err != nil {
+			return false, err
+		}
+
+		return strings.Contains(logs, "[fuzzy BM25]") &&
+			strings.Contains(logs, "[bool must+filter]") &&
+			strings.Contains(logs, "[facets] total=40"), nil
+	})
+}
+
+func TestIntegrationStarterOpenSearchPostgresCDCSync(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := labName(t, "oscdc")
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+
+		assertGone(t, name)
+	})
+
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.ApplyStarter(ctx, ApplyStarterRequest{Dir: dir, ID: "opensearch/postgres-cdc-sync"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatalf("up failed: %v\nopensearch logs:\n%s\nprojector logs:\n%s",
+			err,
+			strings.Join(logsOf(t, eng, dir, "opensearch"), "\n"),
+			strings.Join(logsOf(t, eng, dir, "ev-search-projector"), "\n"),
+		)
+	}
+
+	pollUntil(t, 90*time.Second, "Postgres -> Kafka -> OpenSearch projected all 40 EV docs with doc_lag=0", func() (bool, error) {
+		ov, err := eng.OpenSearchIndices(ctx, ExploreRequest{Dir: dir, Service: "opensearch"})
+		if err != nil {
+			return false, err
+		}
+
+		has40 := slices.ContainsFunc(ov.Indices, func(idx OpenSearchIndex) bool {
+			return idx.Name == "ev-cdc" && idx.Docs == 40
+		})
+		if !has40 {
+			return false, nil
+		}
+
+		logs, err := opensearchServiceLogs(ctx, eng, dir, "ev-cdc-verifier")
+		if err != nil {
+			return false, err
+		}
+
+		return strings.Contains(logs, "postgres(rows=40") && strings.Contains(logs, "doc_lag=0"), nil
+	})
+}
+
+func TestIntegrationStarterOpenSearchZeroDowntimeReindex(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := labName(t, "osreidx")
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+
+		assertGone(t, name)
+	})
+
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.ApplyStarter(ctx, ApplyStarterRequest{Dir: dir, ID: "opensearch/zero-downtime-reindex"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatalf("up failed: %v\nmigrator logs:\n%s\nreader logs:\n%s",
+			err,
+			strings.Join(logsOf(t, eng, dir, "ev-reindex-migrator"), "\n"),
+			strings.Join(logsOf(t, eng, dir, "ev-reindex-reader"), "\n"),
+		)
+	}
+
+	pollUntil(t, 90*time.Second, "alias ev-registry cut over to ev-registry-v2 with 40 docs and zero reader errors", func() (bool, error) {
+		ov, err := eng.OpenSearchIndices(ctx, ExploreRequest{Dir: dir, Service: "opensearch"})
+		if err != nil {
+			return false, err
+		}
+
+		v1Ready, v2Aliased := false, false
+
+		for _, idx := range ov.Indices {
+			if idx.Name == "ev-registry-v1" && idx.Docs == 40 && len(idx.Aliases) == 0 {
+				v1Ready = true
+			}
+
+			if idx.Name == "ev-registry-v2" && idx.Docs == 40 && slices.Contains(idx.Aliases, "ev-registry") {
+				v2Aliased = true
+			}
+		}
+
+		if !v1Ready || !v2Aliased {
+			return false, nil
+		}
+
+		logs, err := opensearchServiceLogs(ctx, eng, dir, "ev-reindex-reader")
+		if err != nil {
+			return false, err
+		}
+
+		return strings.Contains(logs, "backing_index=ev-registry-v2") && strings.Contains(logs, "errors=0"), nil
+	})
+}
+
+func opensearchServiceLogs(ctx context.Context, eng *Engine, dir, service string) (string, error) {
+	lines, err := eng.Logs(ctx, LogsRequest{Dir: dir, Service: service, Tail: 200})
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+
+	for line, err := range lines {
+		if err != nil {
+			return "", err
+		}
+
+		b.WriteString(line.Text)
+		b.WriteByte('\n')
+	}
+
+	return b.String(), nil
+}

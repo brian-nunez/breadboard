@@ -1,0 +1,172 @@
+// Command ev-search-projector consumes keyed EV change events from Kafka,
+// bulk-upserts them into OpenSearch, and commits Kafka offsets only after
+// OpenSearch acknowledges the batch (at-least-once, idempotent projection).
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/opensearch-project/opensearch-go/v5"
+	"github.com/opensearch-project/opensearch-go/v5/opensearchapi"
+	"github.com/twmb/franz-go/pkg/kgo"
+)
+
+const (
+	topicName = "ev-changes"
+	indexName = "ev-cdc"
+)
+
+const cdcMapping = `{
+  "settings": { "number_of_shards": 1, "number_of_replicas": 0 },
+  "mappings": {
+    "properties": {
+      "id":               { "type": "keyword" },
+      "vin_prefix":       { "type": "keyword" },
+      "make":             { "type": "keyword" },
+      "model":            { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
+      "model_year":       { "type": "integer" },
+      "ev_type":          { "type": "keyword" },
+      "cafv_eligibility": { "type": "text" },
+      "electric_range":   { "type": "integer" },
+      "city":             { "type": "keyword" },
+      "county":           { "type": "keyword" },
+      "state":            { "type": "keyword" },
+      "postal_code":      { "type": "keyword" },
+      "electric_utility": { "type": "text" },
+      "version":          { "type": "integer" }
+    }
+  }
+}`
+
+type vehicle struct {
+	ID              string `json:"id"`
+	VINPrefix       string `json:"vin_prefix"`
+	Make            string `json:"make"`
+	Model           string `json:"model"`
+	ModelYear       int    `json:"model_year"`
+	EVType          string `json:"ev_type"`
+	CAFVEligibility string `json:"cafv_eligibility"`
+	ElectricRange   int    `json:"electric_range"`
+	City            string `json:"city"`
+	County          string `json:"county"`
+	State           string `json:"state"`
+	PostalCode      string `json:"postal_code"`
+	ElectricUtility string `json:"electric_utility"`
+	Version         int    `json:"version"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	search, err := opensearchapi.NewClient(opensearchapi.Config{
+		Client: opensearch.Config{
+			Addresses: []string{os.Getenv("OPENSEARCH_URL")},
+			Username:  os.Getenv("OPENSEARCH_USER"),
+			Password:  os.Getenv("OPENSEARCH_PASSWORD"),
+		},
+	})
+	if err != nil {
+		log.Fatalf("opensearch client: %v", err)
+	}
+
+	ensureIndex(ctx, search)
+
+	kopts := []kgo.Opt{
+		kgo.SeedBrokers(strings.Split(os.Getenv("KAFKA_BROKERS"), ",")...),
+		kgo.ConsumerGroup("ev-search-projector"),
+		kgo.ConsumeTopics(topicName),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+		// Manual commits ensure we never advance offsets before OpenSearch indexes the batch.
+		kgo.DisableAutoCommit(),
+	}
+	if os.Getenv("KAFKA_SECURITY_PROTOCOL") == "SSL" {
+		kopts = append(kopts, kgo.DialTLSConfig(new(tls.Config)))
+	}
+	consumer, err := kgo.NewClient(kopts...)
+	if err != nil {
+		log.Fatalf("kafka consumer: %v", err)
+	}
+	defer consumer.Close()
+
+	log.Printf("projecting Kafka topic %s -> OpenSearch index %s", topicName, indexName)
+
+	for {
+		fetches := consumer.PollFetches(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if errs := fetches.Errors(); len(errs) > 0 {
+			log.Printf("kafka fetch warning: %v", errs)
+			time.Sleep(time.Second)
+			continue
+		}
+
+		records := fetches.Records()
+		if len(records) == 0 {
+			continue
+		}
+
+		var bulk bytes.Buffer
+		count := 0
+		for _, r := range records {
+			var v vehicle
+			if err := json.Unmarshal(r.Value, &v); err != nil {
+				log.Printf("skip malformed record offset=%d: %v", r.Offset, err)
+				continue
+			}
+			// Deterministic _id makes duplicate deliveries idempotent on replay.
+			fmt.Fprintf(&bulk, `{"index":{"_index":%q,"_id":%q}}`+"\n", indexName, v.ID)
+			bulk.Write(r.Value)
+			bulk.WriteByte('\n')
+			count++
+		}
+		if count == 0 {
+			continue
+		}
+
+		if _, err := search.Bulk(ctx, opensearchapi.BulkReq{
+			Index:  indexName,
+			Body:   &bulk,
+			Params: &opensearchapi.BulkParams{Refresh: "wait_for"},
+		}); err != nil {
+			// Do not commit offsets when OpenSearch is unavailable; Kafka will
+			// redeliver this batch once OpenSearch recovers.
+			log.Printf("opensearch bulk failed (will retry %d records): %v", count, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		if err := consumer.CommitUncommittedOffsets(ctx); err != nil {
+			log.Printf("commit offsets: %v", err)
+			continue
+		}
+		log.Printf("projected batch of %d EV events into %s and committed offsets", count, indexName)
+	}
+}
+
+func ensureIndex(ctx context.Context, client *opensearchapi.Client) {
+	existsResp, err := client.Indices.Exists(ctx, &opensearchapi.IndicesExistsReq{Indices: []string{indexName}})
+	if err != nil && (existsResp == nil || existsResp.StatusCode != http.StatusNotFound) {
+		log.Fatalf("check index %s: %v", indexName, err)
+	}
+	if existsResp == nil || existsResp.StatusCode == http.StatusNotFound {
+		if _, err := client.Indices.Create(ctx, opensearchapi.IndicesCreateReq{
+			Index:      indexName,
+			BodyReader: strings.NewReader(cdcMapping),
+		}); err != nil {
+			log.Fatalf("create index %s: %v", indexName, err)
+		}
+	}
+}

@@ -1,0 +1,24 @@
+# OpenSearch: Postgres → Kafka → OpenSearch CDC sync
+
+A classic CQRS / search read-model projection across Postgres, Kafka, and OpenSearch, seeded with 40 real registrations from the **Washington State Department of Licensing Electric Vehicle Population Data** (`https://data.wa.gov/Transportation/Electric-Vehicle-Population-Data/f6w7-q2d2`).
+
+- `ev-catalog-writer` persists all 40 EV rows in Postgres (`ev_vehicles`), publishes keyed JSON change events to Kafka topic `ev-changes` (3 partitions, keyed by vehicle ID), and updates one vehicle's `electric_range` + `version` every 6 seconds.
+- `ev-search-projector` consumes `ev-changes` with manual offset commits, bulk-upserts into OpenSearch index `ev-cdc` using deterministic `_id`s, and commits Kafka offsets only after OpenSearch acknowledges the write.
+- `ev-cdc-verifier` compares Postgres row counts and `max(version)` against OpenSearch every 8 seconds to show eventual consistency and convergence.
+
+## Try this
+
+- Start the pipeline and watch convergence across all three apps:
+  ```sh
+  bb up
+  bb logs ev-cdc-verifier -f
+  ```
+- Open `bb serve` to inspect:
+  - Postgres **Tables** tab (`ev_vehicles` row count)
+  - Kafka **Topics & groups** tab (`ev-changes` partitions and `ev-search-projector` consumer lag)
+  - OpenSearch **Indices** tab (`ev-cdc` doc count and size)
+
+## Break this
+
+- **Pause the search cluster under live writes:** Run `docker stop` on the `opensearch` container while `ev-catalog-writer` keeps updating Postgres and producing to Kafka. Watch `ev-cdc-verifier` report OpenSearch unavailable while Kafka buffers the events. Start `opensearch` again and watch `ev-search-projector` drain the backlog and return `doc_lag=0` with zero lost updates.
+- **Rebuild the search index from scratch:** Delete `ev-cdc` via the OpenSearch REST API and restart `ev-search-projector` with a new consumer group ID — because Kafka retains the compacted/full log from offset 0, the entire read model rebuilds cleanly from events.

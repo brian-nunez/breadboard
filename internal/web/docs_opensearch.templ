@@ -1,0 +1,200 @@
+package web
+
+// OpenSearch docs, written to the Kafka template (D-031, D-061).
+
+func init() {
+	registerTech(tech{
+		ID:      "opensearch",
+		Name:    "OpenSearch",
+		Tagline: "Full-text search, inverted indexes, faceted aggregations, and read-model projections over verified HTTPS.",
+		Order:   58,
+		Intro:   opensearchIntro(),
+		GoodFit: []string{
+			"Full-text search with BM25 relevance ranking, stemming, and typo tolerance (fuzziness)",
+			"Faceted filtering and multi-dimensional aggregations across structured catalog or event fields",
+			"CQRS search read-models projected asynchronously from Postgres and Kafka",
+			"Zero-downtime schema and mapping migrations using index aliases and _reindex",
+		},
+		PoorFit: []string{
+			"Primary system of record requiring ACID transactions (use Postgres and project to OpenSearch)",
+			"High-frequency counter mutations or sub-millisecond key-value caching (use Redis)",
+			"Durable multi-consumer event streaming or replayable commit logs (use Kafka)",
+		},
+		Diagram: opensearchDiagram(),
+		Official: []link{
+			{"OpenSearch documentation", "https://opensearch.org/docs/latest/"},
+			{"opensearch-go v5 client", "https://pkg.go.dev/github.com/opensearch-project/opensearch-go/v5"},
+			{"Mapping and field types", "https://opensearch.org/docs/latest/field-types/"},
+			{"Query DSL reference", "https://opensearch.org/docs/latest/query-dsl/"},
+			{"Index aliases and reindexing", "https://opensearch.org/docs/latest/im-plugin/index-alias/"},
+		},
+		Guides: []guide{
+			{
+				Slug: "inverted-index", Title: "Inverted indexes and mappings", Summary: "How Lucene analyzes text vs keyword fields, why explicit mappings matter, and single-node shard health.",
+				Sections: []docSection{{"inverted", "Inverted indexes"}, {"mappings", "text vs keyword fields"}, {"refresh", "Near-real-time refresh and shards"}},
+				Body:     opensearchInvertedIndexGuide(),
+			},
+			{
+				Slug: "queries-and-facets", Title: "Queries, filters, and aggregations", Summary: "Separating BM25 scoring (must) from cached filters (filter) and computing faceted buckets.",
+				Sections: []docSection{{"context", "Query vs filter context"}, {"facets", "Faceted aggregations"}, {"errors", "Handling partial bulk errors in v5"}},
+				Body:     opensearchQueriesGuide(),
+			},
+			{
+				Slug: "cdc-and-aliases", Title: "Syncing from Postgres and zero-downtime reindexing", Summary: "Projecting database writes through Kafka into OpenSearch and migrating immutable mappings with aliases.",
+				Sections: []docSection{{"cqrs", "Postgres to Kafka to OpenSearch"}, {"aliases", "Atomic alias swaps and _reindex"}},
+				Body:     opensearchCDCAliasGuide(),
+			},
+			{
+				Slug: "in-breadboard", Title: "OpenSearch in Breadboard", Summary: "Single-node TLS on 9200, loopback transport, generated admin password, and the Indices explorer.",
+				Sections: []docSection{{"tls", "TLS on HTTP and loopback transport"}, {"env", "What your app receives"}, {"explore", "The Indices tab"}},
+				Body:     opensearchInBreadboardGuide(),
+			},
+		},
+	})
+}
+
+const opensearchClientCode = `// SSL_CERT_FILE is set by Breadboard, so Go's default TLS transport
+// verifies OpenSearch's lab certificate automatically.
+client, err := opensearchapi.NewClient(opensearchapi.Config{
+    Client: opensearch.Config{
+        Addresses: []string{os.Getenv("OPENSEARCH_URL")},
+        Username:  os.Getenv("OPENSEARCH_USER"),
+        Password:  os.Getenv("OPENSEARCH_PASSWORD"),
+    },
+})
+info, err := client.Info(ctx, nil)`
+
+const opensearchMappingCode = `{
+  "settings": { "number_of_shards": 1, "number_of_replicas": 0 },
+  "mappings": {
+    "properties": {
+      "make":             { "type": "keyword" },
+      "model":            { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
+      "city":             { "type": "keyword" },
+      "model_year":       { "type": "integer" },
+      "electric_range":   { "type": "integer" },
+      "electric_utility": { "type": "text" }
+    }
+  }
+}`
+
+const opensearchQueryCode = `{
+  "query": {
+    "bool": {
+      "must": [
+        { "multi_match": { "query": "tesla model", "fields": ["make^2", "model^3", "electric_utility"], "fuzziness": "AUTO" } }
+      ],
+      "filter": [
+        { "term":  { "ev_type": "Battery Electric Vehicle (BEV)" } },
+        { "range": { "electric_range": { "gte": 200 } } }
+      ]
+    }
+  },
+  "aggs": {
+    "by_make": { "terms": { "field": "make", "size": 10 } }
+  }
+}`
+
+const opensearchAliasSwapCode = `{
+  "actions": [
+    { "remove": { "index": "ev-catalog-v1", "alias": "ev-catalog" } },
+    { "add":    { "index": "ev-catalog-v2", "alias": "ev-catalog" } }
+  ]
+}`
+
+const opensearchSpecYAML = `services:
+  opensearch:
+    type: opensearch
+    config:
+      indices: ev-vehicles   # optional comma-separated indices created at startup
+    host: true               # REST API at https://opensearch.<experiment>.localhost:<port>`
+
+templ opensearchIntro() {
+	<p>OpenSearch is a distributed search and analytics engine built on Apache Lucene. Instead of scanning rows sequentially, it builds inverted indexes that map every analyzed token to the documents containing it, pairing full-text BM25 ranking with structured filters and aggregations.</p>
+	<p>In production architectures, OpenSearch almost always sits beside a transactional database like Postgres: the database remains the source of truth while an asynchronous projection (often through Kafka) keeps search indices up to date.</p>
+}
+
+templ opensearchDiagram() {
+	<svg viewBox="0 0 640 156" class="w-full" role="img" aria-label="App services indexing and querying OpenSearch over HTTPS 9200 while transport stays on loopback">
+		<rect x="20" y="24" width="150" height="44" rx="8" fill="#eef2ff" stroke="#6366f1"></rect>
+		<text x="95" y="44" text-anchor="middle" font-size="12" font-weight="600" fill="#1e1b4b">Indexer / Projector</text>
+		<text x="95" y="59" text-anchor="middle" font-size="10" fill="#4338ca">Bulk API (v5)</text>
+		<rect x="20" y="92" width="150" height="44" rx="8" fill="#eef2ff" stroke="#6366f1"></rect>
+		<text x="95" y="112" text-anchor="middle" font-size="12" font-weight="600" fill="#1e1b4b">Search Client</text>
+		<text x="95" y="127" text-anchor="middle" font-size="10" fill="#4338ca">BM25 + Facets</text>
+		<path d="M170 46 L250 72" stroke="#475569" stroke-width="1.5" fill="none"></path>
+		<path d="M170 114 L250 86" stroke="#475569" stroke-width="1.5" fill="none"></path>
+		<rect x="250" y="26" width="160" height="104" rx="8" fill="#eff6ff" stroke="#2563eb"></rect>
+		<text x="330" y="50" text-anchor="middle" font-size="12" font-weight="600" fill="#1e3a8a">OpenSearch 3.10</text>
+		<text x="330" y="68" text-anchor="middle" font-size="10" fill="#1d4ed8">HTTPS :9200 (TLS)</text>
+		<text x="330" y="84" text-anchor="middle" font-size="10" fill="#1d4ed8">Basic Auth (admin)</text>
+		<text x="330" y="102" text-anchor="middle" font-size="10" fill="#64748b">Transport 127.0.0.1:9300</text>
+		<text x="330" y="118" text-anchor="middle" font-size="10" fill="#64748b">Single-node Lucene</text>
+		<path d="M410 78 L468 78" stroke="#475569" stroke-width="1.5" fill="none"></path>
+		<rect x="468" y="36" width="152" height="84" rx="8" fill="#f8fafc" stroke="#cbd5e1"></rect>
+		<text x="544" y="60" text-anchor="middle" font-size="12" font-weight="600" fill="#0f172a">Inverted Indices</text>
+		<text x="544" y="78" text-anchor="middle" font-size="10" fill="#475569">Aliases → v1 / v2</text>
+		<text x="544" y="96" text-anchor="middle" font-size="10" fill="#475569">Explorer + host: true</text>
+	</svg>
+}
+
+templ opensearchInvertedIndexGuide() {
+	@docH2("inverted", "Inverted indexes")
+	@docP() {
+		An inverted index maps every token produced by an analyzer to the list of document IDs (postings list) where that token appears, along with term frequencies and positions. When you search for a phrase or a partial name, OpenSearch intersects postings lists instead of scanning every document.
+	}
+	@docH2("mappings", "text vs keyword fields")
+	@docP() {
+		Always define explicit mappings before indexing production data. Use @docCodeWord("text") on fields you search with full-text queries (analyzed and lowercased) and @docCodeWord("keyword") on fields you filter, sort, or aggregate verbatim (makes, cities, status codes).
+	}
+	@docCode("mapping.json", opensearchMappingCode)
+	@docH2("refresh", "Near-real-time refresh and shards")
+	@docP() {
+		New writes land in an in-memory buffer and transaction log first, then become searchable after a Lucene segment refresh (every 1 second by default, or immediately with @docCodeWord("refresh=wait_for") on the write request). On a single-node lab, set @docCodeWord("number_of_replicas: 0") so every index reaches green health instead of waiting for a second node to hold replicas.
+	}
+}
+
+templ opensearchQueriesGuide() {
+	@docH2("context", "Query vs filter context")
+	@docP() {
+		Inside a @docCodeWord("bool") query, put full-text search terms under @docCodeWord("must") so Lucene computes BM25 relevance scores, and put exact constraints (EV type, model year, range thresholds) under @docCodeWord("filter") where clauses skip scoring and reuse Lucene's bitset filter cache.
+	}
+	@docCode("search.json", opensearchQueryCode)
+	@docH2("facets", "Faceted aggregations")
+	@docP() {
+		Aggregations run over doc values of @docCodeWord("keyword") and numeric fields alongside the query, returning bucket counts (such as registrations per make or electric range bands) in a single round trip.
+	}
+	@docH2("errors", "Handling partial bulk errors in v5")
+	@docP() {
+		The official @docCodeWord("opensearch-go/v5") client surfaces partial bulk and shard failures as typed Go errors instead of hiding them inside an HTTP 200 payload. Always inspect bulk responses and use deterministic document IDs so retrying a batch is idempotent.
+	}
+}
+
+templ opensearchCDCAliasGuide() {
+	@docH2("cqrs", "Postgres to Kafka to OpenSearch")
+	@docP() {
+		Keep transactional writes in Postgres and publish keyed change events to Kafka (partitioned by entity ID to preserve per-record ordering). A dedicated projector consumes batches, writes to OpenSearch with Bulk requests, and commits Kafka offsets only after OpenSearch acknowledges the batch. If the search index is ever lost or its schema changes, resetting the consumer group to offset 0 rebuilds it completely from the log.
+	}
+	@docH2("aliases", "Atomic alias swaps and _reindex")
+	@docP() {
+		Because field types in an existing OpenSearch mapping cannot be changed in place, point application reads and writes at an index alias rather than a physical index name. To migrate mappings without downtime, create the new versioned index, copy documents with @docCodeWord("_reindex")&#44; and swap the alias atomically in one @docCodeWord("_aliases") call:
+	}
+	@docCode("aliases.json", opensearchAliasSwapCode)
+}
+
+templ opensearchInBreadboardGuide() {
+	@docH2("tls", "TLS on HTTP and loopback transport")
+	@docP() {
+		Breadboard runs @docCodeWord("opensearchproject/opensearch:3.10.0") in single-node mode with the Security plugin enabled and demo certificates disabled. Port @docCodeWord("9200") serves HTTPS using the service's lab certificate and sets @docCodeWord("http.publish_host") to the service FQDN so client node discovery verifies TLS cleanly. Transport port @docCodeWord("9300") stays bound strictly to @docCodeWord("127.0.0.1") inside the container.
+	}
+	@docCode("experiment.yaml", opensearchSpecYAML)
+	@docH2("env", "What your app receives")
+	@docP() {
+		Any app with @docCodeWord("opensearch") in @docCodeWord("uses") receives @docCodeWord("OPENSEARCH_URL")&#44; @docCodeWord("OPENSEARCH_USER")&#44; @docCodeWord("OPENSEARCH_PASSWORD")&#44; and @docCodeWord("OPENSEARCH_CACERT") — plus @docCodeWord("SSL_CERT_FILE") automatically. Connect directly with the official Go client:
+	}
+	@docCode("main.go", opensearchClientCode)
+	@docH2("explore", "The Indices tab")
+	@docP() {
+		Open the OpenSearch service page in @docCodeWord("bb serve") and switch to the <strong>Indices</strong> tab (or call the @docCodeWord("opensearch_indices") MCP tool) to inspect cluster status, shard counts, user indices, doc counts, storage sizes, and active aliases.
+	}
+}

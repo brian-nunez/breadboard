@@ -606,7 +606,64 @@ func (s *Server) addExplorers() {
 		}, nil
 	})
 
+	add(s, readTool, true, &sdk.Tool{
+		Name:        "opensearch_indices",
+		Description: "Cluster health, version, shard counts, and user indices (with doc counts, storage sizes, and aliases) of a running OpenSearch service.",
+	}, func(ctx context.Context, _ *sdk.CallToolRequest, in exploreIn) (opensearchOut, error) {
+		req, err := explore(in)
+		if err != nil {
+			return opensearchOut{}, err
+		}
+
+		res, err := s.eng.OpenSearchIndices(ctx, req)
+		if err != nil {
+			return opensearchOut{}, err
+		}
+
+		return opensearchOut{
+			ClusterName:      res.ClusterName,
+			Status:           res.Status,
+			Version:          res.Version,
+			ActiveShards:     res.ActiveShards,
+			UnassignedShards: res.UnassignedShards,
+			Indices: mapSlice(res.Indices, func(idx core.OpenSearchIndex) opensearchIndex {
+				return opensearchIndex{
+					Name:      idx.Name,
+					Health:    idx.Health,
+					Status:    idx.Status,
+					Primaries: idx.Primaries,
+					Replicas:  idx.Replicas,
+					Docs:      idx.Docs,
+					Deleted:   idx.Deleted,
+					Bytes:     idx.Bytes,
+					Aliases:   orEmpty(idx.Aliases),
+				}
+			}),
+		}, nil
+	})
+
 	s.addProxyExplorers(explore)
+}
+
+type opensearchIndex struct {
+	Name      string   `json:"name"`
+	Health    string   `json:"health"`
+	Status    string   `json:"status"`
+	Primaries int      `json:"primaries"`
+	Replicas  int      `json:"replicas"`
+	Docs      int64    `json:"docs"`
+	Deleted   int64    `json:"deleted"`
+	Bytes     int64    `json:"bytes"`
+	Aliases   []string `json:"aliases"`
+}
+
+type opensearchOut struct {
+	ClusterName      string            `json:"cluster_name"`
+	Status           string            `json:"status"`
+	Version          string            `json:"version"`
+	ActiveShards     int               `json:"active_shards"`
+	UnassignedShards int               `json:"unassigned_shards"`
+	Indices          []opensearchIndex `json:"indices"`
 }
 
 type otelTrace struct {

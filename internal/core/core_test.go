@@ -92,7 +92,7 @@ func TestCatalogAndLearn(t *testing.T) {
 		}
 	}
 
-	if !slices.Equal(types, []string{"kafka", "postgres", "redis", "consul", "s3-compatible", "otel", "opensearch", "haproxy", "envoy", "traefik", "nginx", "pgbouncer"}) {
+	if !slices.Equal(types, []string{"kafka", "postgres", "redis", "consul", "s3-compatible", "otel", "opensearch", "nats", "haproxy", "envoy", "traefik", "nginx", "pgbouncer"}) {
 		t.Fatalf("types = %v", types)
 	}
 

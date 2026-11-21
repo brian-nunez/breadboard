@@ -64,6 +64,7 @@ var sdkImports = map[string]string{
 	"consul":        "github.com/hashicorp/consul/api",
 	"otel":          "go.opentelemetry.io/otel",
 	"opensearch":    "github.com/opensearch-project/opensearch-go/v5/opensearchapi",
+	"nats":          "github.com/nats-io/nats.go",
 	"haproxy":       "",
 	"envoy":         "",
 	"traefik":       "",
@@ -117,6 +118,9 @@ var envHelp = map[string]string{
 	"OPENSEARCH_USER":                  "OpenSearch admin username",
 	"OPENSEARCH_PASSWORD":              "password",
 	"OPENSEARCH_CACERT":                "CA file verifying the OpenSearch TLS certificate",
+	"NATS_URL":                         "NATS TLS server address (tls://host:4222)",
+	"NATS_TOKEN":                       "client authorization token",
+	"NATS_CA":                          "CA file verifying the NATS TLS certificate",
 }
 
 // EnvHelp says what a contract variable holds. Proxy variables are named
@@ -189,13 +193,14 @@ type appData struct {
 	NeedConsul                        bool
 	NeedOtel                          bool
 	NeedOpenSearch                    bool
+	NeedNats                          bool
 	NeedHTTP                          bool
 	Example                           string // the README's add-a-service type, free as a name; empty for a generic example
 }
 
 // exampleTypes are the types the README may suggest adding, in order:
 // each works on its own, so the example is valid in any lab.
-var exampleTypes = []string{"redis", "postgres", "kafka", "consul", "s3-compatible", "otel", "opensearch"}
+var exampleTypes = []string{"redis", "postgres", "kafka", "consul", "s3-compatible", "otel", "opensearch", "nats"}
 
 // exampleType is the first of exampleTypes whose name no service or app in
 // the lab (or in the app's uses) takes, so `bb add <type>` and the uses it
@@ -456,6 +461,23 @@ func buildWire(u AppUse, taken map[string]bool, d *appData) (appWire, error) {
 				"password": byBase["OPENSEARCH_PASSWORD"],
 			},
 		}, nil
+	case "nats":
+		d.NeedNats = true
+
+		base := camel + "Conn"
+		if u.Service == "nats" {
+			base = "natsConn"
+		}
+
+		return appWire{
+			Service: u.Service,
+			Kind:    "nats",
+			Var:     claimVar(taken, base),
+			Env: map[string]string{
+				"url":   byBase["NATS_URL"],
+				"token": byBase["NATS_TOKEN"],
+			},
+		}, nil
 	case "haproxy", "envoy", "traefik", "nginx":
 		d.NeedHTTP = true
 
@@ -478,11 +500,11 @@ func reservedAppVars() map[string]bool {
 		// Locals and helpers in main.go
 		"ctx", "stop", "httpClient", "main", "init", "requireEnv",
 		"newPostgres", "newRedis", "newKafkaProducer", "newKafkaConsumer",
-		"newS3", "newConsul", "newOtel", "newOpenSearch", "newHTTPClient",
+		"newS3", "newConsul", "newOtel", "newOpenSearch", "newNats", "newHTTPClient",
 		// Imported package identifiers
 		"context", "errors", "tls", "fmt", "log", "slog", "http", "os", "signal", "strings",
 		"syscall", "time", "aws", "config", "credentials", "s3", "consulapi",
-		"pgxpool", "redis", "kadm", "kgo", "opensearch", "opensearchapi",
+		"pgxpool", "redis", "kadm", "kgo", "opensearch", "opensearchapi", "nats",
 		"otelslog", "otel", "otlploggrpc", "otlpmetricgrpc", "otlptracegrpc",
 		"otellogglobal", "propagation", "sdklog", "sdkmetric", "resource",
 		"sdktrace", "semconv",

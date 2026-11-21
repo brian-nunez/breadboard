@@ -36,6 +36,7 @@ Hostnames below use the default domain and a service named after its type. Image
 | `s3-compatible` (Phase 2) | `chrislusf/seaweedfs:4.53` | 512m, 0.5 cpu | none |
 | `otel` | `grafana/otel-lgtm:0.41.1` | 1g, 1.0 cpu | none |
 | `opensearch` | `opensearchproject/opensearch:3.10.0` | 1536m, 1.0 cpu | none |
+| `nats` | `nats:2.15.3-alpine3.22` | 128m, 0.5 cpu | none |
 
 Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/etc/bb/tls/tls.key`, both together at `/etc/bb/tls/keystore.pem`, the CA at `/etc/bb/ca.pem`, the trust bundle at `/etc/bb/trust-bundle.pem`, and entry configuration under `/etc/bb/config/`.
 
@@ -121,6 +122,15 @@ Every container mounts its certificate at `/etc/bb/tls/tls.crt`, its key at `/et
 - **Health check.** `curl --cacert /etc/bb/ca.pem -u "admin:$OPENSEARCH_PASSWORD" "https://<fqdn>:9200/_cluster/health?wait_for_status=yellow&timeout=5s"`.
 - **Env contract:**
   - `OPENSEARCH_URL=https://opensearch.bb.internal:9200`, `OPENSEARCH_USER=admin`, `OPENSEARCH_PASSWORD` (secret), `OPENSEARCH_CACERT=/etc/bb/ca.pem`
+
+### `nats`
+
+- Displayed as **NATS**: single-node NATS (`nats:2.15.3-alpine3.22`, ADR-0020) with TLS required on client port `4222`, token auth, loopback-only monitoring (`127.0.0.1:8222`), and JetStream persistence under `/data`.
+- **TLS & token auth.** `nats.conf` requires TLS on `0.0.0.0:4222` using `/etc/bb/tls/tls.crt`, `/etc/bb/tls/tls.key`, and `/etc/bb/ca.pem`. The generated `.bb/secrets.json` `token` secret is passed to `nats-server` via `--auth "$NATS_TOKEN"` in the container entrypoint so `nats.conf` never holds a literal secret. No plaintext listener in v1 (`tls.mode: off` refused).
+- **JetStream toggle (`config.jetstream`).** `true` (default) enables JetStream (`store_dir: /data`, `max_memory_store: 64MB`, `max_file_store: 512MB`); `false` runs Core NATS only.
+- **Health check.** `wget -qO- http://127.0.0.1:8222/healthz` plus `/varz` confirming `"tls_required": true`.
+- **Env contract:**
+  - `NATS_URL=tls://nats.bb.internal:4222`, `NATS_TOKEN` (secret), `NATS_CA=/etc/bb/ca.pem`
 
 ### Proxies (Phase 5, wave B)
 

@@ -1,0 +1,28 @@
+# otel/traces
+
+Multi-service distributed tracing in Go with the official [OpenTelemetry Go SDK](https://opentelemetry.io/docs/languages/go/) and [`otelhttp`](https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp), sending spans over TLS to Breadboard's `otel` (LGTM) service (`signals: traces`).
+
+- `cmd/otel-trace-client`: sends one checkout request every 2 seconds to `otel-trace-gateway` with `otelhttp.NewTransport`, creating the root client span and injecting W3C `traceparent`.
+- `cmd/otel-trace-gateway`: serves HTTPS on `8443`, validates the request in a custom child span, and calls `otel-trace-orders`.
+- `cmd/otel-trace-orders`: reserves stock by calling `otel-trace-inventory`, adds span attributes and events, and records an error span on every fifth order.
+- `cmd/otel-trace-inventory`: checks SKU availability with a simulated lookup delay and annotates its span with the SKU and remaining stock.
+
+All four processes share one `trace_id` per checkout. Open Grafana at the host URL `bb status` prints (credentials in `bb creds otel`) or inspect traces in `bb serve` under **otel → Telemetry**.
+
+```sh
+bb up
+bb status
+bb logs otel-trace-client -f
+```
+
+## Try this
+
+- **Follow one trace end to end.** Copy a `trace_id` from `bb logs otel-trace-client` and search for it in Grafana → Explore → Tempo. Notice all four services appear in one waterfall.
+- **Inspect error spans.** Every 5th order fails in `otel-trace-inventory` with HTTP 409; filter in Tempo for `status = error` to see how `span.RecordError` and `span.SetStatus(codes.Error, ...)` surface the failing hop.
+- **Check selective LGTM signals.** Run `bb status` or `bb serve`: `experiment.yaml` sets `config.signals: traces`, so only Tempo, Grafana, and the collector traces pipeline run.
+
+## Break this
+
+- **Break context propagation.** Comment out `otel.SetTextMapPropagator(...)` in `cmd/otel-trace-gateway/main.go` and run `bb up`. Every checkout splits into two unrelated traces in Tempo.
+- **Drop the final batch.** Remove `tp.Shutdown(...)` before exit and stop a service; spans buffered in the batch processor never reach Tempo.
+- **Try insecure OTLP.** Pass `otlptracegrpc.WithInsecure()` to the exporter and run `bb up`; the collector requires TLS and rejects the plaintext connection.

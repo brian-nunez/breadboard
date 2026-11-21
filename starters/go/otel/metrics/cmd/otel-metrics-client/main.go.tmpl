@@ -1,0 +1,131 @@
+// Command otel-metrics-client generates steady HTTPS traffic against both
+// otel-metrics-api replicas and exports client-side request metrics over OTLP TLS.
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	shutdown := initMeter(ctx, "otel-metrics-client", "otel-metrics-client")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	meter := otel.Meter("otel-metrics-client")
+	clientReqs, err := meter.Int64Counter("client_requests",
+		metric.WithDescription("Total requests sent by otel-metrics-client"),
+		metric.WithUnit("{request}"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	clientDuration, err := meter.Float64Histogram("client_request_duration_seconds",
+		metric.WithDescription("End-to-end client request latency"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	domain := labDomain()
+	targets := []string{
+		fmt.Sprintf("https://otel-metrics-api-1.%s:8443/orders", domain),
+		fmt.Sprintf("https://otel-metrics-api-2.%s:8443/orders", domain),
+	}
+	tiers := []string{"standard", "priority"}
+
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   5 * time.Second,
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for n := 1; ; n++ {
+		target := targets[n%len(targets)]
+		tier := tiers[n%len(tiers)]
+		fail := n%10 == 0
+		reqURL := fmt.Sprintf("%s?tier=%s&fail=%t", target, tier, fail)
+
+		start := time.Now()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, nil)
+		if err == nil {
+			resp, err := client.Do(req)
+			status := "error"
+			if err != nil {
+				log.Printf("req=%d err=%v", n, err)
+			} else {
+				body, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				if resp.StatusCode < 400 {
+					status = "ok"
+				}
+				if n%5 == 0 {
+					log.Printf("req=%d tier=%s status=%d %s", n, tier, resp.StatusCode, strings.TrimSpace(string(body)))
+				}
+			}
+			attrs := metric.WithAttributes(attribute.String("tier", tier), attribute.String("status", status))
+			clientReqs.Add(ctx, 1, attrs)
+			clientDuration.Record(ctx, time.Since(start).Seconds(), attrs)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func initMeter(ctx context.Context, service, instance string) func(context.Context) error {
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(service), semconv.ServiceInstanceID(instance)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	exp, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")))
+	if err != nil {
+		log.Fatalf("otel metric exporter: %v", err)
+	}
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exp, sdkmetric.WithInterval(3*time.Second))),
+		sdkmetric.WithResource(res),
+	)
+	otel.SetMeterProvider(mp)
+	return mp.Shutdown
+}
+
+func labDomain() string {
+	if _, d, ok := strings.Cut(os.Getenv("BB_FQDN"), "."); ok && d != "" {
+		return d
+	}
+	return "{{.Domain}}"
+}

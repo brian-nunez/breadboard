@@ -1,0 +1,126 @@
+// Command otel-trace-gateway receives checkout requests over HTTPS, extracts
+// W3C traceparent, validates the order in a child span, and calls otel-trace-orders.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	shutdown := initTracer(ctx, "otel-trace-gateway")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	ordersURL := fmt.Sprintf("https://otel-trace-orders.%s:8443/orders", labDomain())
+	client := &http.Client{
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Timeout:   5 * time.Second,
+	}
+	tracer := otel.Tracer("otel-trace-gateway")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/checkout", func(w http.ResponseWriter, r *http.Request) {
+		// Child span for local validation before calling downstream.
+		valCtx, valSpan := tracer.Start(r.Context(), "gateway.validate",
+			trace.WithAttributes(attribute.String("item.sku", r.URL.Query().Get("sku"))),
+		)
+		time.Sleep(10 * time.Millisecond)
+		valSpan.AddEvent("request validated")
+		valSpan.End()
+
+		req, err := http.NewRequestWithContext(valCtx, http.MethodPost, ordersURL+"?"+r.URL.RawQuery, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			trace.SpanFromContext(r.Context()).RecordError(err)
+			trace.SpanFromContext(r.Context()).SetStatus(codes.Error, err.Error())
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode >= 400 {
+			trace.SpanFromContext(r.Context()).SetStatus(codes.Error, resp.Status)
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(body)
+	})
+
+	srv := &http.Server{
+		Addr:              ":8443",
+		Handler:           otelhttp.NewHandler(mux, "gateway"),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(c)
+	}()
+
+	log.Printf("otel-trace-gateway listening on :8443 (forwarding to %s)", ordersURL)
+	if err := srv.ListenAndServeTLS(os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE")); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}
+
+func initTracer(ctx context.Context, fallback string) func(context.Context) error {
+	name := os.Getenv("BB_SERVICE")
+	if name == "" {
+		name = fallback
+	}
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(name), semconv.ServiceInstanceID(name)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")))
+	if err != nil {
+		log.Fatalf("otel trace exporter: %v", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	return tp.Shutdown
+}
+
+func labDomain() string {
+	if _, d, ok := strings.Cut(os.Getenv("BB_FQDN"), "."); ok && d != "" {
+		return d
+	}
+	return "{{.Domain}}"
+}

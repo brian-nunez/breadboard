@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -153,5 +154,128 @@ func TestIntegrationOtelSelectiveSignals(t *testing.T) {
 		}
 
 		return tel.TracesEnabled && !tel.LogsEnabled && !tel.MetricsEnabled && len(tel.Traces) > 0, nil
+	})
+}
+
+func TestIntegrationStarterOtelTraces(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := labName(t, "otelt")
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+
+		assertGone(t, name)
+	})
+
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.ApplyStarter(ctx, ApplyStarterRequest{Dir: dir, ID: "otel/traces"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatalf("up failed: %v\notel logs:\n%s", err, strings.Join(logsOf(t, eng, dir, "otel"), "\n"))
+	}
+
+	wantServices := []string{"otel-trace-client", "otel-trace-gateway", "otel-trace-orders", "otel-trace-inventory"}
+
+	pollUntil(t, 45*time.Second, "all 4 tracing services in Tempo", func() (bool, error) {
+		tel, err := eng.OtelTelemetry(ctx, ExploreRequest{Dir: dir, Service: "otel"})
+		if err != nil {
+			return false, err
+		}
+
+		for _, s := range wantServices {
+			if !slices.Contains(tel.TraceServices, s) {
+				return false, fmt.Errorf("missing %s in %v", s, tel.TraceServices)
+			}
+		}
+
+		return len(tel.Traces) > 0, nil
+	})
+}
+
+func TestIntegrationStarterOtelMetrics(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := labName(t, "otelm")
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+
+		assertGone(t, name)
+	})
+
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.ApplyStarter(ctx, ApplyStarterRequest{Dir: dir, ID: "otel/metrics"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatalf("up failed: %v", err)
+	}
+
+	pollUntil(t, 45*time.Second, "metrics from api and client in Prometheus", func() (bool, error) {
+		tel, err := eng.OtelTelemetry(ctx, ExploreRequest{Dir: dir, Service: "otel"})
+		if err != nil {
+			return false, err
+		}
+
+		hasAPI := slices.Contains(tel.MetricServices, "otel-metrics-api")
+		hasClient := slices.Contains(tel.MetricServices, "otel-metrics-client")
+
+		hasHist := slices.Contains(tel.Metrics, "order_duration_seconds_bucket")
+		if !hasAPI || !hasClient || !hasHist {
+			return false, fmt.Errorf("services=%v metrics=%d", tel.MetricServices, len(tel.Metrics))
+		}
+
+		return true, nil
+	})
+}
+
+func TestIntegrationStarterOtelLogs(t *testing.T) {
+	eng := realEngine(t)
+	ctx := context.Background()
+	name := labName(t, "otell")
+	dir := filepath.Join(t.TempDir(), name)
+	t.Cleanup(func() {
+		_, _ = eng.Down(context.Background(), DownRequest{Dir: dir, Volumes: true})
+
+		assertGone(t, name)
+	})
+
+	if _, err := eng.Init(ctx, InitRequest{Dir: dir, Name: name}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.ApplyStarter(ctx, ApplyStarterRequest{Dir: dir, ID: "otel/logs"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Up(ctx, UpRequest{Dir: dir}); err != nil {
+		t.Fatalf("up failed: %v", err)
+	}
+
+	wantServices := []string{"otel-log-client", "otel-log-api", "otel-log-worker"}
+
+	pollUntil(t, 45*time.Second, "structured logs from all 3 services in Loki", func() (bool, error) {
+		tel, err := eng.OtelTelemetry(ctx, ExploreRequest{Dir: dir, Service: "otel"})
+		if err != nil {
+			return false, err
+		}
+
+		for _, s := range wantServices {
+			if !slices.Contains(tel.LogServices, s) {
+				return false, fmt.Errorf("missing %s in %v", s, tel.LogServices)
+			}
+		}
+
+		return len(tel.Logs) > 0, nil
 	})
 }

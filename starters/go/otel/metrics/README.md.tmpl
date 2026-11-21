@@ -1,0 +1,25 @@
+# otel/metrics
+
+Multi-service application and Go runtime metrics using the official [OpenTelemetry Go Metrics SDK](https://opentelemetry.io/docs/languages/go/instrumentation/#metrics), [`otelhttp`](https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp), and [`contrib/instrumentation/runtime`](https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/runtime), exported over OTLP gRPC TLS to Breadboard's `otel` (LGTM) service (`signals: metrics`).
+
+- `cmd/otel-metrics-api` (2 replicas): serves HTTPS on `8443`, records a `Counter` (`orders_processed_total`), an `UpDownCounter` (`orders_in_flight`), a `Histogram` (`order_duration_seconds` with explicit buckets), HTTP metrics via `otelhttp`, and Go runtime metrics (GC, goroutines, heap). Each replica sets `service.name=otel-metrics-api` and `service.instance.id=$BB_SERVICE` (`otel-metrics-api-1`, `otel-metrics-api-2`).
+- `cmd/otel-metrics-client`: sends concurrent traffic across replicas and exports its own client-side latency histogram (`client_request_duration_seconds`) and request counter.
+
+```sh
+bb up
+bb status
+bb logs otel-metrics-client -f
+```
+
+## Try this
+
+- **Compare rates and percentiles in Grafana.** Open Grafana at the host URL `bb status` prints (credentials in `bb creds otel`) → Explore → Prometheus:
+  - `rate(orders_processed_total[1m])` grouped by `service_instance_id` and `status`
+  - `histogram_quantile(0.95, sum by (le, service_instance_id) (rate(order_duration_seconds_bucket[1m])))`
+- **Inspect discovered metrics in `bb serve`.** Open **otel → Telemetry** to see every metric name and service reporting into Prometheus.
+- **Scale replicas.** Set `replicas: 3` on `otel-metrics-api` in `experiment.yaml` and run `bb up`; watch `otel-metrics-api-3` appear under `service_instance_id`.
+
+## Break this
+
+- **Create a cardinality explosion.** Add a unique `order_id` attribute to `orders_processed_total` and watch the number of Prometheus time series climb on every request.
+- **Stretch the export interval.** Change `sdkmetric.WithInterval(3*time.Second)` to `30*time.Second` and see how long a short traffic spike takes to appear in Prometheus.

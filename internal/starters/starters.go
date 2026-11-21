@@ -37,7 +37,8 @@ type Starter struct {
 	// Requires lists catalog types the starter needs; missing ones are added.
 	Requires []string
 	// RequiresConfig holds config options to apply to required catalog types
-	// (keyed by catalog type id).
+	// (keyed by catalog type id). For otel, signals are merged when the
+	// service already exists.
 	RequiresConfig map[string]map[string]string
 	// RequiresHost lists required catalog types that get host: true so they
 	// are reachable in the browser through bb-host.
@@ -170,6 +171,54 @@ var all = []Starter{
 		Apps: []App{
 			{Name: "self-greeter", Command: []string{"self-greeter"}, Uses: []string{"consul"}},
 			{Name: "self-caller", Command: []string{"self-caller"}, Uses: []string{"consul"}},
+		},
+	},
+	{
+		ID:             "otel/traces",
+		Title:          "OpenTelemetry distributed traces",
+		Summary:        "Multi-service W3C traceparent propagation over HTTPS with otelhttp, custom child spans, error spans, and Tempo in Grafana.",
+		Language:       "go",
+		Template:       "go/otel/traces",
+		Dir:            "otel-traces",
+		Requires:       []string{"otel"},
+		RequiresConfig: map[string]map[string]string{"otel": {"signals": "traces"}},
+		RequiresHost:   []string{"otel"},
+		Apps: []App{
+			{Name: "otel-trace-inventory", Command: []string{"otel-trace-inventory"}, Uses: []string{"otel"}},
+			{Name: "otel-trace-orders", Command: []string{"otel-trace-orders"}, Uses: []string{"otel"}},
+			{Name: "otel-trace-gateway", Command: []string{"otel-trace-gateway"}, Uses: []string{"otel"}},
+			{Name: "otel-trace-client", Command: []string{"otel-trace-client"}, Uses: []string{"otel"}},
+		},
+	},
+	{
+		ID:             "otel/metrics",
+		Title:          "OpenTelemetry application and runtime metrics",
+		Summary:        "Counters, UpDownCounters, explicit-bucket Histograms, otelhttp, and Go runtime metrics across two replicas into Prometheus.",
+		Language:       "go",
+		Template:       "go/otel/metrics",
+		Dir:            "otel-metrics",
+		Requires:       []string{"otel"},
+		RequiresConfig: map[string]map[string]string{"otel": {"signals": "metrics"}},
+		RequiresHost:   []string{"otel"},
+		Apps: []App{
+			{Name: "otel-metrics-api", Command: []string{"otel-metrics-api"}, Uses: []string{"otel"}, Replicas: 2},
+			{Name: "otel-metrics-client", Command: []string{"otel-metrics-client"}, Uses: []string{"otel"}},
+		},
+	},
+	{
+		ID:             "otel/logs",
+		Title:          "OpenTelemetry structured logs",
+		Summary:        "Multi-service log/slog records bridged to OTLP and Loki via otelslog, correlated by request_id and severity.",
+		Language:       "go",
+		Template:       "go/otel/logs",
+		Dir:            "otel-logs",
+		Requires:       []string{"otel"},
+		RequiresConfig: map[string]map[string]string{"otel": {"signals": "logs"}},
+		RequiresHost:   []string{"otel"},
+		Apps: []App{
+			{Name: "otel-log-worker", Command: []string{"otel-log-worker"}, Uses: []string{"otel"}},
+			{Name: "otel-log-api", Command: []string{"otel-log-api"}, Uses: []string{"otel"}},
+			{Name: "otel-log-client", Command: []string{"otel-log-client"}, Uses: []string{"otel"}},
 		},
 	},
 	{

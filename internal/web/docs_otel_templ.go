@@ -37,20 +37,23 @@ func init() {
 			{"otelslog log bridge", "https://pkg.go.dev/go.opentelemetry.io/contrib/bridges/otelslog"},
 			{"Grafana docker-otel-lgtm", "https://github.com/grafana/docker-otel-lgtm"},
 		},
-		Starters: nil,
+		Starters: []string{"otel/traces", "otel/metrics", "otel/logs"},
 		Guides: []guide{
 			{
 				Slug: "traces", Title: "Traces and context propagation", Summary: "W3C traceparent across HTTP hops, child spans, and error recording.",
+				Starter:  "otel/traces",
 				Sections: []docSection{{"spans", "Spans and trace trees"}, {"propagation", "Context propagation with otelhttp"}, {"errors", "Recording errors"}, {"run", "Run it"}},
 				Body:     otelTracesGuide(),
 			},
 			{
 				Slug: "metrics", Title: "Metrics and RED signals", Summary: "Counters, UpDownCounters, explicit-bucket histograms, and Go runtime metrics.",
+				Starter:  "otel/metrics",
 				Sections: []docSection{{"instruments", "Choosing an instrument"}, {"buckets", "Histograms and buckets"}, {"instances", "Multi-replica identity"}, {"cardinality", "Avoiding cardinality traps"}},
 				Body:     otelMetricsGuide(),
 			},
 			{
 				Slug: "logs", Title: "Structured logs with otelslog", Summary: "Bridging Go's log/slog into OTLP and Loki without regex parsing.",
+				Starter:  "otel/logs",
 				Sections: []docSection{{"bridge", "Bridging log/slog"}, {"attributes", "Structured attributes and severity"}, {"query", "Querying in Loki"}},
 				Body:     otelLogsGuide(),
 			},

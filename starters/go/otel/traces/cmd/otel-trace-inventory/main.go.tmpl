@@ -1,0 +1,103 @@
+// Command otel-trace-inventory is the leaf service in the tracing chain: it
+// simulates a stock reservation lookup and records an error span when fail=true.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	shutdown := initTracer(ctx, "otel-trace-inventory")
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdown(c)
+	}()
+
+	tracer := otel.Tracer("otel-trace-inventory")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/reserve", func(w http.ResponseWriter, r *http.Request) {
+		sku := r.URL.Query().Get("sku")
+		_, span := tracer.Start(r.Context(), "inventory.lookup",
+			trace.WithAttributes(attribute.String("item.sku", sku)),
+		)
+		defer span.End()
+
+		time.Sleep(35 * time.Millisecond)
+
+		if r.URL.Query().Get("fail") == "true" {
+			err := errors.New("insufficient stock")
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+
+		span.SetAttributes(attribute.Int("inventory.remaining", 42))
+		span.AddEvent("stock reserved")
+		fmt.Fprintf(w, "reserved sku=%s\n", sku)
+	})
+
+	srv := &http.Server{
+		Addr:              ":8443",
+		Handler:           otelhttp.NewHandler(mux, "inventory"),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(c)
+	}()
+
+	log.Println("otel-trace-inventory listening on :8443")
+	if err := srv.ListenAndServeTLS(os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE")); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+}
+
+func initTracer(ctx context.Context, fallback string) func(context.Context) error {
+	name := os.Getenv("BB_SERVICE")
+	if name == "" {
+		name = fallback
+	}
+	res, err := resource.Merge(
+		resource.Default(),
+		resource.NewSchemaless(semconv.ServiceName(name), semconv.ServiceInstanceID(name)),
+	)
+	if err != nil {
+		log.Fatalf("otel resource: %v", err)
+	}
+	exp, err := otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")))
+	if err != nil {
+		log.Fatalf("otel trace exporter: %v", err)
+	}
+	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	return tp.Shutdown
+}

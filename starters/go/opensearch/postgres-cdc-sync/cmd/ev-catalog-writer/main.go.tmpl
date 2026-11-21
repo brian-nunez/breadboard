@@ -1,0 +1,163 @@
+// Command ev-catalog-writer treats Postgres as the system of record for 40
+// real Washington State DOL EV registrations and publishes keyed change events
+// to Kafka so downstream search projectors stay in sync.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	_ "embed"
+	"encoding/json"
+	"log"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
+)
+
+//go:embed ev_population.json
+var seedData []byte
+
+const topicName = "ev-changes"
+
+type vehicle struct {
+	ID              string `json:"id"`
+	VINPrefix       string `json:"vin_prefix"`
+	Make            string `json:"make"`
+	Model           string `json:"model"`
+	ModelYear       int    `json:"model_year"`
+	EVType          string `json:"ev_type"`
+	CAFVEligibility string `json:"cafv_eligibility"`
+	ElectricRange   int    `json:"electric_range"`
+	City            string `json:"city"`
+	County          string `json:"county"`
+	State           string `json:"state"`
+	PostalCode      string `json:"postal_code"`
+	ElectricUtility string `json:"electric_utility"`
+	Version         int    `json:"version"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatalf("postgres connect: %v", err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS ev_vehicles (
+			id TEXT PRIMARY KEY,
+			vin_prefix TEXT NOT NULL,
+			make TEXT NOT NULL,
+			model TEXT NOT NULL,
+			model_year INT NOT NULL,
+			ev_type TEXT NOT NULL,
+			cafv_eligibility TEXT NOT NULL,
+			electric_range INT NOT NULL,
+			city TEXT NOT NULL,
+			county TEXT NOT NULL,
+			state TEXT NOT NULL,
+			postal_code TEXT NOT NULL,
+			electric_utility TEXT NOT NULL,
+			version INT NOT NULL DEFAULT 1,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		log.Fatalf("create table: %v", err)
+	}
+
+	kopts := []kgo.Opt{
+		kgo.SeedBrokers(strings.Split(os.Getenv("KAFKA_BROKERS"), ",")...),
+		kgo.DefaultProduceTopic(topicName),
+	}
+	if os.Getenv("KAFKA_SECURITY_PROTOCOL") == "SSL" {
+		kopts = append(kopts, kgo.DialTLSConfig(new(tls.Config)))
+	}
+	producer, err := kgo.NewClient(kopts...)
+	if err != nil {
+		log.Fatalf("kafka producer: %v", err)
+	}
+	defer producer.Close()
+
+	// Kafka disables auto topic creation in Breadboard; create 3 partitions so
+	// keying by vehicle ID preserves per-vehicle ordering across partitions.
+	_, _ = kadm.NewClient(producer).CreateTopic(ctx, 3, 1, nil, topicName)
+
+	var vehicles []vehicle
+	if err := json.Unmarshal(seedData, &vehicles); err != nil {
+		log.Fatalf("decode seed data: %v", err)
+	}
+
+	for i := range vehicles {
+		v := &vehicles[i]
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO ev_vehicles (
+				id, vin_prefix, make, model, model_year, ev_type,
+				cafv_eligibility, electric_range, city, county, state,
+				postal_code, electric_utility, version
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1)
+			ON CONFLICT (id) DO UPDATE SET updated_at = ev_vehicles.updated_at
+			RETURNING version
+		`, v.ID, v.VINPrefix, v.Make, v.Model, v.ModelYear, v.EVType,
+			v.CAFVEligibility, v.ElectricRange, v.City, v.County, v.State,
+			v.PostalCode, v.ElectricUtility).Scan(&v.Version); err != nil {
+			log.Fatalf("seed vehicle %s: %v", v.ID, err)
+		}
+		publish(ctx, producer, *v)
+	}
+	log.Printf("seeded %d Washington State DOL EV registrations into Postgres and published to Kafka topic %s", len(vehicles), topicName)
+
+	// Periodically mutate one vehicle in Postgres and publish the new version
+	// so learners can watch live CDC lag and version progression.
+	ticker := time.NewTicker(6 * time.Second)
+	defer ticker.Stop()
+
+	idx := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			v := vehicles[idx%len(vehicles)]
+			idx++
+
+			if err := pool.QueryRow(ctx, `
+				UPDATE ev_vehicles
+				SET electric_range = electric_range + 5,
+				    version = version + 1,
+				    updated_at = now()
+				WHERE id = $1
+				RETURNING electric_range, version
+			`, v.ID).Scan(&v.ElectricRange, &v.Version); err != nil {
+				log.Printf("update vehicle %s: %v", v.ID, err)
+				continue
+			}
+			vehicles[(idx-1)%len(vehicles)] = v
+			publish(ctx, producer, v)
+			log.Printf("updated Postgres & published %s (%s %s) range=%d version=%d", v.ID, v.Make, v.Model, v.ElectricRange, v.Version)
+		}
+	}
+}
+
+func publish(ctx context.Context, producer *kgo.Client, v vehicle) {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		log.Fatalf("marshal event: %v", err)
+	}
+	rec := &kgo.Record{
+		Topic: topicName,
+		Key:   []byte(v.ID),
+		Value: payload,
+	}
+	if err := producer.ProduceSync(ctx, rec).FirstErr(); err != nil {
+		log.Fatalf("produce %s: %v", v.ID, err)
+	}
+}

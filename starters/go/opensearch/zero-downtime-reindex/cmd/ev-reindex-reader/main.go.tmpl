@@ -1,0 +1,93 @@
+// Command ev-reindex-reader continuously queries the ev-registry alias while
+// ev-reindex-migrator copies data from ev-registry-v1 to ev-registry-v2 and
+// atomically swaps the alias, demonstrating zero failed reads during migration.
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/opensearch-project/opensearch-go/v5"
+	"github.com/opensearch-project/opensearch-go/v5/opensearchapi"
+)
+
+const aliasName = "ev-registry"
+
+const readQuery = `{
+  "size": 1,
+  "query": {
+    "term": { "make": "TESLA" }
+  }
+}`
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	client, err := opensearchapi.NewClient(opensearchapi.Config{
+		Client: opensearch.Config{
+			Addresses: []string{os.Getenv("OPENSEARCH_URL")},
+			Username:  os.Getenv("OPENSEARCH_USER"),
+			Password:  os.Getenv("OPENSEARCH_PASSWORD"),
+		},
+	})
+	if err != nil {
+		log.Fatalf("opensearch client: %v", err)
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	started := false
+	okCount := 0
+	errCount := 0
+
+	for {
+		resp, err := client.Search(ctx, &opensearchapi.SearchReq{
+			Indices:    []string{aliasName},
+			BodyReader: strings.NewReader(readQuery),
+		})
+		if err != nil {
+			if started {
+				errCount++
+				log.Printf("alias=%s query error (errors=%d): %v", aliasName, errCount, err)
+			} else {
+				log.Printf("waiting for alias %s to be attached...", aliasName)
+			}
+		} else if len(resp.Hits.Hits) > 0 {
+			started = true
+			okCount++
+			backingIndex := ""
+			if resp.Hits.Hits[0].Index != nil {
+				backingIndex = *resp.Hits.Hits[0].Index
+			}
+			total := totalHits(resp.Hits.Total)
+			log.Printf("alias=%s -> backing_index=%s tesla_hits=%d ok=%d errors=%d",
+				aliasName, backingIndex, total, okCount, errCount)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func totalHits(t *opensearchapi.SearchHitsMetadataTotal) int64 {
+	if t == nil {
+		return 0
+	}
+	if th, err := t.TotalHits(); err == nil {
+		return th.Value
+	}
+	if n, err := t.Int64(); err == nil {
+		return n
+	}
+	return 0
+}

@@ -37,19 +37,23 @@ func init() {
 			{"Query DSL reference", "https://opensearch.org/docs/latest/query-dsl/"},
 			{"Index aliases and reindexing", "https://opensearch.org/docs/latest/im-plugin/index-alias/"},
 		},
+		Starters: []string{"opensearch/search-basics", "opensearch/postgres-cdc-sync", "opensearch/zero-downtime-reindex"},
 		Guides: []guide{
 			{
 				Slug: "inverted-index", Title: "Inverted indexes and mappings", Summary: "How Lucene analyzes text vs keyword fields, why explicit mappings matter, and single-node shard health.",
+				Starter:  "opensearch/search-basics",
 				Sections: []docSection{{"inverted", "Inverted indexes"}, {"mappings", "text vs keyword fields"}, {"refresh", "Near-real-time refresh and shards"}},
 				Body:     opensearchInvertedIndexGuide(),
 			},
 			{
 				Slug: "queries-and-facets", Title: "Queries, filters, and aggregations", Summary: "Separating BM25 scoring (must) from cached filters (filter) and computing faceted buckets.",
+				Starter:  "opensearch/search-basics",
 				Sections: []docSection{{"context", "Query vs filter context"}, {"facets", "Faceted aggregations"}, {"errors", "Handling partial bulk errors in v5"}},
 				Body:     opensearchQueriesGuide(),
 			},
 			{
 				Slug: "cdc-and-aliases", Title: "Syncing from Postgres and zero-downtime reindexing", Summary: "Projecting database writes through Kafka into OpenSearch and migrating immutable mappings with aliases.",
+				Starter:  "opensearch/postgres-cdc-sync",
 				Sections: []docSection{{"cqrs", "Postgres to Kafka to OpenSearch"}, {"aliases", "Atomic alias swaps and _reindex"}},
 				Body:     opensearchCDCAliasGuide(),
 			},

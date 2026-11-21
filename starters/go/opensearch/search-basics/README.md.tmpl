@@ -1,0 +1,28 @@
+# OpenSearch: full-text search and faceted aggregations
+
+Two Go services using the official `github.com/opensearch-project/opensearch-go/v5` client over verified HTTPS, seeded with 40 real public records from the **Washington State Department of Licensing Electric Vehicle Population Data** (`https://data.wa.gov/Transportation/Electric-Vehicle-Population-Data/f6w7-q2d2`).
+
+- `ev-indexer` creates `ev-vehicles` with explicit `text`, `keyword`, and `integer` mappings (`number_of_shards: 1`, `number_of_replicas: 0`) and bulk-indexes all 40 EV registrations with deterministic document IDs.
+- `ev-searcher` runs three query shapes every 8 seconds: a typo-tolerant BM25 `multi_match` (`"tesal model"`), a `bool` query separating scoring (`must`) from cached filters (`filter`), and faceted aggregations (`terms` by make + `range` buckets by electric range).
+
+## Try this
+
+- Watch both apps index and query:
+  ```sh
+  bb up
+  bb logs ev-indexer
+  bb logs ev-searcher -f
+  ```
+- Open `bb serve`, click `opensearch`, and view the **Indices** tab to see `ev-vehicles` turn `green` with 40 docs.
+- Query the REST API directly from your host using the `host: true` URL shown by `bb status` and credentials from `bb creds opensearch`:
+  ```sh
+  curl --cacert "$(bb ca --host --pem >/tmp/bb-host-ca.pem && echo /tmp/bb-host-ca.pem)" \
+    -u "admin:<password>" \
+    "https://opensearch.{{.Experiment}}.localhost:<port>/ev-vehicles/_search?q=make:TESLA&pretty"
+  ```
+- Edit `cmd/ev-searcher/main.go` to add a `city` terms aggregation or filter by `model_year >= 2020`, then run `bb up` to rebuild and watch the new output.
+
+## Break this
+
+- **Violate an explicit mapping:** Send a document with `"electric_range": "three hundred"` to `ev-vehicles/_doc/bad-type` and observe OpenSearch reject the write with `mapper_parsing_exception` instead of corrupting numeric sorting.
+- **Break green health on one node:** Update `number_of_replicas` to `1` on `ev-vehicles` via `PUT /ev-vehicles/_settings` and inspect the **Indices** tab — the cluster drops to `yellow` with 1 unassigned replica shard because OpenSearch will not place a replica on the same node as its primary.

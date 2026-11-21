@@ -1,0 +1,125 @@
+// Command ev-cdc-verifier periodically compares Postgres (source of truth)
+// against OpenSearch (projected read model) to observe eventual consistency,
+// version convergence, and faceted search results.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/opensearch-project/opensearch-go/v5"
+	"github.com/opensearch-project/opensearch-go/v5/opensearchapi"
+)
+
+const indexName = "ev-cdc"
+
+const summaryQuery = `{
+  "size": 0,
+  "aggs": {
+    "max_version": { "max": { "field": "version" } },
+    "top_makes":   { "terms": { "field": "make", "size": 3 } }
+  }
+}`
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatalf("postgres connect: %v", err)
+	}
+	defer pool.Close()
+
+	search, err := opensearchapi.NewClient(opensearchapi.Config{
+		Client: opensearch.Config{
+			Addresses: []string{os.Getenv("OPENSEARCH_URL")},
+			Username:  os.Getenv("OPENSEARCH_USER"),
+			Password:  os.Getenv("OPENSEARCH_PASSWORD"),
+		},
+	})
+	if err != nil {
+		log.Fatalf("opensearch client: %v", err)
+	}
+
+	ticker := time.NewTicker(8 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		checkSync(ctx, pool, search)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func checkSync(ctx context.Context, pool *pgxpool.Pool, search *opensearchapi.Client) {
+	var pgCount, pgMaxVer int64
+	if err := pool.QueryRow(ctx, `SELECT count(*), coalesce(max(version), 0) FROM ev_vehicles`).Scan(&pgCount, &pgMaxVer); err != nil {
+		log.Printf("waiting for Postgres ev_vehicles table: %v", err)
+		return
+	}
+
+	resp, err := search.Search(ctx, &opensearchapi.SearchReq{
+		Indices:    []string{indexName},
+		BodyReader: strings.NewReader(summaryQuery),
+	})
+	if err != nil {
+		log.Printf("waiting for OpenSearch %s index: %v", indexName, err)
+		return
+	}
+
+	osCount := totalHits(resp.Hits.Total)
+
+	var agg struct {
+		Aggregations struct {
+			MaxVersion struct {
+				Value *float64 `json:"value"`
+			} `json:"max_version"`
+			TopMakes struct {
+				Buckets []struct {
+					Key      string `json:"key"`
+					DocCount int64  `json:"doc_count"`
+				} `json:"buckets"`
+			} `json:"top_makes"`
+		} `json:"aggregations"`
+	}
+	_ = json.NewDecoder(resp.RawBody()).Decode(&agg)
+
+	osMaxVer := int64(0)
+	if agg.Aggregations.MaxVersion.Value != nil {
+		osMaxVer = int64(*agg.Aggregations.MaxVersion.Value)
+	}
+
+	var makes []string
+	for _, b := range agg.Aggregations.TopMakes.Buckets {
+		makes = append(makes, fmt.Sprintf("%s=%d", b.Key, b.DocCount))
+	}
+
+	log.Printf("sync check: postgres(rows=%d, max_ver=%d) vs opensearch(docs=%d, max_ver=%d) doc_lag=%d top_makes=[%s]",
+		pgCount, pgMaxVer, osCount, osMaxVer, pgCount-osCount, strings.Join(makes, ", "))
+}
+
+func totalHits(t *opensearchapi.SearchHitsMetadataTotal) int64 {
+	if t == nil {
+		return 0
+	}
+	if th, err := t.TotalHits(); err == nil {
+		return th.Value
+	}
+	if n, err := t.Int64(); err == nil {
+		return n
+	}
+	return 0
+}

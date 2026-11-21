@@ -1,0 +1,136 @@
+// Command ev-indexer creates the ev-vehicles index with explicit mappings and
+// bulk-indexes 40 real public registrations from the Washington State
+// Department of Licensing Electric Vehicle Population Data (data.wa.gov,
+// dataset f6w7-q2d2).
+package main
+
+import (
+	"bytes"
+	"context"
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"github.com/opensearch-project/opensearch-go/v5"
+	"github.com/opensearch-project/opensearch-go/v5/opensearchapi"
+)
+
+//go:embed ev_population.json
+var seedData []byte
+
+const indexName = "ev-vehicles"
+
+// Explicit mappings separate full-text fields (analyzed for BM25 search) from
+// keyword and numeric fields (stored verbatim for exact filters and facets).
+const indexMapping = `{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0
+  },
+  "mappings": {
+    "properties": {
+      "id":               { "type": "keyword" },
+      "vin_prefix":       { "type": "keyword" },
+      "make":             { "type": "keyword" },
+      "model":            { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
+      "model_year":       { "type": "integer" },
+      "ev_type":          { "type": "keyword" },
+      "cafv_eligibility": { "type": "text" },
+      "electric_range":   { "type": "integer" },
+      "city":             { "type": "keyword" },
+      "county":           { "type": "keyword" },
+      "state":            { "type": "keyword" },
+      "postal_code":      { "type": "keyword" },
+      "electric_utility": { "type": "text" }
+    }
+  }
+}`
+
+type vehicle struct {
+	ID              string `json:"id"`
+	VINPrefix       string `json:"vin_prefix"`
+	Make            string `json:"make"`
+	Model           string `json:"model"`
+	ModelYear       int    `json:"model_year"`
+	EVType          string `json:"ev_type"`
+	CAFVEligibility string `json:"cafv_eligibility"`
+	ElectricRange   int    `json:"electric_range"`
+	City            string `json:"city"`
+	County          string `json:"county"`
+	State           string `json:"state"`
+	PostalCode      string `json:"postal_code"`
+	ElectricUtility string `json:"electric_utility"`
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	client, err := opensearchapi.NewClient(opensearchapi.Config{
+		Client: opensearch.Config{
+			Addresses: []string{os.Getenv("OPENSEARCH_URL")},
+			Username:  os.Getenv("OPENSEARCH_USER"),
+			Password:  os.Getenv("OPENSEARCH_PASSWORD"),
+		},
+	})
+	if err != nil {
+		log.Fatalf("opensearch client: %v", err)
+	}
+
+	var vehicles []vehicle
+	if err := json.Unmarshal(seedData, &vehicles); err != nil {
+		log.Fatalf("decode seed data: %v", err)
+	}
+
+	existsResp, err := client.Indices.Exists(ctx, &opensearchapi.IndicesExistsReq{Indices: []string{indexName}})
+	if err != nil && (existsResp == nil || existsResp.StatusCode != http.StatusNotFound) {
+		log.Fatalf("check index %s: %v", indexName, err)
+	}
+	if existsResp == nil || existsResp.StatusCode == http.StatusNotFound {
+		if _, err := client.Indices.Create(ctx, opensearchapi.IndicesCreateReq{
+			Index:      indexName,
+			BodyReader: strings.NewReader(indexMapping),
+		}); err != nil {
+			log.Fatalf("create index %s: %v", indexName, err)
+		}
+		log.Printf("created index %s with explicit mappings", indexName)
+	}
+
+	// Build a single NDJSON bulk request using deterministic document IDs
+	// (the Washington DOL vehicle ID), making re-runs idempotent.
+	var bulk bytes.Buffer
+	for _, v := range vehicles {
+		fmt.Fprintf(&bulk, `{"index":{"_index":%q,"_id":%q}}`+"\n", indexName, v.ID)
+		b, err := json.Marshal(v)
+		if err != nil {
+			log.Fatalf("marshal vehicle %s: %v", v.ID, err)
+		}
+		bulk.Write(b)
+		bulk.WriteByte('\n')
+	}
+
+	resp, err := client.Bulk(ctx, opensearchapi.BulkReq{
+		Index:  indexName,
+		Body:   &bulk,
+		Params: &opensearchapi.BulkParams{Refresh: "wait_for"},
+	})
+	if err != nil {
+		var partial *opensearchapi.PartialBulkError
+		if errors.As(err, &partial) {
+			log.Fatalf("bulk partial failure: %v", partial)
+		}
+		log.Fatalf("bulk index: %v", err)
+	}
+
+	log.Printf("indexed %d Washington State DOL EV registrations into %s in %d ms (errors=%v)",
+		len(resp.Items), indexName, resp.Took, resp.Errors)
+
+	<-ctx.Done()
+}

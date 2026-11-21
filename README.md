@@ -200,6 +200,14 @@ List them with `bb starters` and apply one with `bb starter <id>`. Each one adds
 | `otel/logs` | Multi-service `log/slog` structured logs bridged via `otelslog` to Loki (`signals: logs`). |
 | `otel/multi-service` | Correlated logs, metrics and traces across four Go services, Postgres and Kafka (with trace propagation in Kafka headers) in full LGTM. |
 
+**OpenSearch**
+
+| Starter | What you see |
+| ------- | ------------ |
+| `opensearch/search-basics` | Explicit `text`/`keyword`/numeric mappings, bulk indexing of 40 Washington State DOL EV registrations, typo-tolerant BM25 queries, cached filters and faceted aggregations. |
+| `opensearch/postgres-cdc-sync` | CQRS read-model projection (`postgres` → `kafka` → `opensearch`) on 40 Washington State EV registrations with manual Kafka offset commits and live lag checks. |
+| `opensearch/zero-downtime-reindex` | Immutable mapping migration (`v1` → `v2`) via server-side `_reindex` and atomic `_aliases` swap while live queries run with zero errors. |
+
 **Sidecars**
 
 | Starter | What you see |
@@ -266,6 +274,7 @@ List them with `bb starters` and apply one with `bb starter <id>`. Each one adds
 | **`consul`** | HashiCorp Consul service catalog and KV store: one server, HTTPS on 8501. |
 | **`s3-compatible`** | Object storage speaking the S3 API (SeaweedFS): HTTPS on 8333, generated access keys. |
 | **`otel`** | OpenTelemetry Collector + Grafana LGTM (Loki, Prometheus, Tempo): OTLP TLS on 4317/4318, Grafana HTTPS on 3000; selective `config.signals`. |
+| **`opensearch`** | Distributed search and analytics engine (single-node OpenSearch 3.10): HTTPS on 9200, loopback transport, generated admin password, optional `config.indices`. |
 | **`haproxy`** | HAProxy load balancer and reverse proxy: TLS on 8443. |
 | **`envoy`** | Envoy proxy and load balancer: TLS on 8443, active health checks. |
 | **`traefik`** | Traefik router and load balancer from a file provider: TLS on 8443. |

@@ -289,7 +289,7 @@ func TestIntegrationHostRouterLoads(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	args := []string{"run", "-d", "--label", "breadboard.experiment=" + name}
+	args := []string{"run", "-d", "--name", name, "--label", "breadboard.experiment=" + name}
 
 	mount := func(file string, data []byte, target string) {
 		path := filepath.Join(dir, file)
@@ -309,7 +309,21 @@ func TestIntegrationHostRouterLoads(t *testing.T) {
 
 	args = append(args, router.Image)
 	args = append(args, c.Command...)
-	id := strings.TrimSpace(docker(t, args...))
+	// Use Output (stdout only), not docker()/CombinedOutput: on a cold runner,
+	// `docker run` prints image pull progress on stderr before writing the
+	// container ID on stdout.
+	rawID, err := exec.Command("docker", args...).Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			t.Fatalf("docker %s: %v\n%s", strings.Join(args, " "), err, ee.Stderr)
+		}
+
+		t.Fatalf("docker %s: %v", strings.Join(args, " "), err)
+	}
+
+	id := strings.TrimSpace(string(rawID))
+
 	t.Cleanup(func() {
 		_, _ = dockerMay("rm", "--force", id)
 

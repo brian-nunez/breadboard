@@ -20,7 +20,7 @@ func TestCoreContractCatalogAndEnv(t *testing.T) {
 	}
 
 	wantTypes := []string{
-		"consul", "envoy", "haproxy", "kafka", "nginx",
+		"consul", "envoy", "haproxy", "kafka", "nats", "nginx",
 		"opensearch", "otel", "pgbouncer", "postgres", "redis", "s3-compatible", "traefik",
 	}
 

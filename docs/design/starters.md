@@ -178,6 +178,7 @@ Each catalog type maps to one client package in `starters.sdkImports` (a test fa
 | `consul` | `github.com/hashicorp/consul/api` (`newConsul`, verifies with `Status().Leader()`) |
 | `otel` | `go.opentelemetry.io/otel` + `sdk/trace`, `sdk/metric`, `sdk/log`, `otlptracegrpc`, `otlpmetricgrpc`, `otlploggrpc`, `otelslog` (`newOtel`, initializes enabled signals and verifies with `ForceFlush`) |
 | `opensearch` | `github.com/opensearch-project/opensearch-go/v5/opensearchapi` (`newOpenSearch`, verifies with `Info`) |
+| `nats` | `github.com/nats-io/nats.go` (`newNats`, verifies with `Flush`) |
 | `haproxy`, `envoy`, `traefik`, `nginx` | `net/http` (`newHTTPClient` + `<service>URL := os.Getenv(...)`) |
 
 `TestRenderedAppBuilds` renders the scaffold for every catalog type at once, each type alone, no service, prefixed and plaintext uses, colliding and leading-digit service names, and app names `log` and `context`, and runs `go build` and `go vet` with `-mod=readonly`; it then runs the binary without its variables (one message, exit 1) and with dummy variables (verifying ready/SIGTERM for non-pinging apps and clean non-panic failure past `requireEnv` for pinging apps). `TestIntegrationAddApp` runs a real Postgres, Redis and Kafka lab with `AddApp` defaults and asserts `bb up` succeeds, the app logs ready, and Kafka's `events` topic exists.

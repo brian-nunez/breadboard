@@ -419,7 +419,7 @@ func checkRun(t *testing.T, bin string, a AppScaffold) {
 
 	for _, u := range a.Uses {
 		switch u.Type {
-		case "postgres", "pgbouncer", "redis", "kafka", "s3-compatible", "consul", "opensearch":
+		case "postgres", "pgbouncer", "redis", "kafka", "s3-compatible", "consul", "opensearch", "nats":
 			pings = true
 		}
 

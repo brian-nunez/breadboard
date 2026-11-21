@@ -135,7 +135,7 @@ bb down                                # stop the lab and delete its data volume
 | ------- | ------------ |
 | `bb init [name]` | Create `experiment.yaml` and `.bb/` here; create the install home and its CA if missing. |
 | `bb catalog` | List the infra service types. |
-| `bb add <type> [--name n]` | Add an infra service to `experiment.yaml`. |
+| `bb add <type> [--name n] [--config k=v]` | Add an infra service to `experiment.yaml`, with optional `config` options. |
 | `bb add app <name> [--uses a,b] [--dir path]` | Write your own Go app and add it to `experiment.yaml`. |
 | `bb remove <name>` | Remove a service or app from `experiment.yaml`. |
 | `bb starters` | List the starters. |

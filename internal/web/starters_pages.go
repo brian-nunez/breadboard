@@ -129,6 +129,18 @@ func specAdditions(d *core.StarterDetails) string {
 
 	for _, t := range d.Requires {
 		fmt.Fprintf(&b, "  %s:\n    type: %s\n", t, t)
+
+		if cfg := d.RequiresConfig[t]; len(cfg) > 0 {
+			b.WriteString("    config:\n")
+
+			for _, k := range slices.Sorted(maps.Keys(cfg)) {
+				fmt.Fprintf(&b, "      %s: %s\n", k, cfg[k])
+			}
+		}
+
+		if slices.Contains(d.RequiresHost, t) {
+			b.WriteString("    host: true\n")
+		}
 	}
 
 	for _, svc := range d.Services {

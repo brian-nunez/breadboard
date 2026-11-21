@@ -200,7 +200,7 @@ Each command is a thin wrapper over one core operation.
 |---|---|
 | `bb init [name]` | Create `experiment.yaml` and `.bb/` in the current directory; create `BB_HOME` and the CA if missing. |
 | `bb catalog` | List available infra service types. |
-| `bb add <type> [--name n]` | Add an infra service to `experiment.yaml`. |
+| `bb add <type> [--name n] [--config k=v]` | Add an infra service to `experiment.yaml`, with optional repeatable `config` key-value pairs. |
 | `bb add app <name> [--uses a,b] [--dir path]` | Write your own minimal Go program (default `./<name>`) and add it as an app using every infra service, or those in `--uses` (`--uses ''` for none). `app` is reserved: no catalog type takes it. |
 | `bb remove <name>` | Remove a service or app from `experiment.yaml`. |
 | `bb starters` | List starters. |
